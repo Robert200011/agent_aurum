@@ -1,0 +1,47 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+.idea/workspace.xml
+postgres-data/
+redis-data/
+# IDE and editor settings
+/.idea/
+.vscode/
+
+# Machine-specific Codex configuration
+/.codex/
+
+# Additional local Python environments
+venv/
+env/
+
+# Generated test reports
+.test-results/
+
+# Runtime files
+*.log
+*.pid
+
+# Operating system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local AI agents and skills
+/.agents/
+
+# Local-only project planning documents
+/aurum-agent-architecture.md
+/aurum-agent-deployment-guide.md
+/aurum-agent-initial-design.md

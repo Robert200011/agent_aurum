@@ -1,0 +1,72 @@
+name: aurum-agent
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg16-trixie
+    environment:
+      POSTGRES_DB: aurum
+      POSTGRES_USER: aurum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aurum_dev_password}
+      AURUM_APP_DB_PASSWORD: ${AURUM_APP_DB_PASSWORD:-aurum_app_dev_password}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - aurum-postgres-data:/var/lib/postgresql/data
+      - ./scripts/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aurum -d aurum"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - aurum-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+    environment:
+      AURUM_ENVIRONMENT: development
+      AURUM_SERVER_HOST: 0.0.0.0
+      AURUM_SERVER_PORT: "${AURUM_SERVER_PORT:-8010}"
+      AURUM_DATABASE_URL: postgresql+asyncpg://aurum_app:${AURUM_APP_DB_PASSWORD:-aurum_app_dev_password}@postgres:5432/aurum
+      AURUM_MIGRATION_DATABASE_URL: postgresql+asyncpg://aurum:${POSTGRES_PASSWORD:-aurum_dev_password}@postgres:5432/aurum
+      AURUM_APP_DATABASE_ROLE: aurum_app
+      AURUM_REDIS_URL: redis://redis:6379/0
+      AURUM_JWT_SECRET_KEY: ${AURUM_JWT_SECRET_KEY:-dev-only-change-me-at-least-32-characters}
+      AURUM_ADMIN_INITIAL_PASSWORD: ${AURUM_ADMIN_INITIAL_PASSWORD:-123456}
+      AURUM_BOOTSTRAP_ADMIN: "true"
+      AURUM_CORS_ORIGINS: '["http://localhost:5173","http://127.0.0.1:5173"]'
+    command:
+      - /bin/sh
+      - -c
+      - alembic upgrade head && aurum-agent grant-app-role && aurum-agent serve
+    ports:
+      - "127.0.0.1:${AURUM_SERVER_PORT:-8010}:${AURUM_SERVER_PORT:-8010}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; port = os.environ['AURUM_SERVER_PORT']; urllib.request.urlopen(f'http://127.0.0.1:{port}/api/v1/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  aurum-postgres-data:
+  aurum-redis-data:
