@@ -1,0 +1,240 @@
+.auth-page {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: minmax(430px, 0.92fr) minmax(480px, 1.08fr);
+  background: #f7f8f5;
+}
+
+.auth-story {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 100vh;
+  padding: clamp(32px, 5vw, 70px);
+  color: white;
+  background:
+    linear-gradient(145deg, rgb(6 31 28 / 12%), rgb(6 31 28 / 92%)),
+    radial-gradient(circle at 82% 14%, rgb(29 166 141 / 34%), transparent 25rem),
+    repeating-linear-gradient(
+      115deg,
+      transparent,
+      transparent 42px,
+      rgb(255 255 255 / 2.6%) 42px,
+      rgb(255 255 255 / 2.6%) 43px
+    ),
+    #082522;
+  overflow: hidden;
+}
+
+.auth-story::after {
+  position: absolute;
+  right: -120px;
+  bottom: 12%;
+  width: 360px;
+  height: 360px;
+  border: 1px solid rgb(213 162 63 / 18%);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 48px rgb(213 162 63 / 3%),
+    0 0 0 96px rgb(213 162 63 / 2%);
+  content: '';
+}
+
+.story-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 560px;
+  margin-block: auto;
+}
+
+.story-kicker,
+.form-kicker {
+  display: block;
+  margin-bottom: 18px;
+  color: #d8b766;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.18em;
+}
+
+.story-copy h1 {
+  margin: 0;
+  font-family: 'Iowan Old Style', 'Songti SC', serif;
+  font-size: clamp(44px, 5vw, 72px);
+  font-weight: 560;
+  letter-spacing: -0.045em;
+  line-height: 1.12;
+}
+
+.story-copy p {
+  max-width: 480px;
+  margin: 26px 0 0;
+  color: rgb(224 241 236 / 66%);
+  font-size: 15px;
+  line-height: 1.9;
+}
+
+.story-metrics {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+.story-metrics div {
+  display: grid;
+  gap: 4px;
+  padding-top: 18px;
+}
+
+.story-metrics strong {
+  color: #d8b766;
+  font-family: 'Iowan Old Style', serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.story-metrics span {
+  color: rgb(224 241 236 / 56%);
+  font-size: 10px;
+}
+
+.promise-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 5%);
+  backdrop-filter: blur(10px);
+}
+
+.promise-card > span {
+  color: #d8b766;
+  font-size: 26px;
+}
+
+.promise-card div {
+  display: grid;
+  gap: 4px;
+}
+
+.promise-card span:last-child {
+  color: rgb(224 241 236 / 56%);
+  font-size: 11px;
+}
+
+.auth-panel {
+  display: grid;
+  min-height: 100vh;
+  padding: 40px;
+  place-items: center;
+}
+
+.form-wrap {
+  width: min(100%, 420px);
+}
+
+.form-wrap h2 {
+  margin: 0;
+  color: var(--ink-950);
+  font-family: 'Iowan Old Style', 'Songti SC', serif;
+  font-size: 38px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+
+.form-wrap > p {
+  margin: 10px 0 30px;
+  color: var(--ink-500);
+  line-height: 1.6;
+}
+
+.form-kicker {
+  margin-bottom: 12px;
+  color: var(--mint-700);
+}
+
+.auth-form :deep(.ant-form-item-label > label) {
+  color: var(--ink-700);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.auth-form :deep(.ant-input-affix-wrapper) {
+  border-radius: 10px;
+}
+
+.submit-button {
+  height: 46px;
+  margin-top: 6px;
+}
+
+.auth-switch {
+  margin-top: 24px;
+  color: var(--ink-500);
+  text-align: center;
+}
+
+.auth-switch a,
+.back-link {
+  color: var(--mint-700);
+  font-weight: 650;
+}
+
+.security-note {
+  margin-top: 34px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  color: #8aa09b;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 30px;
+  font-size: 12px;
+}
+
+.register-form-wrap {
+  padding-block: 24px;
+}
+
+.mobile-logo {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .auth-page {
+    display: block;
+  }
+
+  .auth-story {
+    display: none;
+  }
+
+  .auth-panel {
+    min-height: 100vh;
+    padding: 28px 20px;
+  }
+
+  .mobile-logo {
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    display: block;
+  }
+
+  .form-wrap {
+    padding-top: 64px;
+  }
+}
