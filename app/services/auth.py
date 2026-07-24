@@ -21,7 +21,7 @@ from app.db.repositories.identity import (
     RefreshTokenRepository,
     UserRepository,
 )
-from app.errors import AuthenticationError, ConflictError
+from app.errors import AuthenticationError, BusinessRuleError, ConflictError
 from app.providers.identity import SecurityStore
 from app.security.auth import (
     AccessTokenClaims,
@@ -34,6 +34,15 @@ from app.security.auth import (
 )
 
 DUMMY_PASSWORD_HASH = hash_password("Aurum-dummy-password-9374")
+
+
+def _validate_new_password(value: str, *, minimum_length: int) -> None:
+    """将密码策略失败转换为稳定的业务校验错误。"""
+
+    try:
+        validate_password_strength(value, minimum_length=minimum_length)
+    except ValueError as exc:
+        raise BusinessRuleError(str(exc)) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +86,7 @@ class AuthService:
         raw_password: str,
         request: RequestMetadata,
     ) -> User:
-        validate_password_strength(
+        _validate_new_password(
             raw_password,
             minimum_length=self._settings.password_min_length,
         )
@@ -237,7 +246,7 @@ class AuthService:
             raise AuthenticationError("current password is incorrect")
         if current_password == new_password:
             raise ConflictError("new password must be different from current password")
-        validate_password_strength(
+        _validate_new_password(
             new_password,
             minimum_length=self._settings.password_min_length,
         )

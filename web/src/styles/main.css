@@ -1,0 +1,146 @@
+:root {
+  --ink-950: #071817;
+  --ink-900: #0b2522;
+  --ink-800: #13332f;
+  --ink-700: #31514d;
+  --ink-500: #728985;
+  --mint-700: #0f766e;
+  --mint-500: #19a08f;
+  --mint-100: #dff4ef;
+  --gold-500: #d5a23f;
+  --paper: #f5f7f3;
+  --surface: #ffffff;
+  --line: #dfe7e2;
+  --danger: #d84f4f;
+  color: var(--ink-900);
+  background: var(--paper);
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 90% 0%, rgb(28 142 124 / 8%), transparent 30rem),
+    var(--paper);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+.page-shell {
+  display: grid;
+  gap: 24px;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-heading h1 {
+  margin: 0;
+  color: var(--ink-950);
+  font-family: 'Iowan Old Style', 'Songti SC', serif;
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.page-heading p {
+  max-width: 680px;
+  margin: 8px 0 0;
+  color: var(--ink-500);
+  line-height: 1.65;
+}
+
+.surface-card {
+  border: 1px solid rgb(207 219 211 / 85%);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 14px 40px rgb(11 37 34 / 6%);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.money-positive {
+  color: #087f5b;
+}
+
+.money-negative {
+  color: var(--danger);
+}
+
+.muted {
+  color: var(--ink-500);
+}
+
+.table-action {
+  padding-inline: 4px;
+}
+
+.ant-table-wrapper .ant-table {
+  background: transparent;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  color: var(--ink-700);
+  background: #f3f7f4;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ant-modal .ant-modal-content {
+  border-radius: 18px;
+  padding: 24px;
+}
+
+.ant-btn-primary {
+  box-shadow: 0 6px 16px rgb(15 118 110 / 20%);
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    gap: 18px;
+  }
+
+  .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .page-heading .ant-btn {
+    width: 100%;
+  }
+
+  .surface-card {
+    border-radius: 14px;
+  }
+}

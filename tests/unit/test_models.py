@@ -1,4 +1,4 @@
-"""Phase-one schema coverage tests."""
+"""阶段一数据模型覆盖测试。"""
 
 from __future__ import annotations
 
@@ -54,3 +54,21 @@ def test_identity_enums_persist_public_lowercase_values() -> None:
 
     assert table.c.role.type.enums == ["admin", "user"]
     assert table.c.status.type.enums == ["active", "disabled", "locked"]
+
+
+def test_phase_two_finance_columns_and_constraints_are_declared() -> None:
+    transactions = Base.metadata.tables["finance.financial_transactions"]
+    investment_transactions = Base.metadata.tables["finance.investment_transactions"]
+    budgets = Base.metadata.tables["finance.budgets"]
+    holdings = Base.metadata.tables["finance.investment_holdings"]
+
+    assert "import_key" in transactions.c
+    assert "updated_at" in transactions.c
+    assert "realized_gain" in investment_transactions.c
+    assert any(
+        constraint.name == "uq_budgets_scope" for constraint in budgets.constraints
+    )
+    assert any(
+        constraint.name == "uq_investment_holdings_account_symbol"
+        for constraint in holdings.constraints
+    )

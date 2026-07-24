@@ -42,6 +42,15 @@ Desktop.ini
 /.agents/
 
 # Local-only project planning documents
-/aurum-agent-architecture.md
-/aurum-agent-deployment-guide.md
-/aurum-agent-initial-design.md
+
+.coverage.*
+coverage.xml
+junit*.xml
+test-results/
+playwright-report/
+.eslintcache
+.vite/
+*.tmp
+*.bak
+*.swp
+*.swo

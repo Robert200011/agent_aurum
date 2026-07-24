@@ -1,4 +1,4 @@
-"""FastAPI dependency graph for sessions, services, identity, and RBAC."""
+"""用于会话、服务、身份和 RBAC 的 FastAPI 依赖图。"""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from app.errors import AuthenticationError, AuthorizationError
 from app.providers.identity import SecurityStore
 from app.security.auth import AccessTokenClaims, decode_access_token
 from app.services.auth import AuthService
+from app.services.finance import FinanceService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -80,6 +81,16 @@ async def get_access_context(
 
 
 AccessContextDependency = Annotated[AccessContext, Depends(get_access_context)]
+
+
+def get_finance_service(
+    session: SessionDependency,
+    context: AccessContextDependency,
+) -> FinanceService:
+    return FinanceService(session=session, user_id=context.user.id)
+
+
+FinanceServiceDependency = Annotated[FinanceService, Depends(get_finance_service)]
 
 
 def require_admin(context: AccessContextDependency) -> AccessContext:

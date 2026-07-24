@@ -43,11 +43,11 @@ def validate_password_strength(value: str, *, minimum_length: int) -> None:
     """Enforce a practical baseline while allowing passphrases."""
 
     if len(value) < minimum_length:
-        raise ValueError(f"password must contain at least {minimum_length} characters")
+        raise ValueError(f"密码长度不能少于 {minimum_length} 个字符")
     if len(value) > 128:
-        raise ValueError("password must contain at most 128 characters")
-    if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
-        raise ValueError("password must include at least one letter and one digit")
+        raise ValueError("密码长度不能超过 128 个字符")
+    if not re.search(r"[A-Za-z]", value) or not re.search(r"[0-9]", value):
+        raise ValueError("密码必须同时包含至少一个英文字母和一个数字")
 
 
 def create_access_token(
