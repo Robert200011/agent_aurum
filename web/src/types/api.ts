@@ -33,9 +33,8 @@ export interface User {
   updated_at: string
 }
 
-export interface TokenPair {
+export interface AuthTokenResponse {
   access_token: string
-  refresh_token: string
   token_type: string
   expires_in: number
   refresh_expires_in: number

@@ -58,9 +58,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout(): Promise<void> {
-    const refreshToken = tokenStorage.get()?.refreshToken ?? null
     try {
-      if (tokenStorage.get()?.accessToken) await authApi.logout(refreshToken)
+      if (tokenStorage.get()?.accessToken) await authApi.logout()
     } finally {
       tokenStorage.clear()
       user.value = null

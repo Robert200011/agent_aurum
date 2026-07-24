@@ -17,7 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.api.router import router as v1_router
 from app.config import Settings, get_settings
 from app.db.session import get_engine, get_session_factory
-from app.errors import ApplicationError
+from app.errors import ApplicationError, RateLimitError
 from app.observability.logging import configure_logging
 from app.providers.identity import RedisSecurityStore
 from app.services.admin import bootstrap_admin
@@ -86,7 +86,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(ApplicationError)
     async def application_error_handler(request: Request, exc: ApplicationError) -> JSONResponse:
-        headers = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None
+        headers: dict[str, str] | None = None
+        if exc.status_code == 401:
+            headers = {"WWW-Authenticate": "Bearer"}
+        elif isinstance(exc, RateLimitError):
+            headers = {"Retry-After": str(exc.retry_after_seconds)}
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_payload(request, code=exc.code, message=exc.message),

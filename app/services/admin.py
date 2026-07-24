@@ -19,10 +19,14 @@ async def bootstrap_admin(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
 ) -> bool:
-    """Return True only when a new administrator was created."""
+    """仅在成功创建新的初始管理员时返回 True。"""
 
     if not settings.bootstrap_admin:
         return False
+    admin_password = settings.admin_initial_password
+    if admin_password is None:
+        # 配置模型已经执行相同校验；此处保留防御性检查，避免未来绕过配置入口。
+        raise RuntimeError("initial administrator password is not configured")
 
     async with session_factory() as session:
         users = UserRepository(session)
@@ -33,7 +37,7 @@ async def bootstrap_admin(
         admin = User(
             username=settings.admin_username,
             email=settings.admin_email.casefold(),
-            password_hash=hash_password(settings.admin_initial_password.get_secret_value()),
+            password_hash=hash_password(admin_password.get_secret_value()),
             role=UserRole.ADMIN,
             status=UserStatus.ACTIVE,
             must_change_password=True,

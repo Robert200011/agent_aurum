@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Awaitable
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 from redis.asyncio import Redis
@@ -12,6 +13,38 @@ from redis.exceptions import RedisError
 
 from app.config import Settings
 from app.errors import RateLimitError, ServiceUnavailableError
+
+_LOGIN_GUARD_SCRIPT = """
+local ip_attempts = redis.call("INCR", KEYS[1])
+if ip_attempts == 1 then
+    redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+if ip_attempts > tonumber(ARGV[2]) then
+    return {1, redis.call("TTL", KEYS[1])}
+end
+
+local global_attempts = redis.call("INCR", KEYS[2])
+if global_attempts == 1 then
+    redis.call("EXPIRE", KEYS[2], ARGV[1])
+end
+if global_attempts > tonumber(ARGV[3]) then
+    return {2, redis.call("TTL", KEYS[2])}
+end
+
+local failures = tonumber(redis.call("GET", KEYS[3]) or "0")
+if failures >= tonumber(ARGV[4]) then
+    return {3, redis.call("TTL", KEYS[3])}
+end
+return {0, 0}
+"""
+
+_RECORD_LOGIN_FAILURE_SCRIPT = """
+local failures = redis.call("INCR", KEYS[1])
+if failures == 1 then
+    redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return failures
+"""
 
 
 class SecurityStore(Protocol):
@@ -46,26 +79,62 @@ class RedisSecurityStore:
     def _login_key(identifier: str, ip: str) -> str:
         raw = f"{identifier.casefold()}\0{ip}".encode()
         digest = hashlib.sha256(raw).hexdigest()
-        return f"aurum:security:login-failures:{digest}"
+        return f"aurum:security:{{login}}:failures:{digest}"
+
+    @staticmethod
+    def _login_ip_key(ip: str) -> str:
+        digest = hashlib.sha256(ip.encode()).hexdigest()
+        return f"aurum:security:{{login}}:requests:ip:{digest}"
+
+    @staticmethod
+    def _login_global_key() -> str:
+        return "aurum:security:{login}:requests:global"
 
     @staticmethod
     def _revocation_key(jti: UUID) -> str:
         return f"aurum:security:revoked-access:{jti}"
 
     async def assert_login_allowed(self, identifier: str, ip: str) -> None:
+        """原子消耗登录请求额度，并检查现有的失败锁定状态。"""
+
         try:
-            attempts = await self._redis.get(self._login_key(identifier, ip))
+            result = await cast(
+                Awaitable[Any],
+                self._redis.eval(
+                    _LOGIN_GUARD_SCRIPT,
+                    3,
+                    self._login_ip_key(ip),
+                    self._login_global_key(),
+                    self._login_key(identifier, ip),
+                    str(self._settings.login_request_window_seconds),
+                    str(self._settings.login_ip_request_limit),
+                    str(self._settings.login_global_request_limit),
+                    str(self._settings.login_max_failures),
+                ),
+            )
         except RedisError as exc:
             raise ServiceUnavailableError("security state service is unavailable") from exc
-        if attempts is not None and int(attempts) >= self._settings.login_max_failures:
-            raise RateLimitError("too many failed login attempts; try again later")
+
+        decision = int(result[0])
+        if decision != 0:
+            retry_after = max(1, int(result[1]))
+            raise RateLimitError(
+                "too many login attempts; try again later",
+                retry_after_seconds=retry_after,
+            )
 
     async def record_login_failure(self, identifier: str, ip: str) -> None:
         key = self._login_key(identifier, ip)
         try:
-            attempts = await self._redis.incr(key)
-            if attempts == 1:
-                await self._redis.expire(key, self._settings.login_failure_window_seconds)
+            await cast(
+                Awaitable[Any],
+                self._redis.eval(
+                    _RECORD_LOGIN_FAILURE_SCRIPT,
+                    1,
+                    key,
+                    str(self._settings.login_failure_window_seconds),
+                ),
+            )
         except RedisError as exc:
             raise ServiceUnavailableError("security state service is unavailable") from exc
 

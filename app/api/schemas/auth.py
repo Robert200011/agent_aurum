@@ -26,14 +26,6 @@ class LoginRequest(BaseModel):
     password: SecretStr
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: SecretStr
-
-
-class LogoutRequest(BaseModel):
-    refresh_token: SecretStr | None = None
-
-
 class ChangePasswordRequest(BaseModel):
     current_password: SecretStr
     new_password: SecretStr
@@ -53,9 +45,8 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
 
-class TokenPairResponse(BaseModel):
+class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"  # noqa: S105
     expires_in: int
     refresh_expires_in: int
