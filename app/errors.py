@@ -1,10 +1,10 @@
-"""Domain errors translated into stable API error responses."""
+"""转换为稳定 API 错误响应的领域错误。"""
 
 from __future__ import annotations
 
 
 class ApplicationError(Exception):
-    """Base error with an API-safe code and message."""
+    """包含 API 安全错误码与消息的基础错误。"""
 
     status_code = 400
     code = "application_error"
@@ -24,9 +24,19 @@ class AuthorizationError(ApplicationError):
     code = "permission_denied"
 
 
+class NotFoundError(ApplicationError):
+    status_code = 404
+    code = "resource_not_found"
+
+
 class ConflictError(ApplicationError):
     status_code = 409
     code = "resource_conflict"
+
+
+class BusinessRuleError(ApplicationError):
+    status_code = 422
+    code = "business_rule_violation"
 
 
 class RateLimitError(ApplicationError):

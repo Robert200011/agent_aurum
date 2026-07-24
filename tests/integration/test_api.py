@@ -54,3 +54,32 @@ async def test_invalid_registration_uses_stable_error_shape() -> None:
     assert response.status_code == 422
     assert payload["error"]["code"] == "validation_error"
     assert payload["error"]["request_id"]
+
+
+@pytest.mark.asyncio
+async def test_weak_registration_password_returns_business_error() -> None:
+    app = create_app(
+        Settings(
+            environment="test",
+            bootstrap_admin=False,
+            jwt_secret_key=SecretStr("test-signing-key-with-more-than-32-characters"),
+        )
+    )
+    app.state.security_store = object()
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "password_test",
+                "email": "password-test@example.com",
+                "password": "123456789012",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 422
+    assert payload["error"]["code"] == "business_rule_violation"
+    assert payload["error"]["message"] == "密码必须同时包含至少一个英文字母和一个数字"
+    assert payload["error"]["request_id"]

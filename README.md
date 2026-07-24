@@ -1,8 +1,8 @@
 # Aurum Agent
 
-Aurum Agent 是面向个人财务、存款收支和投资知识问答的 Python 服务。本仓库目前完成
-“阶段一：架构和安全底座”，前端、财务业务接口、知识库管理和 LangGraph RAG 将在后续
-阶段实现。
+Aurum Agent 是面向个人财务、存款收支和投资知识问答的智能应用。本仓库目前完成
+“阶段一：架构和安全底座”“阶段二：个人财务数据基础”，以及覆盖前两阶段能力的
+Vue 3 前端。知识库管理和 LangGraph RAG 将在后续阶段实现。
 
 后端采用根目录 `app/` 包布局，不再使用 `src/aurum_agent/`。现有代码按 API、Agent、
 RAG、Finance、Provider、Database、Service、Worker、Observability 和 Security
@@ -23,6 +23,46 @@ RAG、Finance、Provider、Database、Service、Worker、Observability 和 Secur
 - 迁移所有者与最小权限 API 数据库角色分离；
 - 请求 ID、安全响应头、CORS 白名单、统一错误格式和审计日志。
 
+## 阶段二已包含
+
+- 账户创建、查询、修改和归档；
+- 收入/支出流水 CRUD、搜索、分页和账户余额联动；
+- 预算 CRUD、日期范围校验、重叠预算防护和预算执行统计；
+- 投资账户、持仓、买卖记录、加权成本和已实现收益计算；
+- 管理员写入、登录用户读取的不可变行情快照；
+- 账户余额、现金流、预算和投资组合确定性汇总；
+- CSV/XLSX 流水导入、逐行错误报告和重复提交幂等；
+- 应用层 `user_id` 过滤与 PostgreSQL RLS 双重用户隔离；
+- 金额、数量、币种、时区和跨用户访问测试。
+
+## 当前前端已包含
+
+- 登录、注册、令牌自动续期、退出登录和强制修改初始密码；
+- 自适应桌面端与移动端的应用框架、侧边导航和用户菜单；
+- 财务总览、账户管理、流水筛选与维护、CSV/XLSX 流水导入；
+- 预算管理与执行进度；
+- 投资组合汇总、持仓维护、不可变买卖记录和行情快照管理；
+- 统一的加载、空状态、接口错误提示和人民币/美元等币种格式化。
+
+主要接口统一位于 `/api/v1/finance`：
+
+```text
+/accounts
+/transactions
+/transactions/import
+/budgets
+/holdings
+/investment-transactions
+/market-snapshots
+/portfolio/summary
+/reports/summary
+```
+
+流水导入文件必须使用表头 `transaction_date`、`transaction_type`、`amount` 和
+`category`。可选表头为 `currency`、`description` 和 `external_id`。CSV 必须使用
+UTF-8；XLSX 读取活动工作表。单文件最大 10 MiB、最多 10,000 行。默认严格模式下，
+任意行校验失败都会阻止整批写入；`strict=false` 时可提交其余有效行。
+
 ## 使用 Docker 启动完整后端
 
 要求 Docker Desktop 已启动。
@@ -38,6 +78,24 @@ docker compose ps
 - OpenAPI：`http://127.0.0.1:8010/docs`
 - 存活检查：`http://127.0.0.1:8010/api/v1/health/live`
 - 就绪检查：`http://127.0.0.1:8010/api/v1/health/ready`
+
+## 启动前端
+
+要求已安装 Node.js 24，并已按上文启动后端。首次运行时安装依赖：
+
+```powershell
+Set-Location web
+npm install
+Copy-Item .env.example .env
+npm run dev
+```
+
+浏览器访问 `http://127.0.0.1:5173`。开发服务器会把 `/api` 请求代理到
+`http://127.0.0.1:8010`，通常不需要额外处理跨域。前端生产构建命令：
+
+```powershell
+npm run build
+```
 
 首次登录：
 
@@ -95,6 +153,11 @@ python -m pytest
 python -m ruff check app migrations tests
 alembic check
 docker compose config --quiet
+
+Set-Location web
+npm run check
+npm run build
+npm audit --audit-level=high
 ```
 
 ## 项目结构
@@ -114,7 +177,7 @@ agent_aurum/
 │   ├── security/            # 密码、令牌和授权安全原语
 │   ├── config.py
 │   └── main.py
-├── web/                     # Vue 3 前端预留目录
+├── web/                     # Vue 3、TypeScript、Vite 和 Ant Design Vue 前端
 ├── migrations/              # Alembic 数据库迁移
 ├── tests/
 │   ├── unit/

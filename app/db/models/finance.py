@@ -1,4 +1,4 @@
-"""Personal finance and investment persistence models."""
+"""个人财务与投资持久化模型。"""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -53,6 +54,11 @@ class FinancialTransaction(UUIDPrimaryKeyMixin, Base):
     __table_args__ = (
         CheckConstraint("amount >= 0", name="amount_nonnegative"),
         Index("ix_financial_transactions_user_date", "user_id", "transaction_date"),
+        UniqueConstraint(
+            "user_id",
+            "import_key",
+            name="uq_financial_transactions_user_import_key",
+        ),
         {"schema": FINANCE_SCHEMA},
     )
 
@@ -70,8 +76,15 @@ class FinancialTransaction(UUIDPrimaryKeyMixin, Base):
     description: Mapped[str | None] = mapped_column(String(1024))
     transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)
+    import_key: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
 
@@ -79,7 +92,16 @@ class Budget(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "budgets"
     __table_args__ = (
         CheckConstraint("amount >= 0", name="amount_nonnegative"),
+        CheckConstraint("end_date >= start_date", name="date_range_valid"),
         Index("ix_budgets_user_period", "user_id", "start_date", "end_date"),
+        UniqueConstraint(
+            "user_id",
+            "category",
+            "currency",
+            "start_date",
+            "end_date",
+            name="uq_budgets_scope",
+        ),
         {"schema": FINANCE_SCHEMA},
     )
 
@@ -97,7 +119,15 @@ class Budget(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class InvestmentHolding(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "investment_holdings"
     __table_args__ = (
+        CheckConstraint("quantity >= 0", name="quantity_nonnegative"),
+        CheckConstraint("cost_basis >= 0", name="cost_basis_nonnegative"),
         Index("ix_investment_holdings_user_symbol", "user_id", "symbol"),
+        UniqueConstraint(
+            "user_id",
+            "account_id",
+            "symbol",
+            name="uq_investment_holdings_account_symbol",
+        ),
         {"schema": FINANCE_SCHEMA},
     )
 
@@ -136,6 +166,9 @@ class InvestmentTransaction(UUIDPrimaryKeyMixin, Base):
     quantity: Mapped[Decimal] = mapped_column(QUANTITY, nullable=False)
     price: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     fee: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), nullable=False)
+    realized_gain: Mapped[Decimal] = mapped_column(
+        MONEY, default=Decimal("0"), nullable=False
+    )
     currency: Mapped[str] = mapped_column(String(3), default="CNY", nullable=False)
     transaction_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -143,6 +176,7 @@ class InvestmentTransaction(UUIDPrimaryKeyMixin, Base):
 class MarketPriceSnapshot(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "market_price_snapshots"
     __table_args__ = (
+        CheckConstraint("price >= 0", name="price_nonnegative"),
         Index(
             "uq_market_price_symbol_source_time",
             "symbol",
