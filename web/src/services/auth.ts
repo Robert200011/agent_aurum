@@ -1,9 +1,9 @@
 import { http } from '@/services/http'
-import type { TokenPair, User } from '@/types/api'
+import type { AuthTokenResponse, User } from '@/types/api'
 
 export const authApi = {
-  async login(identifier: string, password: string): Promise<TokenPair> {
-    const response = await http.post<TokenPair>('/auth/login', { identifier, password })
+  async login(identifier: string, password: string): Promise<AuthTokenResponse> {
+    const response = await http.post<AuthTokenResponse>('/auth/login', { identifier, password })
     return response.data
   },
   async register(username: string, email: string, password: string): Promise<User> {
@@ -14,8 +14,8 @@ export const authApi = {
     const response = await http.get<User>('/users/me')
     return response.data
   },
-  async logout(refreshToken: string | null): Promise<void> {
-    await http.post('/auth/logout', { refresh_token: refreshToken })
+  async logout(): Promise<void> {
+    await http.post('/auth/logout')
   },
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
     await http.post('/auth/change-password', {

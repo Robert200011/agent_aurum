@@ -1,9 +1,10 @@
 # Aurum Agent 部署上线与运维方案
 
-> 文档状态：初步部署方案，待代码和基础设施落地后校准  
-> 项目目录：`E:\agent_aurum`  
-> 对应设计文档：[Aurum Agent 初步方案](./aurum-agent-initial-design.md)  
+> 文档状态：持续维护中的部署方案
+> 项目目录：`E:\agent_aurum`
+> 对应设计文档：[Aurum Agent 总体技术方案](./aurum-agent-initial-design.md)
 > 编写日期：2026-07-23
+> 最后更新：2026-07-24
 
 ## 1. 文档目标
 
@@ -24,7 +25,15 @@
 - 服务扩容；
 - 常见故障处理。
 
-本文档当前是部署设计，不代表其中提到的 Dockerfile、Compose 文件、脚本和命令已经全部实现。正式部署前，需要先根据本文档创建并验证相应文件。
+### 1.1 当前落地边界
+
+截至 2026-07-24，阶段一、阶段二、配套 Web 前端和四项安全审计整改已经完成。
+仓库已有开发用 Dockerfile、Docker Compose、Alembic 迁移、健康检查和安全配置生成脚本。
+反向代理、生产 Compose、对象存储、Worker、LangGraph/RAG、集中监控、备份自动化和
+CI/CD 仍属于目标方案，不应视为已经具备的生产资产。
+
+因此，本文档中的开发启动命令可以直接使用；生产拓扑和后续组件仍须在对应阶段完成后
+进行环境级验收。
 
 ## 2. 部署策略
 
@@ -222,60 +231,41 @@ agent_aurum/
 示例：
 
 ```dotenv
-APP_NAME=aurum-agent
-APP_ENV=production
-APP_DEBUG=false
-APP_BASE_URL=https://agent.example.com
+AURUM_APP_NAME=Aurum Agent
+AURUM_ENVIRONMENT=production
+AURUM_DEBUG=false
+AURUM_SERVER_HOST=0.0.0.0
+AURUM_SERVER_PORT=8010
 
-DATABASE_URL=postgresql+asyncpg://aurum_agent:REPLACE_ME@postgres:5432/aurum_agent
-DATABASE_POOL_SIZE=20
-DATABASE_MAX_OVERFLOW=20
+AURUM_DATABASE_URL=postgresql+asyncpg://aurum_app:<由密钥系统注入>@postgres:5432/aurum
+AURUM_MIGRATION_DATABASE_URL=postgresql+asyncpg://aurum_owner:<由密钥系统注入>@postgres:5432/aurum
+AURUM_DATABASE_POOL_SIZE=20
+AURUM_DATABASE_MAX_OVERFLOW=20
+AURUM_REDIS_URL=redis://:<由密钥系统注入>@redis:6379/0
 
-REDIS_URL=redis://:REPLACE_ME@redis:6379/0
-CELERY_BROKER_URL=redis://:REPLACE_ME@redis:6379/1
-CELERY_RESULT_BACKEND=redis://:REPLACE_ME@redis:6379/2
+AURUM_JWT_SECRET_KEY=<由密钥系统注入的高强度随机值>
+AURUM_ACCESS_TOKEN_TTL_MINUTES=15
+AURUM_REFRESH_TOKEN_TTL_DAYS=30
+AURUM_REFRESH_TOKEN_COOKIE_SECURE=true
+AURUM_REFRESH_TOKEN_COOKIE_SAMESITE=lax
 
-JWT_PRIVATE_KEY_PATH=/run/secrets/jwt_private_key
-JWT_PUBLIC_KEY_PATH=/run/secrets/jwt_public_key
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_DAYS=30
+AURUM_ADMIN_USERNAME=admin
+AURUM_ADMIN_INITIAL_PASSWORD=<一次性高强度随机密码>
+AURUM_BOOTSTRAP_ADMIN=true
 
-LANGGRAPH_AES_KEY=REPLACE_ME
-
-S3_ENDPOINT=http://minio:9000
-S3_REGION=us-east-1
-S3_ACCESS_KEY=REPLACE_ME
-S3_SECRET_KEY=REPLACE_ME
-S3_BUCKET=aurum-agent-documents
-S3_USE_SSL=false
-
-LLM_PROVIDER=openai_compatible
-LLM_BASE_URL=REPLACE_ME
-LLM_API_KEY=REPLACE_ME
-LLM_MODEL=REPLACE_ME
-
-EMBEDDING_PROVIDER=REPLACE_ME
-EMBEDDING_BASE_URL=REPLACE_ME
-EMBEDDING_API_KEY=REPLACE_ME
-EMBEDDING_MODEL=REPLACE_ME
-
-RERANKER_PROVIDER=REPLACE_ME
-RERANKER_MODEL=REPLACE_ME
-
-ADMIN_INITIAL_USERNAME=admin
-ADMIN_INITIAL_PASSWORD=123456
-ADMIN_MUST_CHANGE_PASSWORD=true
-
-OTEL_SERVICE_NAME=aurum-agent-api
-PROMETHEUS_ENABLED=true
-LOG_LEVEL=INFO
+AURUM_CORS_ORIGINS=["https://agent.example.com"]
+AURUM_LOG_LEVEL=INFO
 ```
+
+上例只包含当前代码已经支持的配置。LangGraph 加密、对象存储、模型、Embedding、
+Reranker、Celery、OpenTelemetry 和 Prometheus 等变量应在相应功能落地后再加入，
+不能提前假定名称或实现已经确定。
 
 ### 6.1 密钥管理要求
 
 - 生产 `.env` 不得提交到 Git；
-- `.env.example` 只保留字段名和安全示例；
-- JWT 私钥不得写入镜像；
+- `.env.example` 中的敏感字段必须留空；
+- JWT 密钥不得写入代码、镜像或 Compose 默认值；
 - 数据库密码和 Redis 密码必须随机生成；
 - 模型 API Key 不得出现在日志；
 - `LANGGRAPH_AES_KEY` 必须单独备份；
@@ -287,16 +277,17 @@ LOG_LEVEL=INFO
 满足产品要求的初始管理员：
 
 - 用户名：`admin`
-- 初始密码：`123456`
+- 初始密码：无代码默认值，由密钥管理系统生成并注入一次性高强度随机值
 
 生产要求：
 
+- 只有显式设置 `AURUM_BOOTSTRAP_ADMIN=true` 时才允许初始化；
 - 只在首次初始化时使用；
 - 数据库只保存密码哈希；
 - 初始化脚本必须幂等；
 - 管理员存在时不得自动重置密码；
 - 第一次登录必须修改密码；
-- 初始化成功后删除或替换环境中的初始密码；
+- 初始化成功后设置 `AURUM_BOOTSTRAP_ADMIN=false`，并删除初始密码配置；
 - 日志不得打印初始密码。
 
 ## 7. 服务器准备
@@ -470,7 +461,7 @@ docker compose -f deploy/docker-compose.prod.yml run --rm api alembic upgrade he
 目标命令：
 
 ```bash
-docker compose -f deploy/docker-compose.prod.yml run --rm api python -m app.cli init-admin
+docker compose -f deploy/docker-compose.prod.yml run --rm api aurum-agent bootstrap-admin
 ```
 
 初始化程序需要：
@@ -878,6 +869,14 @@ PREVIOUS_VERSION=v0.1.9
 
 ### 17.3 发布记录
 
+当前开发里程碑记录如下；这些记录不等同于生产发布：
+
+| 日期 | 里程碑 | Git 基线 | 验证摘要 |
+| --- | --- | --- | --- |
+| 2026-07-23 | 阶段一：架构和安全底座完成 | `933390a` | 后端测试、RLS、Docker 和真实认证流程通过 |
+| 2026-07-24 | 阶段二及配套 Web 前端完成 | `3bfb9b0` | 财务功能、前端测试和生产构建通过 |
+| 2026-07-24 | 阶段二安全审计整改完成 | 随整改分支交付 | 59 项后端测试、10 项前端测试及配置检查通过 |
+
 每次生产发布应记录：
 
 - 发布时间；
@@ -1177,7 +1176,7 @@ docker compose -f deploy/docker-compose.prod.yml run --rm api alembic upgrade he
 ### 初始化管理员
 
 ```bash
-docker compose -f deploy/docker-compose.prod.yml run --rm api python -m app.cli init-admin
+docker compose -f deploy/docker-compose.prod.yml run --rm api aurum-agent bootstrap-admin
 ```
 
 ### 启动生产服务

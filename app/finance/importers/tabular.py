@@ -6,9 +6,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import struct
+import zipfile
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from pathlib import PurePath
+from pathlib import PurePath, PurePosixPath
 from typing import Any, Protocol, cast
 
 from openpyxl import load_workbook
@@ -20,6 +22,14 @@ from app.errors import BusinessRuleError
 # 表头白名单可防止电子表格列变成任意字段。
 MAX_IMPORT_BYTES = 10 * 1024 * 1024
 MAX_IMPORT_ROWS = 10_000
+MAX_XLSX_ARCHIVE_MEMBERS = 256
+MAX_XLSX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
+MAX_XLSX_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_XLSX_COMPRESSION_RATIO = 100
+MIN_XLSX_RATIO_CHECK_BYTES = 1 * 1024 * 1024
+XLSX_VALIDATION_CHUNK_BYTES = 64 * 1024
+ZIP_EOCD_SIGNATURE = b"PK\x05\x06"
+ZIP_EOCD_STRUCT = struct.Struct("<4s4H2LH")
 REQUIRED_COLUMNS = {
     "transaction_date",
     "transaction_type",
@@ -81,11 +91,128 @@ def _read_csv(content: bytes) -> list[dict[str, Any]]:
     if reader.fieldnames is None:
         raise BusinessRuleError("import file must contain a header row")
     _validate_headers(reader.fieldnames)
-    return [dict(row) for row in reader]
+    rows: list[dict[str, Any]] = []
+    for row in reader:
+        if len(rows) >= MAX_IMPORT_ROWS:
+            raise BusinessRuleError(f"import file exceeds the {MAX_IMPORT_ROWS} row limit")
+        rows.append(dict(row))
+    return rows
+
+
+def _xlsx_declared_member_count(content: bytes) -> int:
+    """在构造 ZipInfo 列表前读取 EOCD，阻断超大中央目录。"""
+
+    minimum_size = ZIP_EOCD_STRUCT.size
+    search_start = max(0, len(content) - minimum_size - 65535)
+    offset = content.rfind(ZIP_EOCD_SIGNATURE, search_start)
+    if offset < 0 or len(content) - offset < minimum_size:
+        raise BusinessRuleError("XLSX file is not a valid ZIP archive")
+
+    (
+        _signature,
+        disk_number,
+        central_directory_disk,
+        members_on_disk,
+        member_count,
+        central_directory_size,
+        central_directory_offset,
+        comment_length,
+    ) = ZIP_EOCD_STRUCT.unpack_from(content, offset)
+    if offset + minimum_size + comment_length != len(content):
+        raise BusinessRuleError("XLSX ZIP archive has an invalid end record")
+    if (
+        disk_number != 0
+        or central_directory_disk != 0
+        or members_on_disk != member_count
+    ):
+        raise BusinessRuleError("multi-disk XLSX archives are not supported")
+    if (
+        member_count == 0xFFFF
+        or central_directory_size == 0xFFFFFFFF
+        or central_directory_offset == 0xFFFFFFFF
+    ):
+        raise BusinessRuleError("ZIP64 XLSX archives are not supported")
+    if member_count > MAX_XLSX_ARCHIVE_MEMBERS:
+        raise BusinessRuleError("XLSX archive contains too many members")
+    if central_directory_offset + central_directory_size > offset:
+        raise BusinessRuleError("XLSX ZIP archive has an invalid central directory")
+    return int(member_count)
+
+
+def _validate_xlsx_member(member: zipfile.ZipInfo) -> None:
+    """拒绝路径、加密、压缩算法或声明大小不安全的归档成员。"""
+
+    path = PurePosixPath(member.filename)
+    if (
+        not member.filename
+        or "\\" in member.filename
+        or path.is_absolute()
+        or ".." in path.parts
+    ):
+        raise BusinessRuleError("XLSX archive contains an unsafe member path")
+    if member.flag_bits & 0x1:
+        raise BusinessRuleError("encrypted XLSX archive members are not supported")
+    if member.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}:
+        raise BusinessRuleError("XLSX archive uses an unsupported compression method")
+    if member.file_size > MAX_XLSX_MEMBER_BYTES:
+        raise BusinessRuleError("XLSX archive member exceeds the expanded size limit")
+
+
+def _validate_xlsx_archive(content: bytes) -> None:
+    """以有界流式解压验证 XLSX 容器，再允许 XML 解析。"""
+
+    declared_member_count = _xlsx_declared_member_count(content)
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = archive.infolist()
+            if len(members) != declared_member_count:
+                raise BusinessRuleError("XLSX ZIP member count is inconsistent")
+
+            total_uncompressed = 0
+            total_compressed = 0
+            for member in members:
+                _validate_xlsx_member(member)
+                if member.is_dir():
+                    continue
+
+                member_uncompressed = 0
+                with archive.open(member) as source:
+                    while chunk := source.read(XLSX_VALIDATION_CHUNK_BYTES):
+                        member_uncompressed += len(chunk)
+                        total_uncompressed += len(chunk)
+                        if member_uncompressed > MAX_XLSX_MEMBER_BYTES:
+                            raise BusinessRuleError(
+                                "XLSX archive member exceeds the expanded size limit"
+                            )
+                        if total_uncompressed > MAX_XLSX_UNCOMPRESSED_BYTES:
+                            raise BusinessRuleError(
+                                "XLSX archive exceeds the total expanded size limit"
+                            )
+
+                total_compressed += member.compress_size
+                if (
+                    member_uncompressed >= MIN_XLSX_RATIO_CHECK_BYTES
+                    and member_uncompressed / max(1, member.compress_size)
+                    > MAX_XLSX_COMPRESSION_RATIO
+                ):
+                    raise BusinessRuleError("XLSX archive member compression ratio is unsafe")
+
+            if (
+                total_uncompressed >= MIN_XLSX_RATIO_CHECK_BYTES
+                and total_uncompressed / max(1, total_compressed) > MAX_XLSX_COMPRESSION_RATIO
+            ):
+                raise BusinessRuleError("XLSX archive compression ratio is unsafe")
+    except BusinessRuleError:
+        raise
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, RuntimeError, EOFError) as exc:
+        raise BusinessRuleError("XLSX file is not a valid ZIP archive") from exc
 
 
 def _read_xlsx(content: bytes) -> list[dict[str, Any]]:
     """仅从当前 XLSX 工作表读取已计算的单元格值。"""
+
+    # ZIP 元数据预检必须先于 openpyxl，避免高膨胀内容进入 XML 解析器。
+    _validate_xlsx_archive(content)
 
     # 只读模式限制工作簿内存占用，纯数据模式则防止
     # 公式被解释为可执行的导入表达式。
@@ -94,6 +221,7 @@ def _read_xlsx(content: bytes) -> list[dict[str, Any]]:
             io.BytesIO(content),
             read_only=True,
             data_only=True,
+            keep_links=False,
         )
     except Exception as exc:
         raise BusinessRuleError("XLSX file could not be parsed") from exc
@@ -110,12 +238,14 @@ def _read_xlsx(content: bytes) -> list[dict[str, Any]]:
             raise BusinessRuleError("import file must contain a header row")
         normalized_headers = [str(value).strip() if value is not None else "" for value in headers]
         _validate_headers(normalized_headers)
-        # 空行会被忽略，但行顺序保持稳定以生成重试键。
-        return [
-            dict(zip(normalized_headers, values, strict=False))
-            for values in iterator
-            if any(value not in (None, "") for value in values)
-        ]
+        rows: list[dict[str, Any]] = []
+        # 每取得一行就检查上限；空行和伪造的巨大行号间隔也计入扫描成本。
+        for scanned_rows, values in enumerate(iterator, start=1):
+            if scanned_rows > MAX_IMPORT_ROWS:
+                raise BusinessRuleError(f"import file exceeds the {MAX_IMPORT_ROWS} row limit")
+            if any(value not in (None, "") for value in values):
+                rows.append(dict(zip(normalized_headers, values, strict=False)))
+        return rows
     finally:
         workbook.close()
 

@@ -8,6 +8,20 @@ Vue 3 前端。知识库管理和 LangGraph RAG 将在后续阶段实现。
 RAG、Finance、Provider、Database、Service、Worker、Observability 和 Security
 边界组织，后续阶段可直接在对应领域目录内扩展。
 
+## 项目里程碑
+
+| 里程碑 | 状态 | 完成日期 |
+| --- | --- | --- |
+| 阶段一：架构和安全底座 | 已完成 | 2026-07-23 |
+| 阶段二：个人财务数据基础 | 已完成 | 2026-07-24 |
+| 阶段一、二配套 Web 前端 | 已完成 | 2026-07-24 |
+| 阶段二收尾与四项安全审计整改 | 已完成 | 2026-07-24 |
+| 阶段三：知识库管理 | 尚未开始 | — |
+
+完整范围、验收结果和后续阶段见
+[总体技术方案](./aurum-agent-initial-design.md#0-项目里程碑与当前状态)。阶段三开始前仍需确认
+模型与 Embedding 供应商、对象存储、异步任务方案和知识库可见范围。
+
 ## 阶段一已包含
 
 - FastAPI 分层应用骨架：API、Service、Repository、Provider；
@@ -18,7 +32,7 @@ RAG、Finance、Provider、Database、Service、Worker、Observability 和 Secur
 - 短期 JWT Access Token；
 - 只保存 SHA-256 摘要的 Refresh Token、轮换和重用检测；
 - Redis 登录失败限流和 Access Token 即时撤销；
-- `admin / 123456` 幂等初始化，管理员首次登录必须修改密码；
+- 可选的初始管理员幂等创建，密码必须通过环境变量显式注入且首次登录必须修改；
 - 个人财务、检索日志和会话表的 PostgreSQL Row Level Security；
 - 迁移所有者与最小权限 API 数据库角色分离；
 - 请求 ID、安全响应头、CORS 白名单、统一错误格式和审计日志。
@@ -63,15 +77,26 @@ RAG、Finance、Provider、Database、Service、Worker、Observability 和 Secur
 UTF-8；XLSX 读取活动工作表。单文件最大 10 MiB、最多 10,000 行。默认严格模式下，
 任意行校验失败都会阻止整批写入；`strict=false` 时可提交其余有效行。
 
+XLSX 在解析 XML 前会流式预检 ZIP 容器：最多允许 256 个成员、32 MiB 总解压大小、
+16 MiB 单成员大小；超过 1 MiB 的成员或归档压缩比不得高于 100。工作表逐行读取并在
+扫描到第 10,001 行时立即终止，空行和异常行号间隔同样计入扫描上限。
+
 ## 使用 Docker 启动完整后端
 
 要求 Docker Desktop 已启动。
 
 ```powershell
-Copy-Item .env.example .env
+.\scripts\generate-dev-env.ps1
 docker compose up --build -d
 docker compose ps
 ```
+
+生成脚本使用操作系统密码学随机数创建 JWT、初始管理员和数据库密码，并且默认不会
+覆盖已有 `.env`。已有开发环境不要直接覆盖 `.env`，数据库密码还必须与现有 Docker
+数据卷中的角色密码保持一致或同步轮换。若 `.env` 来自旧版示例，可执行
+`.\scripts\generate-dev-env.ps1 -RotateAuthSecrets` 只轮换 JWT 和初始管理员配置，
+不会改动数据库密码，也不会修改已经创建的管理员登录密码；该操作会使现有
+Access Token 和 Refresh Token 失效。
 
 服务地址：
 
@@ -97,12 +122,12 @@ npm run dev
 npm run build
 ```
 
-首次登录：
+首次登录使用 `.env` 中生成的 `AURUM_ADMIN_INITIAL_PASSWORD`：
 
 ```json
 {
   "identifier": "admin",
-  "password": "123456"
+  "password": "<AURUM_ADMIN_INITIAL_PASSWORD 中的值>"
 }
 ```
 
@@ -120,7 +145,7 @@ Docker API 使用 `8010`，PyCharm 直接运行的 API 使用 `8011`，两者可
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
+.\scripts\generate-dev-env.ps1
 docker compose up -d postgres redis
 alembic upgrade head
 aurum-agent grant-app-role
@@ -192,10 +217,27 @@ agent_aurum/
 
 ## 配置与密钥
 
-配置统一使用 `AURUM_` 前缀的环境变量。`.env` 只用于本地开发，已被 Git 忽略。
-生产容器应将 Docker/Kubernetes Secret 映射为同名环境变量。当
-`AURUM_ENVIRONMENT=production` 时，如果仍使用示例 JWT 密钥、管理员密码 `123456`
-或开启 Debug，应用会拒绝启动。
+配置统一使用环境变量；应用本身不再包含 JWT、初始管理员或数据库密码的可用默认值。
+`AURUM_JWT_SECRET_KEY`、`AURUM_DATABASE_URL` 和
+`AURUM_MIGRATION_DATABASE_URL` 缺失时，任何环境都会拒绝启动。管理员引导默认关闭；
+只有显式设置 `AURUM_BOOTSTRAP_ADMIN=true` 时，才必须同时提供符合密码规则的
+`AURUM_ADMIN_INITIAL_PASSWORD`。
+
+`.env` 只用于本地开发并已被 Git 忽略，新环境应通过
+`.\scripts\generate-dev-env.ps1` 生成。生产容器应由 Docker/Kubernetes Secret
+注入同名变量；当 `AURUM_ENVIRONMENT=production` 时，应用还会拒绝 Debug 或不安全的
+Refresh Token Cookie 配置。
+
+Refresh Token 只通过限定认证接口路径的 HttpOnly Cookie 下发，不会出现在 API 响应体
+或浏览器 `localStorage` 中。默认 `SameSite=Lax` 适用于前后端同站部署；如果生产环境
+确实需要跨站部署，应同时设置 `AURUM_REFRESH_TOKEN_COOKIE_SAMESITE=none`、启用
+Secure Cookie，并确保 HTTPS 与 `AURUM_CORS_ORIGINS` 的来源白名单配置正确。
+
+登录接口在密码校验前通过 Redis 执行原子限流，默认限制为单 IP 每 60 秒 30 次、
+全局每 60 秒 300 次；原有的“标识符 + IP”失败锁定仍独立生效。可通过
+`AURUM_LOGIN_IP_REQUEST_LIMIT`、`AURUM_LOGIN_GLOBAL_REQUEST_LIMIT` 和
+`AURUM_LOGIN_REQUEST_WINDOW_SECONDS` 调整容量，触发限制时接口返回 `429` 和
+`Retry-After`。
 
 生产部署前还应：
 

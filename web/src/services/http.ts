@@ -5,13 +5,14 @@ import axios, {
 } from 'axios'
 
 import { tokenStorage } from '@/services/token-storage'
-import type { ApiErrorPayload, TokenPair } from '@/types/api'
+import type { ApiErrorPayload, AuthTokenResponse } from '@/types/api'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
 export const http = axios.create({
   baseURL,
   timeout: 20_000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -25,14 +26,14 @@ let refreshPromise: Promise<string> | null = null
 
 async function refreshAccessToken(): Promise<string> {
   const stored = tokenStorage.get()
-  if (!stored?.refreshToken || stored.refreshExpiresAt <= Date.now()) {
+  if (!stored || stored.refreshExpiresAt <= Date.now()) {
     throw new Error('refresh token unavailable')
   }
 
-  const response = await axios.post<TokenPair>(
+  const response = await axios.post<AuthTokenResponse>(
     `${baseURL}/auth/refresh`,
-    { refresh_token: stored.refreshToken },
-    { timeout: 20_000 },
+    undefined,
+    { timeout: 20_000, withCredentials: true },
   )
   return tokenStorage.save(response.data).accessToken
 }
@@ -49,8 +50,11 @@ http.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<ApiErrorPayload>) => {
     const request = error.config as RetryableRequest | undefined
-    const isAuthEndpoint = request?.url?.includes('/auth/') ?? false
-    if (error.response?.status !== 401 || !request || request._retry || isAuthEndpoint) {
+    const cannotRefresh =
+      request?.url?.includes('/auth/login') ||
+      request?.url?.includes('/auth/register') ||
+      request?.url?.includes('/auth/refresh')
+    if (error.response?.status !== 401 || !request || request._retry || cannotRefresh) {
       return Promise.reject(error)
     }
 
