@@ -4,6 +4,7 @@
 > 阶段一交接时间：2026-07-23
 > 后续状态更新时间：2026-07-24
 > 项目路径：`E:\agent_aurum`
+> 文档分类目录：`project_introduction/`
 > 当前阶段：阶段一、阶段二及配套 Web 前端已完成，阶段三尚未开始。
 
 ## 0. 后续里程碑更新
@@ -145,6 +146,9 @@ agent_aurum/
 ├── .env.example
 └── README.md
 ```
+
+上方目录树是阶段一交接时的历史结构；项目介绍和方案文档现已统一迁移到
+`project_introduction/`。
 
 历史上的 `src/aurum_agent/` 布局已经取消。当前正式包路径是根目录下的 `app/`，不要重新创建
 或恢复旧 `src` 结构。
@@ -381,7 +385,7 @@ python -m mypy app migrations tests
 
 不要为了让 Mypy 变绿而关闭全局 strict 模式。
 
-## 9. 本地文件与 Git 忽略
+## 9. 阶段一交接时的本地文件与 Git 忽略（历史快照）
 
 当前已明确忽略：
 
@@ -394,8 +398,9 @@ python -m mypy app migrations tests
 - `aurum-agent-deployment-guide.md`
 - `aurum-agent-initial-design.md`
 
-前三份方案文档只在本地使用，不进入 Git。`.agents` 和 `.codex` 是辅助 Agent/Skill
-资产，不属于产品源代码。
+阶段一交接时曾建议前三份方案文档只在本地使用。该决定现已废止：项目介绍、架构、
+方案和交接文档统一位于 `project_introduction/`，并应进入 Git 版本管理。`.agents`
+和 `.codex` 仍是本机辅助 Agent/Skill 资产，不属于产品源代码。
 
 应继续版本管理：
 
@@ -509,9 +514,9 @@ Agent 执行状态。
 
 ```text
 请接手 E:\agent_aurum 项目。先完整阅读：
-1. aurum-agent-phase-1-handoff.md
-2. README.md
-3. aurum-agent-initial-design.md
+1. project_introduction/aurum-agent-current-handoff.md
+2. project_introduction/README.md
+3. project_introduction/aurum-agent-initial-design.md
 
 阶段一稳定基线提交为：
 933390a872590b47e6e10af7c1bf23b564847bf0
@@ -526,10 +531,11 @@ Agent 执行状态。
 
 ## 14. 参考文档
 
-- `README.md`：当前代码的运行与开发说明；
-- `aurum-agent-initial-design.md`：总体方案和阶段清单；
-- `aurum-agent-architecture.md`：整体架构图与说明；
-- `aurum-agent-deployment-guide.md`：部署上线流程；
+- `project_introduction/README.md`：当前代码的运行与开发说明；
+- `project_introduction/aurum-agent-current-handoff.md`：当前开发进度交接；
+- `project_introduction/aurum-agent-initial-design.md`：总体方案和阶段清单；
+- `project_introduction/aurum-agent-architecture.md`：整体架构图与说明；
+- `project_introduction/aurum-agent-deployment-guide.md`：部署上线流程；
 - `pyproject.toml`：Python 依赖和质量工具配置；
 - `compose.yaml`：本地容器拓扑；
 - `migrations/versions/`：数据库真实演进记录。

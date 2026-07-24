@@ -1,10 +1,12 @@
 # Aurum Agent 总体架构设计
 
-> 文档状态：总体架构设计，待详细设计和代码实现阶段持续校准  
+> 文档状态：总体架构设计，已按阶段一、二实现持续校准  
 > 项目目录：`E:\agent_aurum`  
 > 初步方案：[aurum-agent-initial-design.md](./aurum-agent-initial-design.md)  
 > 部署方案：[aurum-agent-deployment-guide.md](./aurum-agent-deployment-guide.md)  
-> 编写日期：2026-07-23
+> 当前交接：[aurum-agent-current-handoff.md](./aurum-agent-current-handoff.md)  
+> 编写日期：2026-07-23  
+> 最后更新：2026-07-24
 
 ## 1. 文档目标
 

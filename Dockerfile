@@ -8,7 +8,8 @@ WORKDIR /app
 
 RUN addgroup --system aurum && adduser --system --ingroup aurum aurum
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
+COPY project_introduction/README.md ./project_introduction/README.md
 COPY app ./app
 COPY alembic.ini ./
 COPY migrations ./migrations

@@ -2,6 +2,7 @@
 
 > 文档状态：持续维护中的部署方案
 > 项目目录：`E:\agent_aurum`
+> 文档分类目录：`project_introduction/`
 > 对应设计文档：[Aurum Agent 总体技术方案](./aurum-agent-initial-design.md)
 > 编写日期：2026-07-23
 > 最后更新：2026-07-24
@@ -175,7 +176,9 @@ agent_aurum/
 ├── pyproject.toml
 ├── alembic.ini
 ├── .env.example
-└── README.md
+└── project_introduction/
+    ├── README.md
+    └── 其他项目介绍、架构和交接文档
 ```
 
 生产部署文件应与开发环境文件分开，避免开发配置被误用于生产。
