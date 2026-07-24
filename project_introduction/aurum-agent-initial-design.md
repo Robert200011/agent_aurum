@@ -2,6 +2,7 @@
 
 > 文档状态：已确认，按实施进度持续维护
 > 项目目录：`E:\agent_aurum`
+> 文档分类目录：`project_introduction/`
 > 编写日期：2026-07-23
 > 最后更新：2026-07-24
 
@@ -1233,7 +1234,10 @@ agent_aurum/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
-└── README.md
+└── project_introduction/
+    ├── README.md
+    ├── aurum-agent-current-handoff.md
+    └── 其他架构、方案和历史交接文档
 ```
 
 该目录结构已在阶段一完成后落地。结合已实现的安全底座，实际结构额外保留了

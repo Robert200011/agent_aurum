@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "aurum-agent"
 version = "0.1.0"
 description = "Enterprise-grade personal finance and investment RAG agent"
-readme = "README.md"
+readme = "project_introduction/README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "alembic>=1.16,<2",
