@@ -5,9 +5,12 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.rag.constants import DASHSCOPE_TEXT_EMBEDDING_V4, DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS
 
 Environment = Literal["development", "test", "staging", "production"]
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +40,57 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     database_pool_size: int = Field(default=10, ge=1, le=100)
     database_max_overflow: int = Field(default=20, ge=0, le=200)
+
+    dashscope_api_key: SecretStr | None = None
+    embedding_model: str = DASHSCOPE_TEXT_EMBEDDING_V4
+    embedding_dimensions: int = Field(default=DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS, ge=1, le=2048)
+    embedding_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    embedding_batch_size: int = Field(default=16, ge=1, le=64)
+
+    object_storage_endpoint: str = "http://127.0.0.1:9000"
+    object_storage_bucket: str = "aurum-knowledge"
+    object_storage_region: str = "us-east-1"
+    object_storage_access_key: SecretStr | None = None
+    object_storage_secret_key: SecretStr | None = None
+    object_storage_secure: bool = False
+    object_storage_external_endpoint: str | None = None
+    object_storage_readiness_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    object_storage_download_url_ttl_seconds: int = Field(default=300, ge=60, le=3600)
+
+    ingestion_queue_name: str = Field(
+        default="aurum-ingestion",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    ingestion_task_timeout_seconds: int = Field(default=900, ge=30, le=7200)
+    ingestion_lease_seconds: int = Field(default=960, ge=60, le=10800)
+    ingestion_max_retries: int = Field(default=3, ge=0, le=10)
+    worker_heartbeat_interval_seconds: int = Field(default=15, ge=5, le=300)
+    worker_heartbeat_ttl_seconds: int = Field(default=45, ge=10, le=900)
+
+    document_max_size_bytes: int = Field(default=50 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
+    document_max_pdf_pages: int = Field(default=500, ge=1, le=10000)
+    document_max_tabular_rows: int = Field(default=100000, ge=1, le=1000000)
+    document_max_archive_uncompressed_bytes: int = Field(
+        default=200 * 1024 * 1024, ge=1, le=4 * 1024 * 1024 * 1024
+    )
+    document_max_archive_compression_ratio: int = Field(default=100, ge=1, le=1000)
+    document_max_archive_members: int = Field(default=512, ge=1, le=10_000)
+    document_max_archive_member_bytes: int = Field(
+        default=50 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024
+    )
+    document_metadata_max_entries: int = Field(default=16, ge=0, le=64)
+    document_metadata_key_max_length: int = Field(default=64, ge=1, le=256)
+    document_metadata_value_max_length: int = Field(default=512, ge=1, le=4096)
+    outbox_dispatch_batch_size: int = Field(default=50, ge=1, le=500)
+    outbox_dispatch_interval_seconds: int = Field(default=10, ge=1, le=300)
+    outbox_lease_seconds: int = Field(default=300, ge=30, le=3600)
+    outbox_backoff_base_seconds: int = Field(default=5, ge=1, le=3600)
+    outbox_backoff_max_seconds: int = Field(default=300, ge=1, le=86400)
+    chunk_max_tokens: int = Field(default=800, ge=64, le=4096)
+    chunk_overlap_tokens: int = Field(default=100, ge=0, le=1024)
+    document_max_chunks: int = Field(default=10_000, ge=1, le=100_000)
 
     jwt_secret_key: SecretStr = Field(min_length=32)
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
@@ -84,6 +138,26 @@ class Settings(BaseSettings):
         prefix = self.api_v1_prefix.rstrip("/")
         return f"{prefix}/auth"
 
+    @field_validator("object_storage_endpoint", "object_storage_external_endpoint")
+    @classmethod
+    def validate_object_storage_endpoint(cls, value: str | None) -> str | None:
+        """只接受不携带凭据、查询参数和片段的绝对 HTTP(S) endpoint。"""
+
+        if value is None:
+            return None
+        normalized = value.rstrip("/")
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("object-storage endpoint must be an absolute HTTP(S) URL")
+        return normalized
+
     @model_validator(mode="after")
     def validate_security_configuration(self) -> Settings:
         """缺少密钥或启用不安全选项时尽早终止启动。"""
@@ -95,6 +169,23 @@ class Settings(BaseSettings):
             raise ValueError("SameSite=None refresh cookie requires Secure=true")
         if self.login_global_request_limit < self.login_ip_request_limit:
             raise ValueError("global login request limit must be at least the per-IP limit")
+        if self.embedding_dimensions != DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS:
+            raise ValueError(
+                "AURUM_EMBEDDING_DIMENSIONS must match the fixed "
+                f"{DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS}-dimension index"
+            )
+        if self.chunk_overlap_tokens >= self.chunk_max_tokens:
+            raise ValueError("chunk overlap must be smaller than the chunk token limit")
+        if self.ingestion_lease_seconds < self.ingestion_task_timeout_seconds:
+            raise ValueError("ingestion lease must be at least the task timeout")
+        if self.worker_heartbeat_ttl_seconds < self.worker_heartbeat_interval_seconds * 2:
+            raise ValueError("worker heartbeat TTL must cover at least two heartbeat intervals")
+        if self.outbox_backoff_max_seconds < self.outbox_backoff_base_seconds:
+            raise ValueError("outbox maximum backoff must be at least the base backoff")
+        if self.object_storage_secure != self.object_storage_endpoint.startswith("https://"):
+            raise ValueError(
+                "AURUM_OBJECT_STORAGE_SECURE must match AURUM_OBJECT_STORAGE_ENDPOINT scheme"
+            )
 
         if self.bootstrap_admin:
             if self.admin_initial_password is None:
@@ -121,6 +212,18 @@ class Settings(BaseSettings):
             errors.append("AURUM_DEBUG")
         if not self.refresh_token_cookie_secure:
             errors.append("AURUM_REFRESH_TOKEN_COOKIE_SECURE")
+        if not self.object_storage_secure:
+            errors.append("AURUM_OBJECT_STORAGE_SECURE")
+        if self.dashscope_api_key is None:
+            errors.append("AURUM_DASHSCOPE_API_KEY")
+        if self.object_storage_access_key is None:
+            errors.append("AURUM_OBJECT_STORAGE_ACCESS_KEY")
+        if self.object_storage_secret_key is None:
+            errors.append("AURUM_OBJECT_STORAGE_SECRET_KEY")
+        if self.object_storage_external_endpoint is None:
+            errors.append("AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT")
+        elif not self.object_storage_external_endpoint.startswith("https://"):
+            errors.append("AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT")
         if errors:
             joined = ", ".join(errors)
             raise ValueError(f"insecure production configuration: {joined}")

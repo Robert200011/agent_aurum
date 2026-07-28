@@ -11,6 +11,9 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "alembic>=1.16,<2",
     "asyncpg>=0.30,<1",
+    "boto3>=1.35,<2",
+    "celery[redis]>=5.4,<6",
+    "dashscope>=1.23,<2",
     "email-validator>=2.2,<3",
     "fastapi>=0.115,<1",
     "openpyxl>=3.1,<4",

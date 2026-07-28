@@ -19,9 +19,12 @@ from app.db.repositories.identity import (
 from app.db.session import get_db_session
 from app.errors import AuthenticationError, AuthorizationError
 from app.providers.identity import SecurityStore
+from app.providers.object_storage import ObjectStorageProvider
+from app.providers.worker_health import WorkerHealthStore
 from app.security.auth import AccessTokenClaims, decode_access_token
 from app.services.auth import AuthService
 from app.services.finance import FinanceService
+from app.services.rag import RagAdminService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -39,7 +42,17 @@ def get_security_store(request: Request) -> SecurityStore:
     return cast(SecurityStore, request.app.state.security_store)
 
 
+def get_object_storage(request: Request) -> ObjectStorageProvider:
+    return cast(ObjectStorageProvider, request.app.state.object_storage)
+
+
+def get_worker_health_store(request: Request) -> WorkerHealthStore:
+    return cast(WorkerHealthStore, request.app.state.worker_health_store)
+
+
 SecurityStoreDependency = Annotated[SecurityStore, Depends(get_security_store)]
+ObjectStorageDependency = Annotated[ObjectStorageProvider, Depends(get_object_storage)]
+WorkerHealthStoreDependency = Annotated[WorkerHealthStore, Depends(get_worker_health_store)]
 
 
 def get_auth_service(
@@ -91,6 +104,21 @@ def get_finance_service(
 
 
 FinanceServiceDependency = Annotated[FinanceService, Depends(get_finance_service)]
+
+
+def get_rag_admin_service(
+    session: SessionDependency,
+    context: AdminContextDependency,
+    settings: SettingsDependency,
+) -> RagAdminService:
+    return RagAdminService(
+        session=session,
+        actor_user_id=context.user.id,
+        ingestion_max_retries=settings.ingestion_max_retries,
+    )
+
+
+RagAdminServiceDependency = Annotated[RagAdminService, Depends(get_rag_admin_service)]
 
 
 def require_admin(context: AccessContextDependency) -> AccessContext:

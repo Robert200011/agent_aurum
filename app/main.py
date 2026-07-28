@@ -20,6 +20,8 @@ from app.db.session import get_engine, get_session_factory
 from app.errors import ApplicationError, RateLimitError
 from app.observability.logging import configure_logging
 from app.providers.identity import RedisSecurityStore
+from app.providers.s3_object_storage import S3ObjectStorageProvider
+from app.providers.worker_health import RedisWorkerHealthStore
 from app.services.admin import bootstrap_admin
 
 logger = logging.getLogger(__name__)
@@ -57,12 +59,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         security_store = RedisSecurityStore.from_settings(app_settings)
+        worker_health_store = RedisWorkerHealthStore.from_settings(app_settings)
         app.state.security_store = security_store
+        app.state.worker_health_store = worker_health_store
+        app.state.object_storage = S3ObjectStorageProvider(app_settings)
         if app_settings.bootstrap_admin:
             await bootstrap_admin(get_session_factory(), app_settings)
         try:
             yield
         finally:
+            await worker_health_store.close()
             await security_store.close()
             await get_engine().dispose()
 
@@ -81,7 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=app_settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
     )
 
     @app.exception_handler(ApplicationError)
