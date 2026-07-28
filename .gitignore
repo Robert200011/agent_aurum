@@ -54,3 +54,4 @@ playwright-report/
 *.bak
 *.swp
 *.swo
+/tests/

@@ -1,5 +1,47 @@
 name: aurum-agent
 
+x-aurum-runtime-environment: &aurum-runtime-environment
+  AURUM_ENVIRONMENT: development
+  AURUM_DATABASE_URL: postgresql+asyncpg://aurum_app:${AURUM_APP_DB_PASSWORD:?请在 .env 中设置 AURUM_APP_DB_PASSWORD}@postgres:5432/aurum
+  AURUM_MIGRATION_DATABASE_URL: postgresql+asyncpg://aurum:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/aurum
+  AURUM_APP_DATABASE_ROLE: aurum_app
+  AURUM_REDIS_URL: redis://redis:6379/0
+  AURUM_JWT_SECRET_KEY: ${AURUM_JWT_SECRET_KEY:?请在 .env 中设置 AURUM_JWT_SECRET_KEY}
+  AURUM_ADMIN_INITIAL_PASSWORD: ${AURUM_ADMIN_INITIAL_PASSWORD:-}
+  AURUM_BOOTSTRAP_ADMIN: "${AURUM_BOOTSTRAP_ADMIN:-false}"
+  AURUM_CORS_ORIGINS: '["http://localhost:5173","http://127.0.0.1:5173"]'
+  AURUM_DASHSCOPE_API_KEY: ${AURUM_DASHSCOPE_API_KEY:-}
+  AURUM_EMBEDDING_MODEL: ${AURUM_EMBEDDING_MODEL:-text-embedding-v4}
+  AURUM_EMBEDDING_DIMENSIONS: "${AURUM_EMBEDDING_DIMENSIONS:-1024}"
+  AURUM_EMBEDDING_REQUEST_TIMEOUT_SECONDS: "${AURUM_EMBEDDING_REQUEST_TIMEOUT_SECONDS:-30}"
+  AURUM_EMBEDDING_BATCH_SIZE: "${AURUM_EMBEDDING_BATCH_SIZE:-16}"
+  AURUM_OBJECT_STORAGE_ENDPOINT: http://minio:9000
+  AURUM_OBJECT_STORAGE_BUCKET: ${AURUM_OBJECT_STORAGE_BUCKET:-aurum-knowledge}
+  AURUM_OBJECT_STORAGE_REGION: ${AURUM_OBJECT_STORAGE_REGION:-us-east-1}
+  AURUM_OBJECT_STORAGE_ACCESS_KEY: ${AURUM_OBJECT_STORAGE_ACCESS_KEY:?请在 .env 中设置 AURUM_OBJECT_STORAGE_ACCESS_KEY}
+  AURUM_OBJECT_STORAGE_SECRET_KEY: ${AURUM_OBJECT_STORAGE_SECRET_KEY:?请在 .env 中设置 AURUM_OBJECT_STORAGE_SECRET_KEY}
+  AURUM_OBJECT_STORAGE_SECURE: "false"
+  AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT: ${AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT:-http://127.0.0.1:9000}
+  AURUM_OBJECT_STORAGE_READINESS_TIMEOUT_SECONDS: "${AURUM_OBJECT_STORAGE_READINESS_TIMEOUT_SECONDS:-5}"
+  AURUM_OBJECT_STORAGE_DOWNLOAD_URL_TTL_SECONDS: "${AURUM_OBJECT_STORAGE_DOWNLOAD_URL_TTL_SECONDS:-300}"
+  AURUM_INGESTION_QUEUE_NAME: ${AURUM_INGESTION_QUEUE_NAME:-aurum-ingestion}
+  AURUM_INGESTION_TASK_TIMEOUT_SECONDS: "${AURUM_INGESTION_TASK_TIMEOUT_SECONDS:-900}"
+  AURUM_INGESTION_LEASE_SECONDS: "${AURUM_INGESTION_LEASE_SECONDS:-960}"
+  AURUM_INGESTION_MAX_RETRIES: "${AURUM_INGESTION_MAX_RETRIES:-3}"
+  AURUM_WORKER_HEARTBEAT_INTERVAL_SECONDS: "${AURUM_WORKER_HEARTBEAT_INTERVAL_SECONDS:-15}"
+  AURUM_WORKER_HEARTBEAT_TTL_SECONDS: "${AURUM_WORKER_HEARTBEAT_TTL_SECONDS:-45}"
+  AURUM_OUTBOX_DISPATCH_INTERVAL_SECONDS: "${AURUM_OUTBOX_DISPATCH_INTERVAL_SECONDS:-10}"
+  AURUM_OUTBOX_BACKOFF_BASE_SECONDS: "${AURUM_OUTBOX_BACKOFF_BASE_SECONDS:-5}"
+  AURUM_OUTBOX_BACKOFF_MAX_SECONDS: "${AURUM_OUTBOX_BACKOFF_MAX_SECONDS:-300}"
+  AURUM_DOCUMENT_MAX_SIZE_BYTES: "${AURUM_DOCUMENT_MAX_SIZE_BYTES:-52428800}"
+  AURUM_DOCUMENT_MAX_PDF_PAGES: "${AURUM_DOCUMENT_MAX_PDF_PAGES:-500}"
+  AURUM_DOCUMENT_MAX_TABULAR_ROWS: "${AURUM_DOCUMENT_MAX_TABULAR_ROWS:-100000}"
+  AURUM_DOCUMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES: "${AURUM_DOCUMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES:-209715200}"
+  AURUM_DOCUMENT_MAX_ARCHIVE_COMPRESSION_RATIO: "${AURUM_DOCUMENT_MAX_ARCHIVE_COMPRESSION_RATIO:-100}"
+  AURUM_CHUNK_MAX_TOKENS: "${AURUM_CHUNK_MAX_TOKENS:-800}"
+  AURUM_CHUNK_OVERLAP_TOKENS: "${AURUM_CHUNK_OVERLAP_TOKENS:-100}"
+  AURUM_DOCUMENT_MAX_CHUNKS: "${AURUM_DOCUMENT_MAX_CHUNKS:-10000}"
+
 services:
   postgres:
     image: pgvector/pgvector:0.8.2-pg16-trixie
@@ -34,21 +76,62 @@ services:
       retries: 20
     restart: unless-stopped
 
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?请在 .env 中设置 MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - aurum-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?请在 .env 中设置 MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
+      AURUM_OBJECT_STORAGE_BUCKET: ${AURUM_OBJECT_STORAGE_BUCKET:-aurum-knowledge}
+      AURUM_OBJECT_STORAGE_ACCESS_KEY: ${AURUM_OBJECT_STORAGE_ACCESS_KEY:?请在 .env 中设置 AURUM_OBJECT_STORAGE_ACCESS_KEY}
+      AURUM_OBJECT_STORAGE_SECRET_KEY: ${AURUM_OBJECT_STORAGE_SECRET_KEY:?请在 .env 中设置 AURUM_OBJECT_STORAGE_SECRET_KEY}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set aurum http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "aurum/$${AURUM_OBJECT_STORAGE_BUCKET}"
+        mc anonymous set none "aurum/$${AURUM_OBJECT_STORAGE_BUCKET}"
+        mc admin user add aurum "$${AURUM_OBJECT_STORAGE_ACCESS_KEY}" "$${AURUM_OBJECT_STORAGE_SECRET_KEY}"
+        cat > /tmp/aurum-object-storage-policy.json <<EOF
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::$${AURUM_OBJECT_STORAGE_BUCKET}"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::$${AURUM_OBJECT_STORAGE_BUCKET}/*"]}]}
+        EOF
+        mc admin policy create aurum aurum-object-storage /tmp/aurum-object-storage-policy.json || mc admin policy update aurum aurum-object-storage /tmp/aurum-object-storage-policy.json
+        mc admin policy attach aurum aurum-object-storage --user "$${AURUM_OBJECT_STORAGE_ACCESS_KEY}"
+        mc alias set aurum-app http://minio:9000 "$${AURUM_OBJECT_STORAGE_ACCESS_KEY}" "$${AURUM_OBJECT_STORAGE_SECRET_KEY}"
+        probe=health/minio-init-probe
+        printf 'ready' | mc pipe "aurum-app/$${AURUM_OBJECT_STORAGE_BUCKET}/$${probe}"
+        mc stat "aurum-app/$${AURUM_OBJECT_STORAGE_BUCKET}/$${probe}"
+        mc rm "aurum-app/$${AURUM_OBJECT_STORAGE_BUCKET}/$${probe}"
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: .
     environment:
-      AURUM_ENVIRONMENT: development
+      <<: *aurum-runtime-environment
       AURUM_SERVER_HOST: 0.0.0.0
       AURUM_SERVER_PORT: "${AURUM_SERVER_PORT:-8010}"
-      AURUM_DATABASE_URL: postgresql+asyncpg://aurum_app:${AURUM_APP_DB_PASSWORD:?请在 .env 中设置 AURUM_APP_DB_PASSWORD}@postgres:5432/aurum
-      AURUM_MIGRATION_DATABASE_URL: postgresql+asyncpg://aurum:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/aurum
-      AURUM_APP_DATABASE_ROLE: aurum_app
-      AURUM_REDIS_URL: redis://redis:6379/0
-      AURUM_JWT_SECRET_KEY: ${AURUM_JWT_SECRET_KEY:?请在 .env 中设置 AURUM_JWT_SECRET_KEY}
-      AURUM_ADMIN_INITIAL_PASSWORD: ${AURUM_ADMIN_INITIAL_PASSWORD:-}
-      AURUM_BOOTSTRAP_ADMIN: "${AURUM_BOOTSTRAP_ADMIN:-false}"
-      AURUM_CORS_ORIGINS: '["http://localhost:5173","http://127.0.0.1:5173"]'
     command:
       - /bin/sh
       - -c
@@ -60,6 +143,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import os, urllib.request; port = os.environ['AURUM_SERVER_PORT']; urllib.request.urlopen(f'http://127.0.0.1:{port}/api/v1/health/live')"]
       interval: 10s
@@ -67,6 +152,48 @@ services:
       retries: 12
     restart: unless-stopped
 
+  worker:
+    build:
+      context: .
+    environment: *aurum-runtime-environment
+    command:
+      - celery
+      - --app
+      - app.workers.celery_app:celery_app
+      - worker
+      - --loglevel=INFO
+      - --queues=${AURUM_INGESTION_QUEUE_NAME:-aurum-ingestion}
+      - --hostname=aurum-ingestion@%h
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+    environment: *aurum-runtime-environment
+    command:
+      - celery
+      - --app
+      - app.workers.celery_app:celery_app
+      - beat
+      - --loglevel=INFO
+      - --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   aurum-postgres-data:
   aurum-redis-data:
+  aurum-minio-data:

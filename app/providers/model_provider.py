@@ -11,6 +11,14 @@ class ChatModelProvider(Protocol):
 
 
 class EmbeddingProvider(Protocol):
+    """Provider-neutral batch embedding contract for a single index space."""
+
+    @property
+    def provider_name(self) -> str: ...
+
+    @property
+    def model_name(self) -> str: ...
+
     @property
     def dimensions(self) -> int: ...
 
@@ -19,4 +27,3 @@ class EmbeddingProvider(Protocol):
 
 class RerankerProvider(Protocol):
     async def rerank(self, query: str, documents: Sequence[str]) -> list[float]: ...
-

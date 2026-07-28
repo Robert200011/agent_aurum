@@ -4,7 +4,8 @@
 
 Aurum Agent 是面向个人财务、存款收支和投资知识问答的智能应用。本仓库目前完成
 “阶段一：架构和安全底座”“阶段二：个人财务数据基础”，以及覆盖前两阶段能力的
-Vue 3 前端。知识库管理和 LangGraph RAG 将在后续阶段实现。
+Vue 3 前端。阶段三知识库管理正在开发，已形成 Markdown/TXT 到 pgvector 的首个
+异步入库闭环；LangGraph RAG 将在后续阶段实现。
 
 后端采用根目录 `app/` 包布局，不再使用 `src/aurum_agent/`。现有代码按 API、Agent、
 RAG、Finance、Provider、Database、Service、Worker、Observability 和 Security
@@ -18,11 +19,11 @@ RAG、Finance、Provider、Database、Service、Worker、Observability 和 Secur
 | 阶段二：个人财务数据基础 | 已完成 | 2026-07-24 |
 | 阶段一、二配套 Web 前端 | 已完成 | 2026-07-24 |
 | 阶段二收尾与四项安全审计整改 | 已完成 | 2026-07-24 |
-| 阶段三：知识库管理 | 尚未开始 | — |
+| 阶段三：知识库管理 | 进行中（第 4 步首个闭环） | — |
 
 完整范围、验收结果和后续阶段见
-[总体技术方案](./aurum-agent-initial-design.md#0-项目里程碑与当前状态)。阶段三开始前仍需确认
-模型与 Embedding 供应商、对象存储、异步任务方案和知识库可见范围。
+[总体技术方案](./aurum-agent-initial-design.md#0-项目里程碑与当前状态)。阶段三已固定使用
+DashScope `text-embedding-v4`（1024 维）、MinIO、Celery 和显式项目—知识库绑定。
 
 ## 阶段一已包含
 
@@ -105,6 +106,12 @@ Access Token 和 Refresh Token 失效。
 - OpenAPI：`http://127.0.0.1:8010/docs`
 - 存活检查：`http://127.0.0.1:8010/api/v1/health/live`
 - 就绪检查：`http://127.0.0.1:8010/api/v1/health/ready`
+
+就绪检查会验证数据库、Redis，以及 MinIO 应用账户的对象写入、读取元数据和删除权限。
+浏览器下载链接由
+`GET /api/v1/admin/document-versions/{document_version_id}/download-url`
+按 `AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT` 签发；该值必须是浏览器可访问的地址，
+不能填写 Docker 内部的 `http://minio:9000`。
 
 ## 启动前端
 

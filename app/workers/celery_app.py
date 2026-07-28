@@ -1,0 +1,84 @@
+"""Celery application dedicated to asynchronous knowledge ingestion."""
+
+from __future__ import annotations
+
+from celery import Celery  # type: ignore[import-untyped]
+from celery.signals import (  # type: ignore[import-untyped]
+    worker_process_init,
+    worker_process_shutdown,
+    worker_shutdown,
+)
+
+from app.config import Settings, get_settings
+from app.workers.async_runtime import worker_async_runtime
+
+
+@worker_process_init.connect(weak=False)  # type: ignore[untyped-decorator]
+def initialize_worker_async_runtime(**_: object) -> None:
+    """Detach forked workers from any parent loop and database pool."""
+
+    worker_async_runtime.initialize()
+
+
+@worker_process_shutdown.connect(weak=False)  # type: ignore[untyped-decorator]
+def shutdown_worker_process_async_runtime(**_: object) -> None:
+    """Release each prefork child's async resources on its owning loop."""
+
+    worker_async_runtime.close()
+
+
+@worker_shutdown.connect(weak=False)  # type: ignore[untyped-decorator]
+def shutdown_worker_async_runtime(**_: object) -> None:
+    """Also cover non-prefork worker pools that execute tasks in the main process."""
+
+    worker_async_runtime.close()
+
+
+def create_celery_app(settings: Settings) -> Celery:
+    """由同一 Settings 实例生成生产、路由、Beat 和消费侧共享的队列配置。"""
+
+    application = Celery(
+        "aurum_ingestion",
+        broker=settings.redis_url,
+        include=["app.workers.ingestion"],
+    )
+    application.conf.update(
+        task_default_queue=settings.ingestion_queue_name,
+        task_routes={
+            "app.workers.ingestion.dispatch_pending_outbox_events": {
+                "queue": settings.ingestion_queue_name
+            },
+            "app.workers.ingestion.run_ingestion_job": {
+                "queue": settings.ingestion_queue_name
+            },
+            "app.workers.ingestion.record_ingestion_worker_heartbeat": {
+                "queue": settings.ingestion_queue_name
+            },
+        },
+        beat_schedule={
+            "dispatch-pending-ingestion-outbox-events": {
+                "task": "app.workers.ingestion.dispatch_pending_outbox_events",
+                "schedule": settings.outbox_dispatch_interval_seconds,
+                "options": {"queue": settings.ingestion_queue_name},
+            },
+            "record-ingestion-worker-heartbeat": {
+                "task": "app.workers.ingestion.record_ingestion_worker_heartbeat",
+                "schedule": settings.worker_heartbeat_interval_seconds,
+                "options": {"queue": settings.ingestion_queue_name},
+            }
+        },
+        task_serializer="json",
+        result_serializer="json",
+        accept_content=["json"],
+        task_track_started=True,
+        task_time_limit=settings.ingestion_task_timeout_seconds,
+        task_soft_time_limit=max(1, settings.ingestion_task_timeout_seconds - 30),
+        task_acks_late=True,
+        task_reject_on_worker_lost=True,
+        worker_prefetch_multiplier=1,
+        broker_connection_retry_on_startup=True,
+    )
+    return application
+
+
+celery_app = create_celery_app(get_settings())

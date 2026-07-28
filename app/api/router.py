@@ -2,7 +2,19 @@
 
 from fastapi import APIRouter
 
-from app.api import accounts, auth, budgets, holdings, reports, system, transactions, users
+from app.api import (
+    accounts,
+    auth,
+    budgets,
+    documents,
+    holdings,
+    knowledge_bases,
+    projects,
+    reports,
+    system,
+    transactions,
+    users,
+)
 
 router = APIRouter()
 router.include_router(system.router)
@@ -16,3 +28,6 @@ router.include_router(holdings.investment_router)
 router.include_router(holdings.market_router)
 router.include_router(holdings.portfolio_router)
 router.include_router(reports.router)
+router.include_router(projects.router)
+router.include_router(knowledge_bases.router)
+router.include_router(documents.router)

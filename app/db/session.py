@@ -38,6 +38,23 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     )
 
 
+def reset_database_runtime() -> None:
+    """Drop process-local database factories without touching another process."""
+
+    get_session_factory.cache_clear()
+    get_engine.cache_clear()
+
+
+async def dispose_database_runtime() -> None:
+    """Dispose a cached engine on its owning event loop, then clear its factories."""
+
+    try:
+        if get_engine.cache_info().currsize:
+            await get_engine().dispose()
+    finally:
+        reset_database_runtime()
+
+
 async def get_db_session() -> AsyncIterator[AsyncSession]:
     async with get_session_factory()() as session:
         try:

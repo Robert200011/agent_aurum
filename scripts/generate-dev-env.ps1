@@ -50,6 +50,10 @@ $postgresPassword = New-RandomToken -ByteCount 24
 $appDatabasePassword = New-RandomToken -ByteCount 24
 $jwtSecret = New-RandomToken -ByteCount 48
 $adminPassword = "Aurum-1-$(New-RandomToken -ByteCount 18)"
+$minioRootUser = "aurum-root"
+$minioRootPassword = New-RandomToken -ByteCount 32
+$objectStorageAccessKey = "aurum-app"
+$objectStorageSecretKey = New-RandomToken -ByteCount 32
 
 $sourcePath = if ($RotateAuthSecrets) { $targetPath } else { $templatePath }
 $content = Get-Content -LiteralPath $sourcePath -Raw -Encoding utf8
@@ -65,6 +69,10 @@ if ($RotateAuthSecrets) {
 
 $content = Set-EnvironmentValue $content "POSTGRES_PASSWORD" $postgresPassword
 $content = Set-EnvironmentValue $content "AURUM_APP_DB_PASSWORD" $appDatabasePassword
+$content = Set-EnvironmentValue $content "MINIO_ROOT_USER" $minioRootUser
+$content = Set-EnvironmentValue $content "MINIO_ROOT_PASSWORD" $minioRootPassword
+$content = Set-EnvironmentValue $content "AURUM_OBJECT_STORAGE_ACCESS_KEY" $objectStorageAccessKey
+$content = Set-EnvironmentValue $content "AURUM_OBJECT_STORAGE_SECRET_KEY" $objectStorageSecretKey
 $content = Set-EnvironmentValue $content "AURUM_DATABASE_URL" (
     "postgresql+asyncpg://aurum_app:${appDatabasePassword}@localhost:5432/aurum"
 )
