@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.rag import (
     AgentProject,
     Document,
+    DocumentChunk,
     DocumentUploadRequest,
     DocumentVersion,
     IngestionJob,
@@ -188,8 +189,15 @@ class RagRepository:
         )
         return list((await self._session.scalars(statement)).all()), total
 
-    async def get_document_version(self, document_version_id: UUID) -> DocumentVersion | None:
+    async def get_document_version(
+        self,
+        document_version_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> DocumentVersion | None:
         statement = select(DocumentVersion).where(DocumentVersion.id == document_version_id)
+        if for_update:
+            statement = statement.with_for_update()
         return cast(DocumentVersion | None, await self._session.scalar(statement))
 
     async def list_document_versions(self, *, document_id: UUID) -> list[DocumentVersion]:
@@ -226,11 +234,48 @@ class RagRepository:
             statement = statement.with_for_update().execution_options(populate_existing=True)
         return cast(DocumentUploadRequest | None, await self._session.scalar(statement))
 
-    async def get_ingestion_job(self, job_id: UUID) -> IngestionJob | None:
-        return cast(
-            IngestionJob | None,
-            await self._session.scalar(select(IngestionJob).where(IngestionJob.id == job_id)),
+    async def get_ingestion_job(
+        self,
+        job_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> IngestionJob | None:
+        statement = select(IngestionJob).where(IngestionJob.id == job_id)
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        return cast(IngestionJob | None, await self._session.scalar(statement))
+
+    async def list_ingestion_jobs(self, *, document_id: UUID) -> list[IngestionJob]:
+        statement = (
+            select(IngestionJob)
+            .where(IngestionJob.document_id == document_id)
+            .order_by(IngestionJob.created_at.desc(), IngestionJob.id)
         )
+        return list((await self._session.scalars(statement)).all())
+
+    async def get_retrieval_chunks(
+        self,
+        chunk_ids: list[UUID],
+    ) -> dict[UUID, tuple[DocumentChunk, Document]]:
+        if not chunk_ids:
+            return {}
+        statement = (
+            select(DocumentChunk, Document)
+            .join(
+                DocumentVersion,
+                DocumentVersion.id == DocumentChunk.document_version_id,
+            )
+            .join(Document, Document.id == DocumentVersion.document_id)
+            .where(
+                DocumentChunk.id.in_(chunk_ids),
+                DocumentVersion.status == "published",
+                Document.current_published_version_id == DocumentVersion.id,
+                Document.is_enabled.is_(True),
+                Document.deleted_at.is_(None),
+            )
+        )
+        rows = (await self._session.execute(statement)).all()
+        return {chunk.id: (chunk, document) for chunk, document in rows}
 
     async def get_outbox_event(
         self, *, ingestion_job_id: UUID, event_type: str

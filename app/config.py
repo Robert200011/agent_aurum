@@ -66,12 +66,21 @@ class Settings(BaseSettings):
     ingestion_task_timeout_seconds: int = Field(default=900, ge=30, le=7200)
     ingestion_lease_seconds: int = Field(default=960, ge=60, le=10800)
     ingestion_max_retries: int = Field(default=3, ge=0, le=10)
+    ingestion_manual_retry_limit: int = Field(default=5, ge=0, le=100)
     worker_heartbeat_interval_seconds: int = Field(default=15, ge=5, le=300)
     worker_heartbeat_ttl_seconds: int = Field(default=45, ge=10, le=900)
 
     document_max_size_bytes: int = Field(default=50 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
     document_max_pdf_pages: int = Field(default=500, ge=1, le=10000)
     document_max_tabular_rows: int = Field(default=100000, ge=1, le=1000000)
+    document_max_tabular_columns: int = Field(default=256, ge=1, le=16_384)
+    document_max_workbook_sheets: int = Field(default=128, ge=1, le=10_000)
+    document_max_cell_characters: int = Field(default=32_767, ge=1, le=1_000_000)
+    document_max_extracted_characters: int = Field(
+        default=10_000_000,
+        ge=1,
+        le=100_000_000,
+    )
     document_max_archive_uncompressed_bytes: int = Field(
         default=200 * 1024 * 1024, ge=1, le=4 * 1024 * 1024 * 1024
     )
@@ -115,7 +124,7 @@ class Settings(BaseSettings):
     login_request_window_seconds: int = Field(default=60, ge=10, le=3600)
 
     admin_username: str = "admin"
-    admin_email: str = "admin@aurum.local"
+    admin_email: str = "admin@aurum.example.com"
     admin_initial_password: SecretStr | None = None
     bootstrap_admin: bool = False
 

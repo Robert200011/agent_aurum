@@ -30,10 +30,22 @@
 `Event loop is closed` 或 `Future attached to a different loop`；随后真实 Outbox
 事件成功发布为 Celery Job，数据库状态更新为 `published`，测试数据已清理。
 
-至此，本报告列出的 10 项代码整改均已完成。阶段三第 4 步正式准入前仍应完成
-“真实管理员上传全链路”和“Worker 状态纳入统一健康检查/告警”两项运维验收。
+至此，本报告列出的 10 项代码整改均已完成。
 
-## 一、当前已验证的正常项
+## 验收完成更新（2026-07-29）
+
+- 真实管理员上传全链路已通过：浏览器上传经 API、MinIO、Outbox、Worker、解析与分块、
+  DashScope Embedding、pgvector 写入后完成原子版本发布；
+- Worker/Beat 心跳已经接入 Redis 和 `/api/v1/health/ready`，当前数据库、Redis、
+  对象存储和 ingestion Worker 均为 ready；
+- 真实 DashScope Key 下的 `text-embedding-v4` 文档与查询向量生成、Dense/cosine
+  检索、来源重建和浏览器展示已通过；
+- 验收期间额外发现 `RetrievalLog` 写入前未设置事务级用户上下文，导致 PostgreSQL
+  RLS 拒绝插入。该问题已在检索服务中修复，并通过真实日志持久化及回滚式无残留验证；
+- 原审计报告列出的 10 项整改和阶段三准入运维验收均已关闭。阶段三当前仅剩最终质量
+  门禁、Git 变更整理和分支合并。
+
+## 一、审计时点已验证的正常项
 
 - 当前开发数据库已位于 `20260727_0006 (head)`。
 - 当前已通过：`ruff`、`mypy`、`pytest`（98 passed，4 个需显式测试数据库的集成测试 skipped）、`alembic check`、`docker compose config --quiet` 与 `git diff --check`。
@@ -41,7 +53,9 @@
 - API、PostgreSQL、Redis、MinIO 与 Celery Worker 曾成功启动；MinIO 初始化容器也已成功创建 bucket 并关闭匿名访问。
 - Celery Beat 已按配置周期扫描 Outbox；扫描日志包含领取、发布、发布失败、耗尽、积压、失败总数和最长等待时间。
 - 上传校验、对象键生成、不可变 `DocumentVersion`、`IngestionJob`、`OutboxEvent`、S3/MinIO Provider 与管理员 RBAC 的基础代码已经存在。
-- 当前尚未完成真实管理员成功上传冒烟，因为本地唯一管理员仍处于 `must_change_password = true` 状态；这是既有安全策略的正常拦截，而不是代码崩溃。
+- 审计当时尚未完成真实管理员成功上传冒烟，因为本地唯一管理员仍处于
+  `must_change_password = true` 状态；这是既有安全策略的正常拦截，而不是代码崩溃。
+  该项已在上述 2026-07-29 更新前完成。
 
 ## 二、严重程度总览
 

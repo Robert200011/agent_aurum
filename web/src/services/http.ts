@@ -13,9 +13,6 @@ export const http = axios.create({
   baseURL,
   timeout: 20_000,
   withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 })
 
 interface RetryableRequest extends InternalAxiosRequestConfig {
@@ -23,6 +20,26 @@ interface RetryableRequest extends InternalAxiosRequestConfig {
 }
 
 let refreshPromise: Promise<string> | null = null
+
+function validationDetailMessage(detail: unknown): string | null {
+  if (typeof detail !== 'object' || detail === null) return null
+
+  const record = detail as Record<string, unknown>
+  const message = typeof record.msg === 'string' ? record.msg : null
+  if (!message) return null
+
+  const location = Array.isArray(record.loc)
+    ? record.loc
+        .filter((part) => part !== 'body')
+        .filter(
+          (part): part is string | number =>
+            typeof part === 'string' || typeof part === 'number',
+        )
+        .join('.')
+    : ''
+
+  return location ? `${location}：${message}` : message
+}
 
 async function refreshAccessToken(): Promise<string> {
   const stored = tokenStorage.get()
@@ -80,6 +97,12 @@ http.interceptors.response.use(
 export function apiErrorMessage(error: unknown, fallback = '请求失败，请稍后重试'): string {
   if (!axios.isAxiosError<ApiErrorPayload>(error)) return fallback
   const payload = error.response?.data
+  if (payload?.error?.code === 'validation_error' && Array.isArray(payload.details)) {
+    const details = payload.details
+      .map(validationDetailMessage)
+      .filter((detail): detail is string => detail !== null)
+    if (details.length) return `请求参数校验失败：${details.join('；')}`
+  }
   if (payload?.error?.message) return payload.error.message
   if (typeof payload?.detail === 'string') return payload.detail
   if (error.code === 'ECONNABORTED') return '请求超时，请检查后端服务'

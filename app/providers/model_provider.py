@@ -25,5 +25,20 @@ class EmbeddingProvider(Protocol):
     async def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
 
 
+class QueryEmbeddingProvider(Protocol):
+    """Provider-neutral query embedding contract for retrieval."""
+
+    @property
+    def provider_name(self) -> str: ...
+
+    @property
+    def model_name(self) -> str: ...
+
+    @property
+    def dimensions(self) -> int: ...
+
+    async def embed_query(self, query: str) -> list[float]: ...
+
+
 class RerankerProvider(Protocol):
     async def rerank(self, query: str, documents: Sequence[str]) -> list[float]: ...

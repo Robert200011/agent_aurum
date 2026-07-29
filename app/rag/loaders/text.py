@@ -1,40 +1,22 @@
-"""Deterministic UTF-8 text and Markdown parsing for the first ingestion slice."""
+"""Deterministic UTF-8 text and Markdown parsing."""
 
 from __future__ import annotations
 
 import re
 import unicodedata
-from bisect import bisect_right
-from dataclasses import dataclass
+
+from app.rag.loaders.base import DocumentParsingError, ParsedDocument, ParsedSourceSpan
 
 TEXT_PARSER_VERSION = "aurum-text-v1"
 SUPPORTED_TEXT_MIME_TYPES = frozenset({"text/plain", "text/markdown"})
 _MARKDOWN_HEADING = re.compile(r"^(#{1,6})\s+(.+?)(?:\s+#+)?$")
 _INLINE_WHITESPACE = re.compile(r"[^\S\r\n]+")
 
-
-class TextParsingError(ValueError):
+class TextParsingError(DocumentParsingError):
     """A safe, non-retryable source parsing failure."""
 
 
-@dataclass(frozen=True, slots=True)
-class ParsedSection:
-    path: str | None
-    char_start: int
-    char_end: int
-
-
-@dataclass(frozen=True, slots=True)
-class ParsedTextDocument:
-    text: str
-    mime_type: str
-    parser_version: str
-    sections: tuple[ParsedSection, ...]
-
-    def section_path_at(self, char_offset: int) -> str | None:
-        starts = [section.char_start for section in self.sections]
-        index = max(0, bisect_right(starts, char_offset) - 1)
-        return self.sections[index].path
+ParsedTextDocument = ParsedDocument
 
 
 def parse_text_document(content: bytes, mime_type: str) -> ParsedTextDocument:
@@ -49,23 +31,25 @@ def parse_text_document(content: bytes, mime_type: str) -> ParsedTextDocument:
     if "\x00" in decoded:
         raise TextParsingError("text document contains NUL bytes")
 
-    normalized = _normalize_text(decoded)
+    normalized = normalize_text(decoded)
     if not normalized:
         raise TextParsingError("text document is empty after normalization")
     sections = (
         _markdown_sections(normalized)
         if mime_type == "text/markdown"
-        else (ParsedSection(path=None, char_start=0, char_end=len(normalized)),)
+        else (ParsedSourceSpan(char_start=0, char_end=len(normalized)),)
     )
-    return ParsedTextDocument(
+    return ParsedDocument(
         text=normalized,
         mime_type=mime_type,
         parser_version=TEXT_PARSER_VERSION,
-        sections=sections,
+        sources=sections,
     )
 
 
-def _normalize_text(value: str) -> str:
+def normalize_text(value: str) -> str:
+    """Normalize Unicode, line endings, and bounded whitespace deterministically."""
+
     value = unicodedata.normalize("NFKC", value).replace("\r\n", "\n").replace("\r", "\n")
     lines: list[str] = []
     blank_count = 0
@@ -81,7 +65,7 @@ def _normalize_text(value: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _markdown_sections(text: str) -> tuple[ParsedSection, ...]:
+def _markdown_sections(text: str) -> tuple[ParsedSourceSpan, ...]:
     markers: list[tuple[int, str | None]] = [(0, None)]
     heading_stack: list[str] = []
     offset = 0
@@ -98,13 +82,13 @@ def _markdown_sections(text: str) -> tuple[ParsedSection, ...]:
                 markers.append((offset, heading_path))
         offset += len(line)
 
-    sections: list[ParsedSection] = []
+    sections: list[ParsedSourceSpan] = []
     for index, (char_start, section_path) in enumerate(markers):
         char_end = markers[index + 1][0] if index + 1 < len(markers) else len(text)
         if char_end > char_start:
             sections.append(
-                ParsedSection(
-                    path=section_path,
+                ParsedSourceSpan(
+                    section_path=section_path,
                     char_start=char_start,
                     char_end=char_end,
                 )

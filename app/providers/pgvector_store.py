@@ -5,10 +5,17 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.rag import Document, DocumentChunk, DocumentVersion
+from app.db.models.rag import (
+    AgentProject,
+    Document,
+    DocumentChunk,
+    DocumentVersion,
+    KnowledgeBase,
+    ProjectKnowledgeBase,
+)
 from app.providers.vector_store import VectorChunk, VectorSearchResult
 from app.rag.constants import (
     DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS,
@@ -82,13 +89,26 @@ class PgVectorStoreProvider:
                 Document,
                 Document.id == DocumentVersion.document_id,
             )
+            .join(
+                KnowledgeBase,
+                KnowledgeBase.id == DocumentChunk.knowledge_base_id,
+            )
             .where(
                 DocumentChunk.knowledge_base_id.in_(knowledge_base_ids),
                 DocumentChunk.embedding.is_not(None),
+                KnowledgeBase.status == "published",
+                KnowledgeBase.deleted_at.is_(None),
                 DocumentVersion.status == DOCUMENT_VERSION_STATUS_PUBLISHED,
                 Document.current_published_version_id == DocumentVersion.id,
                 Document.is_enabled.is_(True),
                 Document.deleted_at.is_(None),
+                exists().where(
+                    ProjectKnowledgeBase.knowledge_base_id
+                    == DocumentChunk.knowledge_base_id,
+                    ProjectKnowledgeBase.project_id == AgentProject.id,
+                    AgentProject.status == "active",
+                    AgentProject.deleted_at.is_(None),
+                ),
             )
             .order_by(distance, DocumentChunk.id)
             .limit(limit)

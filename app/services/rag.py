@@ -34,6 +34,7 @@ from app.rag.constants import (
     DOCUMENT_VERSION_STATUS_FAILED,
     DOCUMENT_VERSION_STATUS_UPLOADING,
     INGESTION_JOB_STATUS_AWAITING_PIPELINE,
+    INGESTION_JOB_STATUS_FAILED,
     OUTBOX_DEFAULT_MAX_ATTEMPTS,
     OUTBOX_EVENT_INGESTION_REQUESTED,
     OUTBOX_STATUS_FAILED,
@@ -65,10 +66,12 @@ class RagAdminService:
         actor_user_id: UUID,
         *,
         ingestion_max_retries: int = 3,
+        ingestion_manual_retry_limit: int = 5,
     ) -> None:
         self._session = session
         self._actor_user_id = actor_user_id
         self._ingestion_max_retries = ingestion_max_retries
+        self._ingestion_manual_retry_limit = ingestion_manual_retry_limit
         self._repository = RagRepository(session)
         self._audit = AuditRepository(session)
 
@@ -784,8 +787,104 @@ class RagAdminService:
         await self._document(job.document_id)
         return job
 
+    async def list_ingestion_jobs(self, document_id: UUID) -> list[IngestionJob]:
+        await self._document(document_id)
+        return await self._repository.list_ingestion_jobs(document_id=document_id)
+
+    async def retry_ingestion_job(
+        self,
+        job_id: UUID,
+    ) -> tuple[IngestionJob, OutboxEvent]:
+        job = await self._repository.get_ingestion_job(job_id, for_update=True)
+        if job is None:
+            raise NotFoundError("ingestion job was not found")
+        document = await self._repository.get_document(job.document_id, for_update=True)
+        version = await self._repository.get_document_version(
+            job.document_version_id,
+            for_update=True,
+        )
+        if document is None or version is None:
+            raise NotFoundError("ingestion job source was not found")
+        if not document.is_enabled:
+            raise BusinessRuleError("disabled documents cannot be retried")
+        await self._active_knowledge_base(document.knowledge_base_id)
+        if job.status != INGESTION_JOB_STATUS_FAILED:
+            raise BusinessRuleError("only failed ingestion jobs can be retried")
+        if version.status != DOCUMENT_VERSION_STATUS_FAILED:
+            raise BusinessRuleError("failed ingestion job version is not retryable")
+        if job.manual_retry_count >= self._ingestion_manual_retry_limit:
+            raise BusinessRuleError("ingestion job manual retry limit was reached")
+        versions = await self._repository.list_document_versions(document_id=document.id)
+        if any(candidate.version > version.version for candidate in versions):
+            raise BusinessRuleError("only the latest document version can be retried")
+
+        event = await self._repository.get_outbox_event(
+            ingestion_job_id=job.id,
+            event_type=OUTBOX_EVENT_INGESTION_REQUESTED,
+        )
+        if event is None:
+            event = await self._repository.add(
+                OutboxEvent(
+                    ingestion_job_id=job.id,
+                    event_type=OUTBOX_EVENT_INGESTION_REQUESTED,
+                    payload={"schema_version": 1, "ingestion_job_id": str(job.id)},
+                    status=OUTBOX_STATUS_PENDING,
+                    max_attempts=OUTBOX_DEFAULT_MAX_ATTEMPTS,
+                    manual_retry_count=1,
+                )
+            )
+        else:
+            locked_event = await self._repository.get_outbox_event_by_id(
+                event.id,
+                for_update=True,
+            )
+            if locked_event is None:
+                raise NotFoundError("ingestion dispatch event was not found")
+            event = locked_event
+            event.status = OUTBOX_STATUS_PENDING
+            event.attempt_count = 0
+            event.manual_retry_count += 1
+            event.available_at = datetime.now(UTC)
+            event.last_error = None
+            event.published_at = None
+            event.failed_at = None
+            event.lease_owner = None
+            event.lease_expires_at = None
+
+        job.status = INGESTION_JOB_STATUS_AWAITING_PIPELINE
+        job.progress = 0
+        job.retry_count = 0
+        job.manual_retry_count += 1
+        job.error_code = None
+        job.error_message = None
+        job.error_detail = None
+        job.started_at = None
+        job.completed_at = None
+        job.lease_owner = None
+        job.lease_expires_at = None
+        version.status = DOCUMENT_VERSION_STATUS_AWAITING_PIPELINE
+        version.error_code = None
+        version.error_message = None
+        version.warnings = None
+        version.completed_at = None
+        self._audit_event(
+            "rag.ingestion.retried",
+            "ingestion_job",
+            job.id,
+            detail={
+                "manual_retry_count": job.manual_retry_count,
+                "document_version_id": str(version.id),
+            },
+        )
+        await self._commit("unable to retry ingestion job")
+        return job, event
+
     async def retry_ingestion_dispatch(self, job_id: UUID) -> OutboxEvent:
         job = await self.get_ingestion_job(job_id)
+        if job.status != INGESTION_JOB_STATUS_AWAITING_PIPELINE:
+            raise BusinessRuleError(
+                "dispatch can only be retried for an awaiting ingestion job"
+            )
         event = await self._repository.get_outbox_event(
             ingestion_job_id=job.id,
             event_type=OUTBOX_EVENT_INGESTION_REQUESTED,

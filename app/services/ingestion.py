@@ -32,7 +32,8 @@ from app.rag.constants import (
     INGESTION_JOB_STATUS_PROCESSING,
 )
 from app.rag.embeddings.dashscope import EmbeddingProviderFailure
-from app.rag.loaders.text import TextParsingError, parse_text_document
+from app.rag.loaders.base import DocumentParsingError
+from app.rag.loaders.document import parse_document
 from app.rag.splitters.deterministic import (
     DETERMINISTIC_CHUNKER_VERSION,
     ChunkingError,
@@ -103,7 +104,7 @@ class IngestionPipeline:
                         retryable=False,
                     )
                 )
-            parsed = parse_text_document(source, work.mime_type)
+            parsed = parse_document(source, work.mime_type, self._settings)
             chunks = split_parsed_text(
                 parsed,
                 max_tokens=self._settings.chunk_max_tokens,
@@ -140,13 +141,13 @@ class IngestionPipeline:
         except _PermanentPipelineError as exc:
             await self._record_failure(work, exc.failure)
             return "failed"
-        except (TextParsingError, ChunkingError) as exc:
+        except (DocumentParsingError, ChunkingError) as exc:
             await self._record_failure(
                 work,
                 PipelineFailure(
                     code=(
-                        "unsupported_document_format"
-                        if isinstance(exc, TextParsingError)
+                        "document_parsing_failed"
+                        if isinstance(exc, DocumentParsingError)
                         else "document_chunking_failed"
                     ),
                     message=str(exc),
@@ -460,11 +461,11 @@ class IngestionPipeline:
                         chunk_index=chunk.chunk_index,
                         content=chunk.content,
                         content_hash=chunk.content_hash,
-                        page_number=None,
+                        page_number=chunk.page_number,
                         section_path=chunk.section_path,
-                        sheet_name=None,
-                        row_start=None,
-                        row_end=None,
+                        sheet_name=chunk.sheet_name,
+                        row_start=chunk.row_start,
+                        row_end=chunk.row_end,
                         char_start=chunk.char_start,
                         char_end=chunk.char_end,
                         metadata_json=chunk.metadata,
