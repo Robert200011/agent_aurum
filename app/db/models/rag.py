@@ -272,6 +272,10 @@ class IngestionJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "retry_count >= 0 AND max_retries >= 0 AND retry_count <= max_retries",
             name="ingestion_job_retry_count_valid",
         ),
+        CheckConstraint(
+            "manual_retry_count >= 0",
+            name="ingestion_job_manual_retry_count_valid",
+        ),
         Index("ix_ingestion_jobs_status_lease", "status", "lease_expires_at"),
         Index("ix_ingestion_jobs_document_version", "document_id", "document_version_id"),
         {"schema": RAG_SCHEMA},
@@ -284,6 +288,7 @@ class IngestionJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_retries: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    manual_retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     lease_owner: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

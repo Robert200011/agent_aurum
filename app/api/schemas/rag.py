@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -141,6 +141,51 @@ class ProjectKnowledgeBaseResponse(BaseModel):
     created_at: datetime
 
 
+class RetrievalRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2_000)
+    limit: int = Field(default=10, ge=1, le=50)
+    min_score: float | None = Field(default=None, ge=-1.0, le=1.0)
+
+    @field_validator("query")
+    @classmethod
+    def normalize_query(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("query must contain non-whitespace characters")
+        return normalized
+
+
+class RetrievedChunkResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    chunk_id: UUID
+    document_id: UUID
+    document_version_id: UUID
+    knowledge_base_id: UUID
+    content: str
+    title: str
+    page_number: int | None
+    section_path: str | None
+    sheet_name: str | None
+    row_start: int | None
+    row_end: int | None
+    char_start: int | None
+    char_end: int | None
+    metadata: dict[str, Any]
+    score: float
+    retrieval_source: str
+
+
+class RetrievalResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    knowledge_base_id: UUID
+    query: str
+    embedding_model: str
+    latency_ms: int
+    items: list[RetrievedChunkResponse]
+
+
 class DocumentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -197,10 +242,18 @@ class IngestionJobResponse(BaseModel):
     progress: int
     retry_count: int
     max_retries: int
+    manual_retry_count: int
     error_code: str | None
     error_message: str | None
+    error_detail: dict[str, Any] | None
+    started_at: datetime | None
+    completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class IngestionJobListResponse(BaseModel):
+    items: list[IngestionJobResponse]
 
 
 class OutboxEventResponse(BaseModel):
@@ -216,6 +269,11 @@ class OutboxEventResponse(BaseModel):
     last_error: str | None
     published_at: datetime | None
     failed_at: datetime | None
+
+
+class IngestionRetryResponse(BaseModel):
+    ingestion_job: IngestionJobResponse
+    dispatch_event: OutboxEventResponse
 
 
 class DocumentUploadResponse(BaseModel):

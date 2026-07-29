@@ -2,9 +2,9 @@
 
 > 交接日期：**2026-07-27**  
 > 项目路径：`E:\agent_aurum`  
-> 工作分支：`phase-3-knowledge-base`  
+> 工作分支：`phase-3-knowledge-base-2`
 > 当前开发阶段：**阶段三：知识库管理**  
-> 当前实际进度：**第 3 步整改与验收已完成；第 4 步的 Markdown/TXT 最小入库闭环已完成，其他格式仍待扩展。**
+> 当前实际进度：**阶段三第 1～6 步功能、真实 DashScope Key 外部冒烟和管理员浏览器核心验收已完成；待最终质量门禁、整理提交和分支合并。**
 
 ## 0. 后续整改补充（2026-07-28）
 
@@ -21,7 +21,7 @@
 `/api/v1/health/ready`：心跳过期时 readiness 返回非 200，容器复验时数据库、Redis、
 MinIO 和 ingestion Worker 均为 ready。
 
-### 0.1 阶段三第 4 步首个最小闭环（2026-07-28）
+### 0.1 阶段三第 4 步入库闭环（2026-07-28）
 
 本轮已完成：
 
@@ -32,25 +32,90 @@ MinIO 和 ingestion Worker 均为 ready。
 - 1024 维 pgvector 写入、cosine 检索及 HNSW 索引迁移 `20260728_0007`；
 - 带租约的 Worker 流水线、解析产物分离存储、进度、失败摘要、有限重试和幂等消费；
 - `DocumentVersion`、Chunk、向量及 `Document.current_published_version_id` 的事务性原子发布；
-- 使用真实 PostgreSQL/pgvector 和固定假向量完成端到端集成验收。
+- 使用真实 PostgreSQL/pgvector 和固定假向量完成端到端集成验收；
+- PDF 按页受限提取并记录 `page_number`，加密文件、超页数和无可提取文本文件安全失败；
+- DOCX 使用禁用 DTD、实体和外部引用的 OpenXML 解析，保留标题章节路径与表格行文本；
+- CSV 使用 UTF-8 严格解析并记录物理行范围，XLSX 只读取缓存单元格值并记录工作表和行范围；
+- 分块器按 PDF 页和 XLSX 工作表建立硬边界，防止 Chunk 跨来源分区后丢失引用精度；
+- 增加提取字符数、表格列数、工作表数和单元格字符数限制，并接入 Compose 环境配置。
 
-当前明确未完成：
+### 0.2 阶段三第 5 步检索、进度与人工重试 API（2026-07-28）
 
-- PDF、DOCX、CSV、XLSX 的受限解析和各自来源定位；
-- 使用真实 DashScope Key 的外部 Embedding 冒烟（当前 `.env` 未配置该密钥）；
-- 阶段三第 5 步的检索、任务进度与人工重试 API；
-- 阶段三第 6 步的管理员知识库前端。
+本轮已完成：
+
+- `POST /api/v1/admin/knowledge-bases/{knowledge_base_id}/retrieve`：对查询文本使用
+  DashScope query 类型 Embedding，在单个已发布知识库中执行 pgvector cosine Dense 检索；
+- 检索层强制过滤已发布知识库、有效项目作用域、当前已发布文档版本、启用且未删除文档；
+- 返回 Chunk 正文、文档标题、页码、章节、工作表、行范围、字符偏移、分数和检索来源；
+- 成功检索写入 `RetrievalLog`，记录操作者、查询、结果数、耗时、最高分和模型信息；
+- `GET /api/v1/admin/documents/{document_id}/ingestion-jobs`：按文档返回任务历史；
+- 任务详情补充自动/人工重试次数、错误详情、开始时间和完成时间；
+- `POST /api/v1/admin/ingestion-jobs/{job_id}/retry`：仅允许管理员重试失败的最新版本，
+  原子重置 Job/Version 并重新入队 Outbox；
+- 保留 `retry-dispatch` 处理单纯的消息投递失败，避免与流水线执行失败混用；
+- 人工重试默认最多 5 次，迁移 `20260728_0008` 增加数据库持久化计数与非负约束；
+- 真实 PostgreSQL/pgvector 临时验收覆盖检索、日志、任务历史、重试、重复重试拒绝，
+  验收数据已清理。
+
+### 0.3 阶段三第 6 步管理员知识库前端（2026-07-28）
+
+本轮已完成：
+
+- 增加管理员专属 `/admin/projects` 和 `/admin/knowledge-bases` 路由、侧边菜单及前端
+  `adminOnly` 路由守卫；普通用户不显示入口，后端 RBAC 仍是最终权限边界；
+- 项目创建、编辑、启停、软删除，以及唯一有效知识库作用域的操作说明和错误反馈；
+- 知识库创建、编辑、发布、终止性停用、软删除、项目绑定与安全解绑；
+- PDF、DOCX、Markdown、TXT、CSV、XLSX 文档和新版本上传，单次上传使用稳定的
+  `Idempotency-Key`，失败后在同一弹窗重试不会产生新的业务请求键；
+- 文档列表、内容哈希、启停/删除、不可变版本历史、版本元数据和预签名源文件下载；
+- 入库任务自动轮询、进度、自动/人工重试计数、失败摘要、失败任务重试，以及单纯
+  Outbox 投递失败的独立重新投递入口；
+- 已发布知识库的 Dense 检索测试，可配置返回条数和最低分数，并展示 Chunk 正文、
+  相似度、文档标题、页码、章节、工作表或行范围；
+- 桌面与移动端响应式布局，以及统一的加载、空状态、业务错误和危险操作确认。
+
+### 0.4 真实 DashScope Key 与管理员浏览器验收（2026-07-29）
+
+本轮已完成：
+
+- 运行时已配置真实 DashScope Key；任何密钥值均未写入仓库或项目文档；
+- 管理员通过浏览器创建项目和知识库，完成知识库发布、停用等生命周期操作验证；
+- 通过浏览器上传 TXT 文档及新版本，Worker 入库任务完成至 100%，当前版本原子发布，
+  旧版本正确标记为已被替代；
+- 文档 Chunk 使用 DashScope `text-embedding-v4` 生成 1024 维向量并写入 pgvector；
+- 查询“本次验收编号是什么？”时，查询文本再次通过真实 DashScope API 生成向量，
+  Dense/cosine 检索命中 `agent测试用.txt`，返回 `AURUM-RAG-0729`；
+- 该次检索返回 1 个结果，最高分 `0.6278`、耗时 `313 ms`，模型为
+  `text-embedding-v4`，对应 `RetrievalLog` 已成功持久化；
+- 修复 Axios 全局 JSON `Content-Type` 导致 `FormData` 上传被序列化为 JSON、FastAPI
+  返回 422 的问题，并增强前端请求校验错误展示；
+- 修复 Dense 检索成功后写入 `rag.retrieval_logs` 时缺少事务级租户上下文、触发
+  PostgreSQL RLS 拒绝并返回 500 的问题；检索服务现在会在访问租户表前设置当前管理员
+  用户上下文，RLS 写入及回滚式无残留验证均通过；
+- 当前数据库位于 `20260728_0008 (head)`；readiness 确认数据库、Redis、对象存储和
+  ingestion Worker 全部 ready。
+
+当前收尾事项：
+
+- 执行阶段三最终后端、前端、迁移和 Compose 质量门禁；
+- 复核 Git 变更范围，确保 `.env`、本地缓存和临时验收脚本未被提交；
+- 提交并合并 `phase-3-knowledge-base-2`，随后再进入阶段四基础 RAG 问答。
 
 最近验证结果：
 
 | 检查 | 结果 |
 |---|---|
 | Ruff | 通过 |
-| Mypy | 通过，89 个源文件 |
-| 默认 Pytest | 107 项通过，5 项集成测试按环境开关跳过 |
-| 入库流水线 PostgreSQL/pgvector 集成测试 | 1 项通过 |
-| Alembic | 已升级至 `20260728_0007`，metadata check 通过 |
-| Docker | API、Worker、Beat 正常；`/api/v1/health/ready` 返回 200 |
+| Mypy | 通过，95 个源文件 |
+| 当前本地 Pytest | 39 项通过，5 项集成测试按环境开关跳过 |
+| 四类新增格式解析样本 | PDF、DOCX、CSV、XLSX 全部通过 |
+| 入库流水线 PostgreSQL/pgvector 临时验收 | 四类新增格式全部发布成功，来源定位落库正确，验收数据已清理 |
+| 第 5 步 PostgreSQL/pgvector 临时验收 | 检索、日志、进度与人工重试全部通过，验收数据已清理 |
+| 管理员知识库前端 | TypeScript、ESLint、10 项既有前端测试和 Vite 生产构建通过 |
+| 真实 DashScope Key 入库与检索 | `text-embedding-v4` 文档/查询向量生成、pgvector 命中和来源展示通过 |
+| 检索日志 RLS 修复 | Ruff 通过，RAG 针对性测试 10 项通过，真实 RLS 写入与回滚验证通过 |
+| Alembic | 已升级至 `20260728_0008`，downgrade/upgrade 与 metadata check 通过 |
+| Docker | API、Worker、Beat 正常；`/api/v1/health/ready` 返回 ready，四项依赖均为 true |
 
 以下原始交接内容保留为 2026-07-27 时点记录。
 
@@ -354,7 +419,8 @@ API 校验
 
 - **第 5 步**：检索、进度与重试 API；
 - **第 6 步**：管理员知识库前端、上传界面、任务状态、版本历史与检索测试面板；
-- 之后才是 LangGraph、RAG 问答、SSE 和财务 Agent。
+- 第 1～6 步功能完成后，先做管理员浏览器验收和真实 Key 外部冒烟，再进入
+  LangGraph、RAG 问答、SSE 和财务 Agent。
 
 ## 7. 本地环境与依赖注意事项
 

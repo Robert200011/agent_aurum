@@ -21,7 +21,9 @@ from app.api.schemas.rag import (
     DocumentUploadResponse,
     DocumentVersionListResponse,
     DocumentVersionResponse,
+    IngestionJobListResponse,
     IngestionJobResponse,
+    IngestionRetryResponse,
     OutboxEventResponse,
 )
 from app.errors import BusinessRuleError
@@ -199,6 +201,38 @@ async def get_ingestion_job(
     _admin: AdminContextDependency,
 ) -> IngestionJobResponse:
     return IngestionJobResponse.model_validate(await service.get_ingestion_job(job_id))
+
+
+@router.get(
+    "/documents/{document_id}/ingestion-jobs",
+    response_model=IngestionJobListResponse,
+)
+async def list_ingestion_jobs(
+    document_id: UUID,
+    service: RagAdminServiceDependency,
+    _admin: AdminContextDependency,
+) -> IngestionJobListResponse:
+    jobs = await service.list_ingestion_jobs(document_id)
+    return IngestionJobListResponse(
+        items=[IngestionJobResponse.model_validate(job) for job in jobs]
+    )
+
+
+@router.post(
+    "/ingestion-jobs/{job_id}/retry",
+    response_model=IngestionRetryResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_ingestion_job(
+    job_id: UUID,
+    service: RagAdminServiceDependency,
+    _admin: AdminContextDependency,
+) -> IngestionRetryResponse:
+    job, event = await service.retry_ingestion_job(job_id)
+    return IngestionRetryResponse(
+        ingestion_job=IngestionJobResponse.model_validate(job),
+        dispatch_event=OutboxEventResponse.model_validate(event),
+    )
 
 
 @router.post(

@@ -4,8 +4,11 @@
 
 Aurum Agent 是面向个人财务、存款收支和投资知识问答的智能应用。本仓库目前完成
 “阶段一：架构和安全底座”“阶段二：个人财务数据基础”，以及覆盖前两阶段能力的
-Vue 3 前端。阶段三知识库管理正在开发，已形成 Markdown/TXT 到 pgvector 的首个
-异步入库闭环；LangGraph RAG 将在后续阶段实现。
+Vue 3 前端。阶段三知识库管理第 1～6 步功能与真实 DashScope Key 核心验收已经完成：
+PDF、DOCX、Markdown、TXT、CSV、XLSX 均已接入异步解析、确定性分块、Embedding、
+pgvector 写入和原子发布链路，管理员项目/知识库、文档版本、任务状态与重试、
+Dense 检索测试前端也已接入现有 API。当前待完成阶段三最终回归和分支合并；
+LangGraph RAG 将在阶段四实现。
 
 后端采用根目录 `app/` 包布局，不再使用 `src/aurum_agent/`。现有代码按 API、Agent、
 RAG、Finance、Provider、Database、Service、Worker、Observability 和 Security
@@ -19,7 +22,7 @@ RAG、Finance、Provider、Database、Service、Worker、Observability 和 Secur
 | 阶段二：个人财务数据基础 | 已完成 | 2026-07-24 |
 | 阶段一、二配套 Web 前端 | 已完成 | 2026-07-24 |
 | 阶段二收尾与四项安全审计整改 | 已完成 | 2026-07-24 |
-| 阶段三：知识库管理 | 进行中（第 4 步首个闭环） | — |
+| 阶段三：知识库管理 | 功能与核心验收完成（待最终回归和合并） | — |
 
 完整范围、验收结果和后续阶段见
 [总体技术方案](./aurum-agent-initial-design.md#0-项目里程碑与当前状态)。阶段三已固定使用
@@ -59,6 +62,9 @@ DashScope `text-embedding-v4`（1024 维）、MinIO、Celery 和显式项目—�
 - 财务总览、账户管理、流水筛选与维护、CSV/XLSX 流水导入；
 - 预算管理与执行进度；
 - 投资组合汇总、持仓维护、不可变买卖记录和行情快照管理；
+- 管理员专属 Agent 项目、知识库和项目作用域绑定管理；
+- 六类知识文档上传、不可变版本历史、源文件下载、任务进度轮询和失败重试；
+- 已发布知识库的 Dense 检索测试及 Chunk 来源定位展示；
 - 统一的加载、空状态、接口错误提示和人民币/美元等币种格式化。
 
 主要接口统一位于 `/api/v1/finance`：

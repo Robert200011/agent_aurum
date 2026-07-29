@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from dashscope import TextEmbedding  # type: ignore[import-untyped]
 
@@ -56,6 +56,18 @@ class DashScopeEmbeddingProvider:
         return self._dimensions
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return await self._embed(texts, text_type="document")
+
+    async def embed_query(self, query: str) -> list[float]:
+        vectors = await self._embed([query], text_type="query")
+        return vectors[0]
+
+    async def _embed(
+        self,
+        texts: Sequence[str],
+        *,
+        text_type: Literal["document", "query"],
+    ) -> list[list[float]]:
         if not texts:
             return []
         if self._api_key is None:
@@ -74,7 +86,7 @@ class DashScopeEmbeddingProvider:
                     model=self._model_name,
                     input=batch,
                     api_key=self._api_key,
-                    text_type="document",
+                    text_type=text_type,
                     dimension=self._dimensions,
                     output_type="dense",
                     timeout=self._timeout_seconds,

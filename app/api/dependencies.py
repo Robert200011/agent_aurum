@@ -21,10 +21,12 @@ from app.errors import AuthenticationError, AuthorizationError
 from app.providers.identity import SecurityStore
 from app.providers.object_storage import ObjectStorageProvider
 from app.providers.worker_health import WorkerHealthStore
+from app.rag.embeddings.dashscope import DashScopeEmbeddingProvider
 from app.security.auth import AccessTokenClaims, decode_access_token
 from app.services.auth import AuthService
 from app.services.finance import FinanceService
 from app.services.rag import RagAdminService
+from app.services.retrieval import RagRetrievalService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -115,10 +117,29 @@ def get_rag_admin_service(
         session=session,
         actor_user_id=context.user.id,
         ingestion_max_retries=settings.ingestion_max_retries,
+        ingestion_manual_retry_limit=settings.ingestion_manual_retry_limit,
     )
 
 
 RagAdminServiceDependency = Annotated[RagAdminService, Depends(get_rag_admin_service)]
+
+
+def get_rag_retrieval_service(
+    session: SessionDependency,
+    context: AdminContextDependency,
+    settings: SettingsDependency,
+) -> RagRetrievalService:
+    return RagRetrievalService(
+        session=session,
+        actor_user_id=context.user.id,
+        embedding_provider=DashScopeEmbeddingProvider(settings),
+    )
+
+
+RagRetrievalServiceDependency = Annotated[
+    RagRetrievalService,
+    Depends(get_rag_retrieval_service),
+]
 
 
 def require_admin(context: AccessContextDependency) -> AccessContext:

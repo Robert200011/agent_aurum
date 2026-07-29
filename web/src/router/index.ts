@@ -54,6 +54,18 @@ const router = createRouter({
           meta: { title: '投资组合' },
         },
         {
+          path: 'admin/projects',
+          name: 'admin-projects',
+          component: () => import('@/views/admin/AdminProjectsView.vue'),
+          meta: { title: 'Agent 项目', adminOnly: true },
+        },
+        {
+          path: 'admin/knowledge-bases',
+          name: 'admin-knowledge-bases',
+          component: () => import('@/views/admin/AdminKnowledgeBasesView.vue'),
+          meta: { title: '知识库工作台', adminOnly: true },
+        },
+        {
           path: 'change-password',
           name: 'change-password',
           component: () => import('@/views/auth/ChangePasswordView.vue'),
@@ -88,6 +100,9 @@ router.beforeEach(async (to) => {
     to.name !== 'not-found'
   ) {
     return { name: 'change-password' }
+  }
+  if (to.meta.adminOnly && !auth.isAdmin) {
+    return { name: 'dashboard' }
   }
 
   document.title = `${String(to.meta.title ?? '工作台')} · Aurum Agent`

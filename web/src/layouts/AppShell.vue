@@ -3,6 +3,8 @@ import {
   BankOutlined,
   BarChartOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
+  FolderOpenOutlined,
   LockOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
@@ -25,8 +27,9 @@ const mobileOpen = ref(false)
 const isMobile = ref(false)
 
 const selectedKeys = computed(() => {
-  const topLevel = route.path.split('/')[1]
-  return [topLevel || 'dashboard']
+  const segments = route.path.split('/').filter(Boolean)
+  if (segments[0] === 'admin' && segments[1]) return [`admin/${segments[1]}`]
+  return [segments[0] || 'dashboard']
 })
 
 const pageTitle = computed(() => String(route.meta.title ?? 'Aurum Agent'))
@@ -101,6 +104,15 @@ onBeforeUnmount(() => {
           <BarChartOutlined />
           <span>投资组合</span>
         </a-menu-item>
+        <a-menu-divider v-if="auth.isAdmin" />
+        <a-menu-item v-if="auth.isAdmin" key="admin/projects">
+          <FolderOpenOutlined />
+          <span>Agent 项目</span>
+        </a-menu-item>
+        <a-menu-item v-if="auth.isAdmin" key="admin/knowledge-bases">
+          <DatabaseOutlined />
+          <span>知识库工作台</span>
+        </a-menu-item>
       </a-menu>
       <div v-if="!collapsed" class="sider-note">
         <span>数据边界</span>
@@ -128,7 +140,16 @@ onBeforeUnmount(() => {
         <a-menu-item key="accounts"><BankOutlined />账户管理</a-menu-item>
         <a-menu-item key="transactions"><SwapOutlined />收支明细</a-menu-item>
         <a-menu-item key="budgets"><PieChartOutlined />预算管理</a-menu-item>
-        <a-menu-item key="investments"><BarChartOutlined />投资组合</a-menu-item>
+        <a-menu-item key="investments">
+          <BarChartOutlined />投资组合
+        </a-menu-item>
+        <a-menu-divider v-if="auth.isAdmin" />
+        <a-menu-item v-if="auth.isAdmin" key="admin/projects">
+          <FolderOpenOutlined />Agent 项目
+        </a-menu-item>
+        <a-menu-item v-if="auth.isAdmin" key="admin/knowledge-bases">
+          <DatabaseOutlined />知识库工作台
+        </a-menu-item>
       </a-menu>
     </a-drawer>
 
@@ -164,7 +185,9 @@ onBeforeUnmount(() => {
             <a-menu @click="handleUserMenu">
               <a-menu-item key="password"><LockOutlined />修改密码</a-menu-item>
               <a-menu-divider />
-              <a-menu-item key="logout" danger><LogoutOutlined />退出登录</a-menu-item>
+              <a-menu-item key="logout" danger>
+                <LogoutOutlined />退出登录
+              </a-menu-item>
             </a-menu>
           </template>
         </a-dropdown>

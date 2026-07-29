@@ -6,7 +6,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
 
-from app.api.dependencies import AdminContextDependency, RagAdminServiceDependency
+from app.api.dependencies import (
+    AdminContextDependency,
+    RagAdminServiceDependency,
+    RagRetrievalServiceDependency,
+)
 from app.api.schemas.rag import (
     KnowledgeBaseCreate,
     KnowledgeBaseListResponse,
@@ -14,6 +18,8 @@ from app.api.schemas.rag import (
     KnowledgeBaseUpdate,
     ProjectKnowledgeBaseCreate,
     ProjectKnowledgeBaseResponse,
+    RetrievalRequest,
+    RetrievalResponse,
 )
 
 router = APIRouter(prefix="/admin/knowledge-bases", tags=["admin-knowledge-bases"])
@@ -56,6 +62,22 @@ async def get_knowledge_base(
     _admin: AdminContextDependency,
 ) -> KnowledgeBaseResponse:
     return KnowledgeBaseResponse.model_validate(await service.get_knowledge_base(knowledge_base_id))
+
+
+@router.post("/{knowledge_base_id}/retrieve", response_model=RetrievalResponse)
+async def retrieve_knowledge_base(
+    knowledge_base_id: UUID,
+    payload: RetrievalRequest,
+    service: RagRetrievalServiceDependency,
+    _admin: AdminContextDependency,
+) -> RetrievalResponse:
+    result = await service.retrieve(
+        knowledge_base_id=knowledge_base_id,
+        query=payload.query,
+        limit=payload.limit,
+        min_score=payload.min_score,
+    )
+    return RetrievalResponse.model_validate(result)
 
 
 @router.patch("/{knowledge_base_id}", response_model=KnowledgeBaseResponse)
