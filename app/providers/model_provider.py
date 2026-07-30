@@ -18,6 +18,15 @@ class ChatModelProviderError(RuntimeError):
         self.retryable = retryable
 
 
+class RerankerProviderError(RuntimeError):
+    """检索服务可安全降级处理的重排 Provider 失败。"""
+
+    def __init__(self, code: str, *, retryable: bool) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = retryable
+
+
 @dataclass(frozen=True, slots=True)
 class ChatMessage:
     """一条与具体模型 SDK 无关的提示消息。"""
@@ -102,4 +111,10 @@ class QueryEmbeddingProvider(Protocol):
 
 
 class RerankerProvider(Protocol):
+    @property
+    def provider_name(self) -> str: ...
+
+    @property
+    def model_name(self) -> str: ...
+
     async def rerank(self, query: str, documents: Sequence[str]) -> list[float]: ...

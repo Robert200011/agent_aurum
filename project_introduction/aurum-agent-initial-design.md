@@ -15,7 +15,8 @@
 | 阶段一、二配套 Web 前端 | 已完成 | 2026-07-24 | 登录注册、应用框架、财务总览、账户、流水、预算和投资管理界面 |
 | 阶段二收尾与安全审计整改 | 已完成 | 2026-07-24 | Refresh Token Cookie、登录限流、XLSX 防护、敏感默认配置移除及回归验证 |
 | 阶段三：知识库管理 | 收尾中 | — | 第 1～6 步功能、真实 DashScope Key 冒烟和管理员浏览器核心验收完成；待最终回归和分支合并 |
-| 阶段四至阶段七 | 尚未开始 | — | RAG、财务 Agent、完整企业级加固和后续增强 |
+| 阶段四：基础 RAG 问答 | 增强中 | — | 浏览器问答 Demo、可信引用、持久化、Hybrid Retrieval 和 Reranker 已完成 |
+| 阶段五至阶段七 | 尚未开始 | — | 财务 Agent、完整企业级加固和后续增强 |
 
 阶段一稳定基线为提交 `933390a`，阶段二通过合并提交 `3bfb9b0` 进入 `master`。
 截至 2026-07-29，当前可交付范围是“阶段一 + 阶段二 + 对应 Web 前端 + 阶段三
@@ -23,8 +24,9 @@
 入库链路，管理员项目/知识库管理、文档上传与版本、任务进度与人工重试、Dense 检索
 测试前端已经与管理 API 对齐。真实 DashScope Key 下的文档 Embedding、查询 Embedding、
 pgvector 检索、来源展示和检索日志持久化已经通过浏览器核心验收；阶段四基础 RAG
-问答 Demo、可信结构化引用、会话持久化和 Hybrid Retrieval 已完成，Reranker、SSE 与
-LangGraph Postgres Checkpoint 尚待实现。
+问答 Demo、可信结构化引用、会话持久化、Hybrid Retrieval、Reranker 和 SSE 流式输出
+已完成；阶段四增强项 Hybrid Retrieval、Reranker、SSE 与加密的 LangGraph
+PostgreSQL Checkpoint 也已接入。
 
 ## 1. 项目目标
 
@@ -540,6 +542,16 @@ V1 版本建议所有 Agent 工具只读。
 - 支持 Human-in-the-loop；
 - Checkpoint 存放在独立 `agent` schema；
 - 对敏感状态启用加密。
+
+当前实现补充约束：
+
+- API 启动时由迁移账号幂等执行 Checkpointer 自带的 `setup()`；
+- 运行期使用最小权限应用账号读写 Checkpoint；
+- SSE 与非流式回答均通过同一 LangGraph 图执行，不允许流式路径绕开 Checkpoint；
+- Checkpoint channel value 使用 AES-EAX 加密，生产环境必须配置独立的
+  `AURUM_LANGGRAPH_AES_KEY`；
+- `agent_runs.detail.checkpoint_id` 关联最终恢复点，产品消息仍以 `chat` schema
+  中的业务表为准。
 
 产品会话表和 LangGraph Checkpoint 不能相互替代：
 
@@ -1119,13 +1131,13 @@ Ruff、Mypy、Alembic、Docker Compose 配置检查和前端生产构建全部�
 
 - [x] LangGraph 状态定义；
 - [x] Hybrid Retrieval；
-- [ ] Reranker；
+- [x] Reranker；
 - [x] 回答生成；
-- [ ] SSE 流式输出；
+- [x] SSE 流式输出；
 - [x] 结构化引用；
 - [x] 引用原文查看；
 - [x] 会话和消息保存；
-- [ ] LangGraph Postgres Checkpoint；
+- [x] LangGraph Postgres Checkpoint；
 - [x] 历史会话恢复。
 
 ### 阶段五：个人财务 Agent

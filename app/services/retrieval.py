@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Any
 from uuid import UUID
@@ -20,7 +21,11 @@ from app.db.models.rag import (
 from app.db.repositories.rag import RagRepository
 from app.db.session import set_tenant_context
 from app.errors import BusinessRuleError, NotFoundError, ServiceUnavailableError
-from app.providers.model_provider import QueryEmbeddingProvider
+from app.providers.model_provider import (
+    QueryEmbeddingProvider,
+    RerankerProvider,
+    RerankerProviderError,
+)
 from app.providers.pgtrigram_store import PgTrigramStoreProvider
 from app.providers.pgvector_store import PgVectorStoreProvider
 from app.providers.sparse_store import SparseStoreProvider
@@ -83,6 +88,7 @@ class RagRetrievalService:
         embedding_provider: QueryEmbeddingProvider,
         vector_store: VectorStoreProvider | None = None,
         sparse_store: SparseStoreProvider | None = None,
+        reranker_provider: RerankerProvider | None = None,
         hybrid_candidate_multiplier: int = 4,
         rrf_k: int = 60,
     ) -> None:
@@ -96,6 +102,7 @@ class RagRetrievalService:
         self._repository = RagRepository(session)
         self._vector_store = vector_store or PgVectorStoreProvider(session)
         self._sparse_store = sparse_store or PgTrigramStoreProvider(session)
+        self._reranker_provider = reranker_provider
         self._hybrid_candidate_multiplier = hybrid_candidate_multiplier
         self._rrf_k = rrf_k
 
@@ -213,19 +220,25 @@ class RagRetrievalService:
             limit=candidate_limit,
             project_id=project.id,
         )
-        hits = reciprocal_rank_fuse(
+        fused_hits = reciprocal_rank_fuse(
             dense_hits=dense_hits,
             sparse_hits=sparse_hits,
-            limit=limit,
+            limit=candidate_limit,
             rrf_k=self._rrf_k,
         )
         persisted = await self._repository.get_retrieval_chunks(
-            [hit.chunk_id for hit in hits],
+            [hit.chunk_id for hit in fused_hits],
             project_id=project.id,
         )
-        items = self._reconstruct_items(
-            hits=hits,
+        candidates = self._reconstruct_items(
+            hits=fused_hits,
             persisted=persisted,
+            min_score=None,
+        )
+        items, reranker_applied, reranker_fallback_code = await self._rerank_candidates(
+            query=query,
+            candidates=candidates,
+            limit=limit,
             min_score=min_score,
         )
 
@@ -247,7 +260,9 @@ class RagRetrievalService:
                     latency_ms=latency_ms,
                     top_score=scoped_items[0].score if scoped_items else None,
                     detail={
-                        "retrieval_source": "hybrid",
+                        "retrieval_source": (
+                            "hybrid_rerank" if reranker_applied else "hybrid"
+                        ),
                         "scope": "project",
                         "project_id": str(project.id),
                         "embedding_model": knowledge_base.embedding_model,
@@ -262,7 +277,20 @@ class RagRetrievalService:
                             hit.knowledge_base_id == knowledge_base.id
                             for hit in sparse_hits
                         ),
+                        "fusion_candidate_count": len(candidates),
                         "rrf_k": self._rrf_k,
+                        "reranker_applied": reranker_applied,
+                        "reranker_provider": (
+                            self._reranker_provider.provider_name
+                            if self._reranker_provider is not None
+                            else None
+                        ),
+                        "reranker_model": (
+                            self._reranker_provider.model_name
+                            if self._reranker_provider is not None
+                            else None
+                        ),
+                        "reranker_fallback_code": reranker_fallback_code,
                         "total_result_count": len(items),
                         "searched_knowledge_base_count": len(knowledge_bases),
                     },
@@ -276,6 +304,52 @@ class RagRetrievalService:
             embedding_model=self._embedding_provider.model_name,
             latency_ms=latency_ms,
             items=items,
+        )
+
+    async def _rerank_candidates(
+        self,
+        *,
+        query: str,
+        candidates: list[RetrievedChunk],
+        limit: int,
+        min_score: float | None,
+    ) -> tuple[list[RetrievedChunk], bool, str | None]:
+        """重排融合候选；Provider 故障时保留确定性的 RRF 结果。"""
+
+        if not candidates:
+            return [], False, None
+        if self._reranker_provider is None:
+            return _filter_and_limit(candidates, limit=limit, min_score=min_score), False, None
+        try:
+            scores = await self._reranker_provider.rerank(
+                query,
+                [candidate.content for candidate in candidates],
+            )
+        except RerankerProviderError as exc:
+            return (
+                _filter_and_limit(candidates, limit=limit, min_score=min_score),
+                False,
+                exc.code,
+            )
+        if (
+            len(scores) != len(candidates)
+            or any(not math.isfinite(score) or not 0.0 <= score <= 1.0 for score in scores)
+        ):
+            return (
+                _filter_and_limit(candidates, limit=limit, min_score=min_score),
+                False,
+                "reranker_response_invalid",
+            )
+
+        reranked = [
+            replace(candidate, score=score)
+            for candidate, score in zip(candidates, scores, strict=True)
+        ]
+        reranked.sort(key=lambda item: item.score, reverse=True)
+        return (
+            _filter_and_limit(reranked, limit=limit, min_score=min_score),
+            True,
+            None,
         )
 
     async def _embed_query(self, query: str) -> list[float]:
@@ -349,3 +423,16 @@ def _validated_query(query: str, *, limit: int, min_score: float | None) -> str:
     if min_score is not None and not -1.0 <= min_score <= 1.0:
         raise BusinessRuleError("retrieval score threshold is not valid")
     return normalized
+
+
+def _filter_and_limit(
+    items: Sequence[RetrievedChunk],
+    *,
+    limit: int,
+    min_score: float | None,
+) -> list[RetrievedChunk]:
+    return [
+        item
+        for item in items
+        if min_score is None or item.score >= min_score
+    ][:limit]

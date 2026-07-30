@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -17,11 +19,15 @@ from app.agents.state import (
     RagAnswerUpdate,
 )
 from app.errors import ServiceUnavailableError
-from app.providers.model_provider import ChatModelProvider, ChatModelProviderError
+from app.providers.model_provider import (
+    ChatCompletionResult,
+    ChatModelProvider,
+    ChatModelProviderError,
+)
 from app.rag.citations.structured import CitationValidationError, structure_citations
 from app.services.retrieval import RagRetrievalService
 
-RAG_GRAPH_VERSION = "rag-citations-v1"
+RAG_GRAPH_VERSION = "rag-citations-checkpoint-v2"
 CompiledRagAnswerGraph = CompiledStateGraph[
     RagAnswerState,
     None,
@@ -36,6 +42,7 @@ def build_rag_answer_graph(
     chat_provider: ChatModelProvider,
     context_max_characters: int,
     context_source_max_characters: int,
+    checkpointer: BaseCheckpointSaver[str] | None = None,
 ) -> CompiledRagAnswerGraph:
     """编译检索、生成和可信引用校验三个固定节点。"""
 
@@ -62,10 +69,32 @@ def build_rag_answer_graph(
                 "answer": NO_CONTEXT_ANSWER,
             }
 
+        messages = build_answer_messages(question=state["question"], context=context)
         try:
-            completion = await chat_provider.complete(
-                build_answer_messages(question=state["question"], context=context)
-            )
+            if state["response_mode"] == "stream":
+                writer = get_stream_writer()
+                parts: list[str] = []
+                model = chat_provider.model_name
+                finish_reason: str | None = None
+                request_id: str | None = None
+                usage = None
+                async for chunk in chat_provider.stream(messages):
+                    model = chunk.model
+                    finish_reason = chunk.finish_reason or finish_reason
+                    request_id = chunk.request_id or request_id
+                    usage = chunk.usage or usage
+                    if chunk.delta:
+                        parts.append(chunk.delta)
+                        writer({"type": "answer_delta", "text": chunk.delta})
+                completion = ChatCompletionResult(
+                    content="".join(parts).strip(),
+                    model=model,
+                    finish_reason=finish_reason,
+                    request_id=request_id,
+                    usage=usage,
+                )
+            else:
+                completion = await chat_provider.complete(messages)
         except ChatModelProviderError as exc:
             message = (
                 "chat model is not configured"
@@ -110,4 +139,7 @@ def build_rag_answer_graph(
     builder.add_edge("retrieve_knowledge", "generate_answer")
     builder.add_edge("generate_answer", "validate_citations")
     builder.add_edge("validate_citations", END)
-    return builder.compile(name=RAG_GRAPH_VERSION)
+    return builder.compile(
+        checkpointer=checkpointer,
+        name=RAG_GRAPH_VERSION,
+    )

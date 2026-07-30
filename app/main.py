@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sys
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from uuid import uuid4
 
 import uvicorn
@@ -12,8 +14,13 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.agents.checkpoints import (
+    checkpoint_connection_url,
+    encrypted_checkpoint_serializer,
+)
 from app.api.router import router as v1_router
 from app.chat.providers.dashscope import DashScopeChatModelProvider
 from app.config import Settings, get_settings
@@ -23,6 +30,7 @@ from app.observability.logging import configure_logging
 from app.providers.identity import RedisSecurityStore
 from app.providers.s3_object_storage import S3ObjectStorageProvider
 from app.providers.worker_health import RedisWorkerHealthStore
+from app.rag.rerankers.dashscope import DashScopeRerankerProvider
 from app.services.admin import bootstrap_admin
 
 logger = logging.getLogger(__name__)
@@ -65,12 +73,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.worker_health_store = worker_health_store
         app.state.object_storage = S3ObjectStorageProvider(app_settings)
         app.state.chat_model = DashScopeChatModelProvider(app_settings)
+        app.state.reranker = (
+            DashScopeRerankerProvider(app_settings)
+            if app_settings.rag_reranker_enabled
+            else None
+        )
         if app_settings.bootstrap_admin:
             await bootstrap_admin(get_session_factory(), app_settings)
+        serializer = encrypted_checkpoint_serializer(
+            app_settings.langgraph_aes_key_bytes
+        )
+        owner_url = checkpoint_connection_url(app_settings.migration_database_url)
+        runtime_url = checkpoint_connection_url(app_settings.database_url)
         try:
-            yield
+            async with AsyncPostgresSaver.from_conn_string(
+                owner_url,
+                serde=serializer,
+            ) as setup_saver:
+                await setup_saver.setup()
+            async with AsyncExitStack() as stack:
+                app.state.checkpointer = await stack.enter_async_context(
+                    AsyncPostgresSaver.from_conn_string(
+                        runtime_url,
+                        serde=serializer,
+                    )
+                )
+                yield
         finally:
             await app.state.chat_model.close()
+            if app.state.reranker is not None:
+                await app.state.reranker.close()
             await worker_health_store.close()
             await security_store.close()
             await get_engine().dispose()
@@ -141,6 +173,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 app = create_app()
 
 
+def windows_selector_loop_factory() -> asyncio.AbstractEventLoop:
+    """Create the event loop required by async psycopg on Windows."""
+
+    return asyncio.SelectorEventLoop()
+
+
 def run_server() -> None:
     """Start a local server when this file is executed directly."""
 
@@ -150,6 +188,11 @@ def run_server() -> None:
         host=settings.server_host,
         port=settings.direct_server_port,
         log_level=settings.log_level.lower(),
+        loop=(
+            "app.main:windows_selector_loop_factory"
+            if sys.platform == "win32"
+            else "auto"
+        ),
     )
 
 

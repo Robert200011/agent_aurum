@@ -7,6 +7,7 @@ from typing import Annotated, cast
 
 from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -19,7 +20,7 @@ from app.db.repositories.identity import (
 from app.db.session import get_db_session
 from app.errors import AuthenticationError, AuthorizationError
 from app.providers.identity import SecurityStore
-from app.providers.model_provider import ChatModelProvider
+from app.providers.model_provider import ChatModelProvider, RerankerProvider
 from app.providers.object_storage import ObjectStorageProvider
 from app.providers.worker_health import WorkerHealthStore
 from app.rag.embeddings.dashscope import DashScopeEmbeddingProvider
@@ -59,12 +60,28 @@ def get_chat_model_provider(request: Request) -> ChatModelProvider:
     return cast(ChatModelProvider, request.app.state.chat_model)
 
 
+def get_reranker_provider(request: Request) -> RerankerProvider | None:
+    return cast(RerankerProvider | None, request.app.state.reranker)
+
+
+def get_checkpoint_saver(request: Request) -> BaseCheckpointSaver[str]:
+    return cast(BaseCheckpointSaver[str], request.app.state.checkpointer)
+
+
 SecurityStoreDependency = Annotated[SecurityStore, Depends(get_security_store)]
 ObjectStorageDependency = Annotated[ObjectStorageProvider, Depends(get_object_storage)]
 WorkerHealthStoreDependency = Annotated[WorkerHealthStore, Depends(get_worker_health_store)]
 ChatModelProviderDependency = Annotated[
     ChatModelProvider,
     Depends(get_chat_model_provider),
+]
+RerankerProviderDependency = Annotated[
+    RerankerProvider | None,
+    Depends(get_reranker_provider),
+]
+CheckpointSaverDependency = Annotated[
+    BaseCheckpointSaver[str],
+    Depends(get_checkpoint_saver),
 ]
 
 
@@ -159,6 +176,7 @@ def get_project_retrieval_service(
     session: SessionDependency,
     context: AccessContextDependency,
     settings: SettingsDependency,
+    reranker_provider: RerankerProviderDependency,
 ) -> RagRetrievalService:
     """Build the normal-user retriever; project scope is enforced by the service."""
 
@@ -166,6 +184,7 @@ def get_project_retrieval_service(
         session=session,
         actor_user_id=context.user.id,
         embedding_provider=DashScopeEmbeddingProvider(settings),
+        reranker_provider=reranker_provider,
         hybrid_candidate_multiplier=settings.rag_hybrid_candidate_multiplier,
         rrf_k=settings.rag_rrf_k,
     )
@@ -180,6 +199,7 @@ ProjectRetrievalServiceDependency = Annotated[
 def get_rag_answer_service(
     retrieval_service: ProjectRetrievalServiceDependency,
     chat_provider: ChatModelProviderDependency,
+    checkpointer: CheckpointSaverDependency,
     settings: SettingsDependency,
 ) -> RagAnswerService:
     """Build the authenticated user's minimal project RAG workflow."""
@@ -187,6 +207,7 @@ def get_rag_answer_service(
     return RagAnswerService(
         retrieval_service=retrieval_service,
         chat_provider=chat_provider,
+        checkpointer=checkpointer,
         retrieval_limit=settings.rag_retrieval_limit,
         context_max_characters=settings.rag_context_max_characters,
         context_source_max_characters=settings.rag_context_source_max_characters,

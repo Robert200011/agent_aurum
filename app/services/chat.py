@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -10,6 +12,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.graph import RAG_GRAPH_VERSION
+from app.agents.state import RagAnswerCompleted, RagAnswerDelta, RagAnswerResult
 from app.chat.types import (
     AgentRunStatus,
     ConversationStatus,
@@ -50,6 +53,41 @@ class PersistedAnswer:
     message: Message
     citations: list[MessageCitation]
     run: AgentRun
+
+
+@dataclass(frozen=True, slots=True)
+class ChatStreamStarted:
+    """SSE 响应开始后可用于前端占位和诊断的持久化身份。"""
+
+    message_id: UUID
+    run_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class ChatStreamDelta:
+    """已从模型收到但尚未通过最终引用校验的文本增量。"""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ChatStreamCompleted:
+    """最终回答和可信引用均已成功持久化。"""
+
+    answer: PersistedAnswer
+
+
+type ChatAnswerStreamEvent = ChatStreamStarted | ChatStreamDelta | ChatStreamCompleted
+
+
+@dataclass(frozen=True, slots=True)
+class _StreamingRun:
+    project_id: UUID
+    thread_id: UUID
+    question: str
+    message_id: UUID
+    run_id: UUID
+    started_at: datetime
 
 
 class ChatService:
@@ -213,6 +251,7 @@ class ChatService:
             result = await self._answer_service.answer(
                 project_id=conversation.project_id,
                 question=normalized_question,
+                thread_id=conversation.id,
             )
             await self._prepare()
             assistant = await self._required_message(assistant_message.id, for_update=True)
@@ -243,7 +282,7 @@ class ChatService:
             persisted_run.latency_ms = result.latency_ms
             persisted_run.completed_at = completed_at
             persisted_run.detail = {
-                "retrieval_source": "dense",
+                "retrieval_source": "hybrid",
                 "retrieval_result_count": len(result.retrieval.items),
                 "citation_count": len(citations),
                 "embedding_model": result.retrieval.embedding_model,
@@ -254,6 +293,8 @@ class ChatService:
                 "finish_reason": (
                     result.completion.finish_reason if result.completion else "no_context"
                 ),
+                "checkpoint_id": result.checkpoint_id,
+                "checkpoint_namespace": "",
             }
             await self._session.commit()
             return PersistedAnswer(
@@ -277,6 +318,222 @@ class ChatService:
                 started_at=started_at,
             )
             raise
+
+    async def stream_answer(
+        self,
+        *,
+        conversation_id: UUID,
+        question: str,
+        trace_id: str | None,
+    ) -> AsyncIterator[ChatAnswerStreamEvent]:
+        """持久化流式运行，并仅在可信引用校验成功后提交最终回答。"""
+
+        streaming_run = await self._start_streaming_run(
+            conversation_id=conversation_id,
+            question=question,
+            trace_id=trace_id,
+        )
+        yield ChatStreamStarted(
+            message_id=streaming_run.message_id,
+            run_id=streaming_run.run_id,
+        )
+        completed = False
+        try:
+            async for event in self._answer_service.stream(
+                project_id=streaming_run.project_id,
+                question=streaming_run.question,
+                thread_id=streaming_run.thread_id,
+            ):
+                if isinstance(event, RagAnswerDelta):
+                    yield ChatStreamDelta(event.text)
+                    continue
+                if not isinstance(event, RagAnswerCompleted):
+                    raise RuntimeError("unsupported RAG stream event")
+                persisted = await self._persist_streamed_answer(
+                    streaming_run=streaming_run,
+                    result=event.result,
+                )
+                completed = True
+                yield ChatStreamCompleted(persisted)
+            if not completed:
+                raise RuntimeError("RAG stream ended without a completion event")
+        except asyncio.CancelledError:
+            if not completed:
+                await self._mark_stream_terminal(
+                    streaming_run=streaming_run,
+                    message_status=MessageStatus.CANCELLED,
+                    run_status=AgentRunStatus.CANCELLED,
+                    error_code="client_disconnected",
+                )
+            raise
+        except ApplicationError as exc:
+            if not completed:
+                await self._mark_stream_terminal(
+                    streaming_run=streaming_run,
+                    message_status=MessageStatus.FAILED,
+                    run_status=AgentRunStatus.FAILED,
+                    error_code=exc.code,
+                )
+            raise
+        except Exception:
+            if not completed:
+                await self._mark_stream_terminal(
+                    streaming_run=streaming_run,
+                    message_status=MessageStatus.FAILED,
+                    run_status=AgentRunStatus.FAILED,
+                    error_code="internal_error",
+                )
+            raise
+
+    async def _start_streaming_run(
+        self,
+        *,
+        conversation_id: UUID,
+        question: str,
+        trace_id: str | None,
+    ) -> _StreamingRun:
+        await self._prepare()
+        conversation = await self._owned_conversation(conversation_id, for_update=True)
+        if conversation.status != ConversationStatus.ACTIVE.value:
+            raise BusinessRuleError("only active conversations can receive messages")
+        if conversation.project_id is None:
+            raise BusinessRuleError("conversation project is no longer available")
+
+        normalized_question = question.strip()
+        if not normalized_question or len(normalized_question) > 2_000:
+            raise BusinessRuleError("question is not valid")
+        started_at = datetime.now(UTC)
+        user_message = Message(
+            conversation_id=conversation.id,
+            user_id=self._user_id,
+            role=MessageRole.USER.value,
+            content=normalized_question,
+            status=MessageStatus.COMPLETED.value,
+            created_at=started_at,
+        )
+        assistant_message = Message(
+            conversation_id=conversation.id,
+            user_id=self._user_id,
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            status=MessageStatus.STREAMING.value,
+            created_at=started_at + timedelta(microseconds=1),
+        )
+        await self._repository.add_all([user_message, assistant_message])
+        run = await self._repository.add(
+            AgentRun(
+                user_id=self._user_id,
+                conversation_id=conversation.id,
+                message_id=assistant_message.id,
+                thread_id=conversation.id,
+                trace_id=trace_id[:64] if trace_id else None,
+                status=AgentRunStatus.RUNNING.value,
+                graph_version=RAG_GRAPH_VERSION,
+                detail={"response_mode": "sse"},
+                started_at=started_at,
+            )
+        )
+        if conversation.title == DEFAULT_CONVERSATION_TITLE:
+            conversation.title = _automatic_title(normalized_question)
+        conversation.updated_at = started_at
+        await self._session.commit()
+        return _StreamingRun(
+            project_id=conversation.project_id,
+            thread_id=conversation.id,
+            question=normalized_question,
+            message_id=assistant_message.id,
+            run_id=run.id,
+            started_at=started_at,
+        )
+
+    async def _persist_streamed_answer(
+        self,
+        *,
+        streaming_run: _StreamingRun,
+        result: RagAnswerResult,
+    ) -> PersistedAnswer:
+        await self._prepare()
+        assistant = await self._required_message(
+            streaming_run.message_id,
+            for_update=True,
+        )
+        run = await self._required_run(streaming_run.run_id, for_update=True)
+        completed_at = datetime.now(UTC)
+        assistant.content = result.answer
+        assistant.status = MessageStatus.COMPLETED.value
+        assistant.latency_ms = result.latency_ms
+        if result.completion is not None:
+            assistant.model = result.completion.model
+            if result.completion.usage is not None:
+                assistant.prompt_tokens = result.completion.usage.prompt_tokens
+                assistant.completion_tokens = result.completion.usage.completion_tokens
+        citations = [
+            MessageCitation(
+                user_id=self._user_id,
+                message_id=assistant.id,
+                chunk_id=citation.chunk_id,
+                rank=citation.citation_id,
+                score=citation.score,
+                quote_snapshot=citation.quote,
+                source_snapshot=citation.source_snapshot(),
+            )
+            for citation in result.citations
+        ]
+        await self._repository.add_all(citations)
+        run.status = AgentRunStatus.COMPLETED.value
+        run.latency_ms = result.latency_ms
+        run.completed_at = completed_at
+        run.detail = {
+            "response_mode": "sse",
+            "retrieval_source": "hybrid",
+            "retrieval_result_count": len(result.retrieval.items),
+            "citation_count": len(citations),
+            "embedding_model": result.retrieval.embedding_model,
+            "chat_model": result.completion.model if result.completion else None,
+            "chat_request_id": (
+                result.completion.request_id if result.completion else None
+            ),
+            "finish_reason": (
+                result.completion.finish_reason if result.completion else "no_context"
+            ),
+            "checkpoint_id": result.checkpoint_id,
+            "checkpoint_namespace": "",
+        }
+        await self._session.commit()
+        return PersistedAnswer(message=assistant, citations=citations, run=run)
+
+    async def _mark_stream_terminal(
+        self,
+        *,
+        streaming_run: _StreamingRun,
+        message_status: MessageStatus,
+        run_status: AgentRunStatus,
+        error_code: str,
+    ) -> None:
+        await self._session.rollback()
+        try:
+            await self._prepare()
+            message = await self._required_message(
+                streaming_run.message_id,
+                for_update=True,
+            )
+            run = await self._required_run(streaming_run.run_id, for_update=True)
+            completed_at = datetime.now(UTC)
+            message.content = ""
+            message.status = message_status.value
+            message.latency_ms = max(
+                0,
+                round((completed_at - streaming_run.started_at).total_seconds() * 1000),
+            )
+            run.status = run_status.value
+            run.error_code = error_code[:64]
+            run.latency_ms = message.latency_ms
+            run.completed_at = completed_at
+            run.detail = {"response_mode": "sse"}
+            await self._session.commit()
+        except Exception:
+            await self._session.rollback()
+            logger.exception("unable to persist terminal streaming RAG state")
 
     async def _mark_failed(
         self,

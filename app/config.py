@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -11,7 +12,12 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.chat.constants import DASHSCOPE_CHAT_MODEL, DASHSCOPE_OPENAI_BASE_URL
-from app.rag.constants import DASHSCOPE_TEXT_EMBEDDING_V4, DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS
+from app.rag.constants import (
+    DASHSCOPE_QWEN3_RERANK,
+    DASHSCOPE_RERANK_BASE_URL,
+    DASHSCOPE_TEXT_EMBEDDING_V4,
+    DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS,
+)
 
 Environment = Literal["development", "test", "staging", "production"]
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -41,6 +47,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     database_pool_size: int = Field(default=10, ge=1, le=100)
     database_max_overflow: int = Field(default=20, ge=0, le=200)
+    langgraph_aes_key: SecretStr | None = None
 
     dashscope_api_key: SecretStr | None = None
     chat_model: str = Field(default=DASHSCOPE_CHAT_MODEL, min_length=1, max_length=128)
@@ -52,6 +59,11 @@ class Settings(BaseSettings):
     rag_retrieval_limit: int = Field(default=6, ge=1, le=20)
     rag_hybrid_candidate_multiplier: int = Field(default=4, ge=1, le=10)
     rag_rrf_k: int = Field(default=60, ge=1, le=1_000)
+    rag_reranker_enabled: bool = True
+    reranker_model: str = Field(default=DASHSCOPE_QWEN3_RERANK, min_length=1, max_length=128)
+    reranker_base_url: str = DASHSCOPE_RERANK_BASE_URL
+    reranker_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    reranker_max_retries: int = Field(default=1, ge=0, le=5)
     rag_context_max_characters: int = Field(default=24_000, ge=2_000, le=200_000)
     rag_context_source_max_characters: int = Field(default=6_000, ge=500, le=50_000)
     embedding_model: str = DASHSCOPE_TEXT_EMBEDDING_V4
@@ -159,15 +171,35 @@ class Settings(BaseSettings):
         prefix = self.api_v1_prefix.rstrip("/")
         return f"{prefix}/auth"
 
-    @field_validator("chat_model", mode="before")
+    @property
+    def langgraph_aes_key_bytes(self) -> bytes:
+        """返回 Checkpoint 专用 AES 密钥；开发环境可从 JWT 根密钥域隔离派生。"""
+
+        if self.langgraph_aes_key is not None:
+            return self.langgraph_aes_key.get_secret_value().encode()
+        return hmac.digest(
+            self.jwt_secret_key.get_secret_value().encode(),
+            b"aurum-agent/langgraph-checkpoint/v1",
+            "sha256",
+        )
+
+    @field_validator("chat_model", "reranker_model", mode="before")
     @classmethod
     def normalize_chat_model(cls, value: object) -> object:
         """模型名称去除配置文件中意外带入的首尾空白。"""
 
         return value.strip() if isinstance(value, str) else value
 
+    @field_validator("langgraph_aes_key", mode="before")
+    @classmethod
+    def normalize_optional_checkpoint_key(cls, value: object) -> object:
+        """Compose 的空值按未配置处理，使开发环境使用域隔离派生密钥。"""
+
+        return None if value == "" else value
+
     @field_validator(
         "chat_model_base_url",
+        "reranker_base_url",
         "object_storage_endpoint",
         "object_storage_external_endpoint",
     )
@@ -238,6 +270,13 @@ class Settings(BaseSettings):
             if not any(character.isdigit() for character in password):
                 raise ValueError("initial administrator password must contain a digit")
 
+        if self.langgraph_aes_key is not None:
+            checkpoint_key = self.langgraph_aes_key.get_secret_value().encode()
+            if len(checkpoint_key) not in {16, 24, 32}:
+                raise ValueError(
+                    "AURUM_LANGGRAPH_AES_KEY must be 16, 24, or 32 bytes long"
+                )
+
         if not self.is_production:
             return self
 
@@ -250,8 +289,12 @@ class Settings(BaseSettings):
             errors.append("AURUM_OBJECT_STORAGE_SECURE")
         if not self.chat_model_base_url.startswith("https://"):
             errors.append("AURUM_CHAT_MODEL_BASE_URL")
+        if self.rag_reranker_enabled and not self.reranker_base_url.startswith("https://"):
+            errors.append("AURUM_RERANKER_BASE_URL")
         if self.dashscope_api_key is None:
             errors.append("AURUM_DASHSCOPE_API_KEY")
+        if self.langgraph_aes_key is None:
+            errors.append("AURUM_LANGGRAPH_AES_KEY")
         if self.object_storage_access_key is None:
             errors.append("AURUM_OBJECT_STORAGE_ACCESS_KEY")
         if self.object_storage_secret_key is None:

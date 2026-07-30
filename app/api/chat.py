@@ -1,10 +1,16 @@
-"""普通登录用户的非流式会话和基础 RAG 问答 API。"""
+"""普通登录用户的会话、非流式与 SSE 基础 RAG 问答 API。"""
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.api.dependencies import ChatServiceDependency
 from app.api.schemas.chat import (
@@ -18,9 +24,21 @@ from app.api.schemas.chat import (
     MessageCitationResponse,
     MessageResponse,
     QuestionCreate,
+    StreamDeltaResponse,
+    StreamErrorResponse,
+    StreamStartedResponse,
     StructuredAnswerResponse,
 )
 from app.db.models.chat import Message, MessageCitation
+from app.errors import ApplicationError
+from app.services.chat import (
+    ChatStreamCompleted,
+    ChatStreamDelta,
+    ChatStreamStarted,
+    PersistedAnswer,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 project_router = APIRouter(prefix="/chat", tags=["chat"])
@@ -112,13 +130,113 @@ async def answer_conversation(
         question=payload.question,
         trace_id=_request_id(request),
     )
+    return _structured_answer_response(persisted)
+
+
+@router.post("/{conversation_id}/messages/stream")
+async def stream_answer_conversation(
+    conversation_id: UUID,
+    payload: QuestionCreate,
+    request: Request,
+    service: ChatServiceDependency,
+) -> StreamingResponse:
+    """通过 POST SSE 逐段发送回答，并在 complete 事件附带可信引用。"""
+
+    return StreamingResponse(
+        _answer_event_stream(
+            conversation_id=conversation_id,
+            question=payload.question,
+            request=request,
+            service=service,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _answer_event_stream(
+    *,
+    conversation_id: UUID,
+    question: str,
+    request: Request,
+    service: ChatServiceDependency,
+) -> AsyncIterator[str]:
+    sequence = 0
+    try:
+        async for event in service.stream_answer(
+            conversation_id=conversation_id,
+            question=question,
+            trace_id=_request_id(request),
+        ):
+            sequence += 1
+            if isinstance(event, ChatStreamStarted):
+                yield _sse(
+                    event="start",
+                    event_id=sequence,
+                    payload=StreamStartedResponse(
+                        message_id=event.message_id,
+                        run_id=event.run_id,
+                    ),
+                )
+            elif isinstance(event, ChatStreamDelta):
+                yield _sse(
+                    event="delta",
+                    event_id=sequence,
+                    payload=StreamDeltaResponse(delta=event.text),
+                )
+            elif isinstance(event, ChatStreamCompleted):
+                yield _sse(
+                    event="complete",
+                    event_id=sequence,
+                    payload=_structured_answer_response(event.answer),
+                )
+            else:
+                raise RuntimeError("unsupported chat stream event")
+    except asyncio.CancelledError:
+        raise
+    except ApplicationError as exc:
+        sequence += 1
+        yield _sse(
+            event="error",
+            event_id=sequence,
+            payload=StreamErrorResponse(
+                code=exc.code,
+                message=exc.message,
+                request_id=_request_id(request),
+            ),
+        )
+    except Exception:
+        logger.exception("unhandled streaming answer error")
+        sequence += 1
+        yield _sse(
+            event="error",
+            event_id=sequence,
+            payload=StreamErrorResponse(
+                code="internal_error",
+                message="an internal error occurred",
+                request_id=_request_id(request),
+            ),
+        )
+
+
+def _structured_answer_response(persisted: PersistedAnswer) -> StructuredAnswerResponse:
     return StructuredAnswerResponse(
         message_id=persisted.message.id,
         answer=persisted.message.content,
-        citations=[
-            _citation_response(citation) for citation in persisted.citations
-        ],
+        citations=[_citation_response(citation) for citation in persisted.citations],
     )
+
+
+def _sse(*, event: str, event_id: int, payload: BaseModel) -> str:
+    data = json.dumps(
+        payload.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"id: {event_id}\nevent: {event}\ndata: {data}\n\n"
 
 
 def _message_response(

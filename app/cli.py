@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 
 import uvicorn
 
@@ -38,4 +39,13 @@ def main() -> None:
     elif args.command == "grant-app-role":
         asyncio.run(_grant_app_role())
     elif args.command == "serve":
-        uvicorn.run("app.main:app", host=args.host, port=args.port)
+        uvicorn.run(
+            "app.main:app",
+            host=args.host,
+            port=args.port,
+            loop=(
+                "app.main:windows_selector_loop_factory"
+                if sys.platform == "win32"
+                else "auto"
+            ),
+        )
