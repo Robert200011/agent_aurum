@@ -6,7 +6,19 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +35,11 @@ from app.db.base import (
 class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "conversations"
     __table_args__ = (
+        UniqueConstraint("id", "user_id", name="conversation_user_identity"),
+        CheckConstraint(
+            "status IN ('active', 'archived')",
+            name="conversation_status_valid",
+        ),
         Index("ix_conversations_user_updated", "user_id", "updated_at"),
         {"schema": CHAT_SCHEMA},
     )
@@ -40,6 +57,27 @@ class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Message(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "messages"
     __table_args__ = (
+        UniqueConstraint("id", "user_id", name="message_user_identity"),
+        ForeignKeyConstraint(
+            ["conversation_id", "user_id"],
+            [f"{CHAT_SCHEMA}.conversations.id", f"{CHAT_SCHEMA}.conversations.user_id"],
+            name="fk_messages_conversation_user",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "role IN ('user', 'assistant')",
+            name="message_role_valid",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'streaming', 'completed', 'failed', 'cancelled')",
+            name="message_status_valid",
+        ),
+        CheckConstraint(
+            "(prompt_tokens IS NULL OR prompt_tokens >= 0) "
+            "AND (completion_tokens IS NULL OR completion_tokens >= 0) "
+            "AND (latency_ms IS NULL OR latency_ms >= 0)",
+            name="message_metrics_nonnegative",
+        ),
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
         Index("ix_messages_user_created", "user_id", "created_at"),
         {"schema": CHAT_SCHEMA},
@@ -66,6 +104,27 @@ class Message(UUIDPrimaryKeyMixin, Base):
 class MessageCitation(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "message_citations"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["message_id", "user_id"],
+            [f"{CHAT_SCHEMA}.messages.id", f"{CHAT_SCHEMA}.messages.user_id"],
+            name="fk_message_citations_message_user",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("rank > 0", name="message_citation_rank_positive"),
+        CheckConstraint(
+            "score IS NULL OR score BETWEEN -1.0 AND 1.0",
+            name="message_citation_score_valid",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(source_snapshot) = 'object' "
+            "AND source_snapshot ?& ARRAY["
+            "'document_id', 'document_version_id', 'knowledge_base_id', "
+            "'chunk_id', 'title', 'document_version', 'content_hash'"
+            "] "
+            "AND source_snapshot ->> 'chunk_id' = chunk_id::text "
+            "AND length(btrim(source_snapshot ->> 'title')) > 0",
+            name="message_citation_source_snapshot_valid",
+        ),
         Index("ix_message_citations_message_rank", "message_id", "rank", unique=True),
         {"schema": CHAT_SCHEMA},
     )
@@ -82,11 +141,35 @@ class MessageCitation(UUIDPrimaryKeyMixin, Base):
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     score: Mapped[float | None] = mapped_column(Float)
     quote_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    source_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
 
 class AgentRun(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "user_id"],
+            [f"{CHAT_SCHEMA}.conversations.id", f"{CHAT_SCHEMA}.conversations.user_id"],
+            name="fk_agent_runs_conversation_user",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["message_id", "user_id"],
+            [f"{CHAT_SCHEMA}.messages.id", f"{CHAT_SCHEMA}.messages.user_id"],
+            name="fk_agent_runs_message_user",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed', 'cancelled')",
+            name="agent_run_status_valid",
+        ),
+        CheckConstraint(
+            "latency_ms IS NULL OR latency_ms >= 0",
+            name="agent_run_latency_nonnegative",
+        ),
+        CheckConstraint(
+            "thread_id = conversation_id",
+            name="agent_run_thread_matches_conversation",
+        ),
         Index("ix_agent_runs_conversation_created", "conversation_id", "created_at"),
         {"schema": CHAT_SCHEMA},
     )
@@ -101,10 +184,14 @@ class AgentRun(UUIDPrimaryKeyMixin, Base):
         ForeignKey(f"{CHAT_SCHEMA}.messages.id", ondelete="SET NULL")
     )
     thread_id: Mapped[UUID] = mapped_column(index=True, nullable=False)
+    trace_id: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     graph_version: Mapped[str | None] = mapped_column(String(64))
+    error_code: Mapped[str | None] = mapped_column(String(64))
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

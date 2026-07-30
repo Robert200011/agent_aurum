@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.router import router as v1_router
+from app.chat.providers.dashscope import DashScopeChatModelProvider
 from app.config import Settings, get_settings
 from app.db.session import get_engine, get_session_factory
 from app.errors import ApplicationError, RateLimitError
@@ -63,11 +64,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.security_store = security_store
         app.state.worker_health_store = worker_health_store
         app.state.object_storage = S3ObjectStorageProvider(app_settings)
+        app.state.chat_model = DashScopeChatModelProvider(app_settings)
         if app_settings.bootstrap_admin:
             await bootstrap_admin(get_session_factory(), app_settings)
         try:
             yield
         finally:
+            await app.state.chat_model.close()
             await worker_health_store.close()
             await security_store.close()
             await get_engine().dispose()

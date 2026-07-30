@@ -61,6 +61,26 @@ class RagRepository:
         )
         return list((await self._session.scalars(statement)).all()), total
 
+    async def list_available_chat_projects(self) -> list[AgentProject]:
+        """Return active projects backed by at least one published knowledge base."""
+
+        published_knowledge_base = exists().where(
+            ProjectKnowledgeBase.project_id == AgentProject.id,
+            ProjectKnowledgeBase.knowledge_base_id == KnowledgeBase.id,
+            KnowledgeBase.status == "published",
+            KnowledgeBase.deleted_at.is_(None),
+        )
+        statement = (
+            select(AgentProject)
+            .where(
+                AgentProject.status == "active",
+                AgentProject.deleted_at.is_(None),
+                published_knowledge_base,
+            )
+            .order_by(AgentProject.name, AgentProject.id)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     async def get_knowledge_base(
         self,
         knowledge_base_id: UUID,
@@ -152,6 +172,34 @@ class RagRepository:
             )
             .order_by(KnowledgeBase.id)
             .with_for_update()
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def list_published_knowledge_bases_for_project(
+        self,
+        *,
+        project_id: UUID,
+    ) -> list[KnowledgeBase]:
+        """Return only searchable knowledge bases in one exact active project."""
+
+        statement = (
+            select(KnowledgeBase)
+            .join(
+                ProjectKnowledgeBase,
+                ProjectKnowledgeBase.knowledge_base_id == KnowledgeBase.id,
+            )
+            .join(
+                AgentProject,
+                AgentProject.id == ProjectKnowledgeBase.project_id,
+            )
+            .where(
+                ProjectKnowledgeBase.project_id == project_id,
+                AgentProject.status == "active",
+                AgentProject.deleted_at.is_(None),
+                KnowledgeBase.status == "published",
+                KnowledgeBase.deleted_at.is_(None),
+            )
+            .order_by(KnowledgeBase.id)
         )
         return list((await self._session.scalars(statement)).all())
 
@@ -256,26 +304,48 @@ class RagRepository:
     async def get_retrieval_chunks(
         self,
         chunk_ids: list[UUID],
-    ) -> dict[UUID, tuple[DocumentChunk, Document]]:
+        *,
+        project_id: UUID | None = None,
+    ) -> dict[UUID, tuple[DocumentChunk, Document, DocumentVersion]]:
         if not chunk_ids:
             return {}
         statement = (
-            select(DocumentChunk, Document)
+            select(DocumentChunk, Document, DocumentVersion)
             .join(
                 DocumentVersion,
                 DocumentVersion.id == DocumentChunk.document_version_id,
             )
             .join(Document, Document.id == DocumentVersion.document_id)
+            .join(
+                KnowledgeBase,
+                KnowledgeBase.id == DocumentChunk.knowledge_base_id,
+            )
             .where(
                 DocumentChunk.id.in_(chunk_ids),
+                KnowledgeBase.status == "published",
+                KnowledgeBase.deleted_at.is_(None),
                 DocumentVersion.status == "published",
                 Document.current_published_version_id == DocumentVersion.id,
                 Document.is_enabled.is_(True),
                 Document.deleted_at.is_(None),
             )
         )
+        if project_id is not None:
+            statement = statement.where(
+                exists().where(
+                    ProjectKnowledgeBase.knowledge_base_id
+                    == DocumentChunk.knowledge_base_id,
+                    ProjectKnowledgeBase.project_id == project_id,
+                    AgentProject.id == ProjectKnowledgeBase.project_id,
+                    AgentProject.status == "active",
+                    AgentProject.deleted_at.is_(None),
+                )
+            )
         rows = (await self._session.execute(statement)).all()
-        return {chunk.id: (chunk, document) for chunk, document in rows}
+        return {
+            chunk.id: (chunk, document, document_version)
+            for chunk, document, document_version in rows
+        }
 
     async def get_outbox_event(
         self, *, ingestion_job_id: UUID, event_type: str

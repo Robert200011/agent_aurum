@@ -22,8 +22,9 @@
 知识库管理第 1～6 步功能代码”。PDF、DOCX、Markdown、TXT、CSV、XLSX 均已进入统一
 入库链路，管理员项目/知识库管理、文档上传与版本、任务进度与人工重试、Dense 检索
 测试前端已经与管理 API 对齐。真实 DashScope Key 下的文档 Embedding、查询 Embedding、
-pgvector 检索、来源展示和检索日志持久化已经通过浏览器核心验收；LangGraph、生成式
-RAG 问答和 Agent 工具编排尚未开始。
+pgvector 检索、来源展示和检索日志持久化已经通过浏览器核心验收；阶段四基础 RAG
+问答 Demo、可信结构化引用、会话持久化和 Hybrid Retrieval 已完成，Reranker、SSE 与
+LangGraph Postgres Checkpoint 尚待实现。
 
 ## 1. 项目目标
 
@@ -1112,20 +1113,20 @@ Ruff、Mypy、Alembic、Docker Compose 配置检查和前端生产构建全部�
 - [x] 管理员浏览器核心验收：项目/知识库生命周期、版本入库、真实向量检索、来源展示
   和检索日志 RLS 持久化。
 
-阶段三当前只剩最终质量门禁、Git 变更整理和分支合并；阶段四功能尚未开始。
+阶段一至阶段三已经完成；阶段四基础 RAG 浏览器问答 Demo 已可运行，当前进入增强项开发。
 
 ### 阶段四：基础 RAG 问答
 
-- [ ] LangGraph 状态定义；
-- [ ] Hybrid Retrieval；
+- [x] LangGraph 状态定义；
+- [x] Hybrid Retrieval；
 - [ ] Reranker；
-- [ ] 回答生成；
+- [x] 回答生成；
 - [ ] SSE 流式输出；
-- [ ] 结构化引用；
-- [ ] 引用原文查看；
-- [ ] 会话和消息保存；
+- [x] 结构化引用；
+- [x] 引用原文查看；
+- [x] 会话和消息保存；
 - [ ] LangGraph Postgres Checkpoint；
-- [ ] 历史会话恢复。
+- [x] 历史会话恢复。
 
 ### 阶段五：个人财务 Agent
 

@@ -540,6 +540,7 @@ def upgrade() -> None:
     for schema in SCHEMAS:
         op.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     metadata.create_all(bind=connection, checkfirst=True)
     for schema, table in TENANT_TABLES:
         qualified = f'"{schema}"."{table}"'

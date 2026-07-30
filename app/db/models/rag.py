@@ -222,6 +222,12 @@ class DocumentChunk(UUIDPrimaryKeyMixin, Base):
         Index("ix_document_chunks_kb_version", "knowledge_base_id", "document_version_id"),
         Index("ix_document_chunks_kb_content_hash", "knowledge_base_id", "content_hash"),
         Index(
+            "ix_document_chunks_content_trgm",
+            "content",
+            postgresql_using="gin",
+            postgresql_ops={"content": "gin_trgm_ops"},
+        ),
+        Index(
             "ix_document_chunks_embedding_hnsw",
             "embedding",
             postgresql_using="hnsw",
