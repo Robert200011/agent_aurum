@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.chat.constants import DASHSCOPE_CHAT_MODEL, DASHSCOPE_OPENAI_BASE_URL
 from app.rag.constants import DASHSCOPE_TEXT_EMBEDDING_V4, DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS
 
 Environment = Literal["development", "test", "staging", "production"]
@@ -42,6 +43,17 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=20, ge=0, le=200)
 
     dashscope_api_key: SecretStr | None = None
+    chat_model: str = Field(default=DASHSCOPE_CHAT_MODEL, min_length=1, max_length=128)
+    chat_model_base_url: str = DASHSCOPE_OPENAI_BASE_URL
+    chat_model_timeout_seconds: int = Field(default=60, ge=1, le=600)
+    chat_model_max_tokens: int = Field(default=2_048, ge=1, le=65_536)
+    chat_model_temperature: float = Field(default=0.1, gt=0.0, lt=2.0)
+    chat_model_max_retries: int = Field(default=2, ge=0, le=10)
+    rag_retrieval_limit: int = Field(default=6, ge=1, le=20)
+    rag_hybrid_candidate_multiplier: int = Field(default=4, ge=1, le=10)
+    rag_rrf_k: int = Field(default=60, ge=1, le=1_000)
+    rag_context_max_characters: int = Field(default=24_000, ge=2_000, le=200_000)
+    rag_context_source_max_characters: int = Field(default=6_000, ge=500, le=50_000)
     embedding_model: str = DASHSCOPE_TEXT_EMBEDDING_V4
     embedding_dimensions: int = Field(default=DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS, ge=1, le=2048)
     embedding_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
@@ -147,9 +159,20 @@ class Settings(BaseSettings):
         prefix = self.api_v1_prefix.rstrip("/")
         return f"{prefix}/auth"
 
-    @field_validator("object_storage_endpoint", "object_storage_external_endpoint")
+    @field_validator("chat_model", mode="before")
     @classmethod
-    def validate_object_storage_endpoint(cls, value: str | None) -> str | None:
+    def normalize_chat_model(cls, value: object) -> object:
+        """模型名称去除配置文件中意外带入的首尾空白。"""
+
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator(
+        "chat_model_base_url",
+        "object_storage_endpoint",
+        "object_storage_external_endpoint",
+    )
+    @classmethod
+    def validate_http_endpoint(cls, value: str | None) -> str | None:
         """只接受不携带凭据、查询参数和片段的绝对 HTTP(S) endpoint。"""
 
         if value is None:
@@ -183,6 +206,8 @@ class Settings(BaseSettings):
                 "AURUM_EMBEDDING_DIMENSIONS must match the fixed "
                 f"{DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS}-dimension index"
             )
+        if self.rag_context_source_max_characters > self.rag_context_max_characters:
+            raise ValueError("RAG source context limit must not exceed total context limit")
         if self.chunk_overlap_tokens >= self.chunk_max_tokens:
             raise ValueError("chunk overlap must be smaller than the chunk token limit")
         if self.ingestion_lease_seconds < self.ingestion_task_timeout_seconds:
@@ -223,6 +248,8 @@ class Settings(BaseSettings):
             errors.append("AURUM_REFRESH_TOKEN_COOKIE_SECURE")
         if not self.object_storage_secure:
             errors.append("AURUM_OBJECT_STORAGE_SECURE")
+        if not self.chat_model_base_url.startswith("https://"):
+            errors.append("AURUM_CHAT_MODEL_BASE_URL")
         if self.dashscope_api_key is None:
             errors.append("AURUM_DASHSCOPE_API_KEY")
         if self.object_storage_access_key is None:

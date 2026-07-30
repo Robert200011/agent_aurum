@@ -6,6 +6,7 @@ from app.api import (
     accounts,
     auth,
     budgets,
+    chat,
     documents,
     holdings,
     knowledge_bases,
@@ -20,6 +21,8 @@ router = APIRouter()
 router.include_router(system.router)
 router.include_router(auth.router)
 router.include_router(users.router)
+router.include_router(chat.project_router)
+router.include_router(chat.router)
 router.include_router(accounts.router)
 router.include_router(transactions.router)
 router.include_router(budgets.router)

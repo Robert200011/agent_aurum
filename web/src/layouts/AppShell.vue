@@ -9,6 +9,7 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  MessageOutlined,
   PieChartOutlined,
   SwapOutlined,
   UserOutlined,
@@ -88,6 +89,10 @@ onBeforeUnmount(() => {
           <DashboardOutlined />
           <span>财务总览</span>
         </a-menu-item>
+        <a-menu-item key="chat">
+          <MessageOutlined />
+          <span>智能问答</span>
+        </a-menu-item>
         <a-menu-item key="accounts">
           <BankOutlined />
           <span>账户管理</span>
@@ -137,6 +142,7 @@ onBeforeUnmount(() => {
         @click="({ key }: { key: string }) => navigate(key)"
       >
         <a-menu-item key="dashboard"><DashboardOutlined />财务总览</a-menu-item>
+        <a-menu-item key="chat"><MessageOutlined />智能问答</a-menu-item>
         <a-menu-item key="accounts"><BankOutlined />账户管理</a-menu-item>
         <a-menu-item key="transactions"><SwapOutlined />收支明细</a-menu-item>
         <a-menu-item key="budgets"><PieChartOutlined />预算管理</a-menu-item>

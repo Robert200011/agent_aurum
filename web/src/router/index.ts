@@ -30,6 +30,12 @@ const router = createRouter({
           meta: { title: '财务总览' },
         },
         {
+          path: 'chat',
+          name: 'chat',
+          component: () => import('@/views/ChatView.vue'),
+          meta: { title: '智能问答' },
+        },
+        {
           path: 'accounts',
           name: 'accounts',
           component: () => import('@/views/AccountsView.vue'),

@@ -44,4 +44,5 @@ class VectorStoreProvider(Protocol):
         knowledge_base_ids: Sequence[UUID],
         vector: Sequence[float],
         limit: int,
+        project_id: UUID | None = None,
     ) -> list[VectorSearchResult]: ...

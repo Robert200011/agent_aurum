@@ -19,11 +19,14 @@ from app.db.repositories.identity import (
 from app.db.session import get_db_session
 from app.errors import AuthenticationError, AuthorizationError
 from app.providers.identity import SecurityStore
+from app.providers.model_provider import ChatModelProvider
 from app.providers.object_storage import ObjectStorageProvider
 from app.providers.worker_health import WorkerHealthStore
 from app.rag.embeddings.dashscope import DashScopeEmbeddingProvider
 from app.security.auth import AccessTokenClaims, decode_access_token
+from app.services.answering import RagAnswerService
 from app.services.auth import AuthService
+from app.services.chat import ChatService
 from app.services.finance import FinanceService
 from app.services.rag import RagAdminService
 from app.services.retrieval import RagRetrievalService
@@ -52,9 +55,17 @@ def get_worker_health_store(request: Request) -> WorkerHealthStore:
     return cast(WorkerHealthStore, request.app.state.worker_health_store)
 
 
+def get_chat_model_provider(request: Request) -> ChatModelProvider:
+    return cast(ChatModelProvider, request.app.state.chat_model)
+
+
 SecurityStoreDependency = Annotated[SecurityStore, Depends(get_security_store)]
 ObjectStorageDependency = Annotated[ObjectStorageProvider, Depends(get_object_storage)]
 WorkerHealthStoreDependency = Annotated[WorkerHealthStore, Depends(get_worker_health_store)]
+ChatModelProviderDependency = Annotated[
+    ChatModelProvider,
+    Depends(get_chat_model_provider),
+]
 
 
 def get_auth_service(
@@ -133,6 +144,8 @@ def get_rag_retrieval_service(
         session=session,
         actor_user_id=context.user.id,
         embedding_provider=DashScopeEmbeddingProvider(settings),
+        hybrid_candidate_multiplier=settings.rag_hybrid_candidate_multiplier,
+        rrf_k=settings.rag_rrf_k,
     )
 
 
@@ -140,6 +153,65 @@ RagRetrievalServiceDependency = Annotated[
     RagRetrievalService,
     Depends(get_rag_retrieval_service),
 ]
+
+
+def get_project_retrieval_service(
+    session: SessionDependency,
+    context: AccessContextDependency,
+    settings: SettingsDependency,
+) -> RagRetrievalService:
+    """Build the normal-user retriever; project scope is enforced by the service."""
+
+    return RagRetrievalService(
+        session=session,
+        actor_user_id=context.user.id,
+        embedding_provider=DashScopeEmbeddingProvider(settings),
+        hybrid_candidate_multiplier=settings.rag_hybrid_candidate_multiplier,
+        rrf_k=settings.rag_rrf_k,
+    )
+
+
+ProjectRetrievalServiceDependency = Annotated[
+    RagRetrievalService,
+    Depends(get_project_retrieval_service),
+]
+
+
+def get_rag_answer_service(
+    retrieval_service: ProjectRetrievalServiceDependency,
+    chat_provider: ChatModelProviderDependency,
+    settings: SettingsDependency,
+) -> RagAnswerService:
+    """Build the authenticated user's minimal project RAG workflow."""
+
+    return RagAnswerService(
+        retrieval_service=retrieval_service,
+        chat_provider=chat_provider,
+        retrieval_limit=settings.rag_retrieval_limit,
+        context_max_characters=settings.rag_context_max_characters,
+        context_source_max_characters=settings.rag_context_source_max_characters,
+    )
+
+
+RagAnswerServiceDependency = Annotated[
+    RagAnswerService,
+    Depends(get_rag_answer_service),
+]
+
+
+def get_chat_service(
+    session: SessionDependency,
+    context: AccessContextDependency,
+    answer_service: RagAnswerServiceDependency,
+) -> ChatService:
+    return ChatService(
+        session=session,
+        user_id=context.user.id,
+        answer_service=answer_service,
+    )
+
+
+ChatServiceDependency = Annotated[ChatService, Depends(get_chat_service)]
 
 
 def require_admin(context: AccessContextDependency) -> AccessContext:

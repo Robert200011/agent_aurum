@@ -73,12 +73,23 @@ class PgVectorStoreProvider:
         knowledge_base_ids: Sequence[UUID],
         vector: Sequence[float],
         limit: int,
+        project_id: UUID | None = None,
     ) -> list[VectorSearchResult]:
         if not knowledge_base_ids or limit <= 0:
             return []
         if len(vector) != DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS:
             raise ValueError("query vector dimensions are invalid")
         distance = DocumentChunk.embedding.cosine_distance(list(vector)).label("distance")
+        active_project_scope = exists().where(
+            ProjectKnowledgeBase.knowledge_base_id == DocumentChunk.knowledge_base_id,
+            ProjectKnowledgeBase.project_id == AgentProject.id,
+            AgentProject.status == "active",
+            AgentProject.deleted_at.is_(None),
+        )
+        if project_id is not None:
+            active_project_scope = active_project_scope.where(
+                ProjectKnowledgeBase.project_id == project_id,
+            )
         statement = (
             select(DocumentChunk, distance)
             .join(
@@ -102,13 +113,7 @@ class PgVectorStoreProvider:
                 Document.current_published_version_id == DocumentVersion.id,
                 Document.is_enabled.is_(True),
                 Document.deleted_at.is_(None),
-                exists().where(
-                    ProjectKnowledgeBase.knowledge_base_id
-                    == DocumentChunk.knowledge_base_id,
-                    ProjectKnowledgeBase.project_id == AgentProject.id,
-                    AgentProject.status == "active",
-                    AgentProject.deleted_at.is_(None),
-                ),
+                active_project_scope,
             )
             .order_by(distance, DocumentChunk.id)
             .limit(limit)
