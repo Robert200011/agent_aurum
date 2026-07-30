@@ -13,10 +13,10 @@ import {
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import AnswerContent from '@/components/chat/AnswerContent.vue'
-import { chatApi } from '@/services/chat'
+import { ChatStreamRequestError, chatApi } from '@/services/chat'
 import { apiErrorMessage } from '@/services/http'
 import type {
   ChatProject,
@@ -37,8 +37,12 @@ const conversations = ref<Conversation[]>([])
 const activeConversation = ref<ConversationDetail | null>(null)
 const question = ref('')
 const pendingQuestion = ref('')
+const streamingAnswer = ref('')
+const streamingCitations = ref<MessageCitation[]>([])
 const errorText = ref('')
 const messageScroller = ref<HTMLElement | null>(null)
+let streamAbortController: AbortController | null = null
+let scrollFrame: number | null = null
 
 const createOpen = ref(false)
 const createProjectId = ref<string>()
@@ -194,17 +198,40 @@ async function submitQuestion(): Promise<void> {
 
   question.value = ''
   pendingQuestion.value = normalized
+  streamingAnswer.value = ''
+  streamingCitations.value = []
   errorText.value = ''
   sending.value = true
+  streamAbortController = new AbortController()
   await scrollToBottom()
   try {
-    await chatApi.ask(conversation.id, normalized)
-    await Promise.all([
-      selectConversation(conversation.id),
-      refreshConversations(),
-    ])
+    await chatApi.askStream(
+      conversation.id,
+      normalized,
+      {
+        onDelta(delta) {
+          streamingAnswer.value += delta
+          scheduleScrollToBottom()
+        },
+        onComplete(answer) {
+          streamingAnswer.value = answer.answer
+          streamingCitations.value = answer.citations
+          scheduleScrollToBottom()
+        },
+      },
+      streamAbortController.signal,
+    )
+    await selectConversation(conversation.id)
+    try {
+      await refreshConversations()
+    } catch {
+      message.warning('回答已完成，但会话列表刷新失败')
+    }
   } catch (error) {
-    errorText.value = apiErrorMessage(error, '回答生成失败，请稍后重试')
+    errorText.value =
+      error instanceof ChatStreamRequestError
+        ? error.message
+        : apiErrorMessage(error, '回答生成失败，请稍后重试')
     question.value = normalized
     try {
       await selectConversation(conversation.id)
@@ -212,7 +239,10 @@ async function submitQuestion(): Promise<void> {
       // 原错误信息更有助于用户恢复，不用二次加载错误覆盖它。
     }
   } finally {
+    streamAbortController = null
     pendingQuestion.value = ''
+    streamingAnswer.value = ''
+    streamingCitations.value = []
     sending.value = false
     await scrollToBottom()
   }
@@ -241,6 +271,19 @@ async function scrollToBottom(): Promise<void> {
     messageScroller.value.scrollTop = messageScroller.value.scrollHeight
   }
 }
+
+function scheduleScrollToBottom(): void {
+  if (scrollFrame !== null) return
+  scrollFrame = window.requestAnimationFrame(() => {
+    scrollFrame = null
+    void scrollToBottom()
+  })
+}
+
+onBeforeUnmount(() => {
+  streamAbortController?.abort()
+  if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame)
+})
 
 onMounted(loadWorkspace)
 </script>
@@ -301,6 +344,7 @@ onMounted(loadWorkspace)
                   archived: conversation.status === 'archived',
                 },
               ]"
+              :disabled="sending"
               @click="selectConversation(conversation.id)"
             >
               <span class="conversation-icon"><MessageOutlined /></span>
@@ -464,7 +508,43 @@ onMounted(loadWorkspace)
                 <div class="message-avatar"><RobotOutlined /></div>
                 <div class="message-body">
                   <div class="message-meta"><strong>Aurum</strong></div>
-                  <div class="thinking-indicator">
+                  <div v-if="streamingAnswer" class="streamed-answer">
+                    <AnswerContent
+                      :answer="streamingAnswer"
+                      :citation-ids="
+                        streamingCitations.map((citation) => citation.citation_id)
+                      "
+                      @citation="
+                        (citationId) =>
+                          openCitation(streamingCitations, citationId)
+                      "
+                    />
+                    <span
+                      v-if="streamingCitations.length === 0"
+                      class="streaming-caret"
+                      aria-hidden="true"
+                    />
+                    <div
+                      v-if="streamingCitations.length"
+                      class="message-sources"
+                    >
+                      <span>参考来源</span>
+                      <button
+                        v-for="citation in streamingCitations"
+                        :key="citation.chunk_id"
+                        type="button"
+                        @click="
+                          openCitation(
+                            streamingCitations,
+                            citation.citation_id,
+                          )
+                        "
+                      >
+                        [{{ citation.citation_id }}] {{ citation.title }}
+                      </button>
+                    </div>
+                  </div>
+                  <div v-else class="thinking-indicator">
                     <i /><i /><i />
                     <span>正在检索项目知识并生成回答…</span>
                   </div>
@@ -723,6 +803,10 @@ onMounted(loadWorkspace)
 
 .conversation-item.archived {
   opacity: 0.66;
+}
+
+.conversation-item:disabled {
+  cursor: not-allowed;
 }
 
 .conversation-icon {
@@ -987,6 +1071,20 @@ onMounted(loadWorkspace)
 .thinking-indicator i:nth-child(3) {
   margin-right: 5px;
   animation-delay: 0.28s;
+}
+
+.streamed-answer {
+  position: relative;
+}
+
+.streaming-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  margin-left: 3px;
+  vertical-align: -0.15em;
+  background: var(--mint-600);
+  animation: thinking 0.85s infinite ease-in-out;
 }
 
 .composer {

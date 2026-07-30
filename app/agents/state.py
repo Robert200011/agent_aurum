@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Literal, TypedDict
 from uuid import UUID
 
 from app.providers.model_provider import ChatCompletionResult
@@ -41,6 +41,24 @@ class RagAnswerResult:
     context: ControlledRagContext
     completion: ChatCompletionResult | None
     latency_ms: int
+    checkpoint_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RagAnswerDelta:
+    """模型生成期间向上层暴露的一段纯文本增量。"""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class RagAnswerCompleted:
+    """流式生成完成并通过可信引用校验后的最终结果。"""
+
+    result: RagAnswerResult
+
+
+type RagAnswerStreamEvent = RagAnswerDelta | RagAnswerCompleted
 
 
 class RagAnswerInput(TypedDict):
@@ -50,6 +68,7 @@ class RagAnswerInput(TypedDict):
     question: str
     retrieval_limit: int
     min_score: float | None
+    response_mode: Literal["complete", "stream"]
 
 
 class RagAnswerOutput(TypedDict):
@@ -69,6 +88,7 @@ class RagAnswerState(TypedDict, total=False):
     question: str
     retrieval_limit: int
     min_score: float | None
+    response_mode: Literal["complete", "stream"]
     retrieval: ProjectRetrievalResult
     context: ControlledRagContext
     completion: ChatCompletionResult | None

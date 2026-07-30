@@ -77,3 +77,18 @@ export interface StructuredAnswer {
   data_as_of: string | null
   risk_notice: string | null
 }
+
+export interface ChatStreamStarted {
+  message_id: string
+  run_id: string
+}
+
+export interface ChatStreamDelta {
+  delta: string
+}
+
+export interface ChatStreamError {
+  code: string
+  message: string
+  request_id: string | null
+}

@@ -220,3 +220,24 @@ class StructuredAnswerResponse(BaseModel):
     citations: list[MessageCitationResponse] = Field(default_factory=list)
     data_as_of: datetime | None = None
     risk_notice: str | None = None
+
+
+class StreamStartedResponse(BaseModel):
+    """SSE start 事件携带的持久化消息与运行标识。"""
+
+    message_id: UUID
+    run_id: UUID
+
+
+class StreamDeltaResponse(BaseModel):
+    """SSE delta 事件中的模型文本增量。"""
+
+    delta: str = Field(min_length=1)
+
+
+class StreamErrorResponse(BaseModel):
+    """HTTP 响应已经开始后仍可安全传递的流式错误。"""
+
+    code: str
+    message: str
+    request_id: str | None = None

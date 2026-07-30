@@ -7,10 +7,10 @@ import axios, {
 import { tokenStorage } from '@/services/token-storage'
 import type { ApiErrorPayload, AuthTokenResponse } from '@/types/api'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+export const apiBaseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
 export const http = axios.create({
-  baseURL,
+  baseURL: apiBaseURL,
   timeout: 20_000,
   withCredentials: true,
 })
@@ -48,11 +48,49 @@ async function refreshAccessToken(): Promise<string> {
   }
 
   const response = await axios.post<AuthTokenResponse>(
-    `${baseURL}/auth/refresh`,
+    apiURL('/auth/refresh'),
     undefined,
     { timeout: 20_000, withCredentials: true },
   )
   return tokenStorage.save(response.data).accessToken
+}
+
+function apiURL(path: string): string {
+  return `${apiBaseURL.replace(/\/$/, '')}/${path.replace(/^\//, '')}`
+}
+
+export async function authorizedFetch(
+  path: string,
+  init: RequestInit,
+): Promise<Response> {
+  const execute = (): Promise<Response> => {
+    const headers = new Headers(init.headers)
+    const accessToken = tokenStorage.get()?.accessToken
+    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+    return fetch(apiURL(path), {
+      ...init,
+      headers,
+      credentials: 'include',
+    })
+  }
+
+  let response = await execute()
+  if (response.status !== 401) return response
+
+  try {
+    refreshPromise ??= refreshAccessToken().finally(() => {
+      refreshPromise = null
+    })
+    await refreshPromise
+    response = await execute()
+    return response
+  } catch (error) {
+    tokenStorage.clear()
+    if (window.location.pathname !== '/login') {
+      window.location.assign('/login?expired=1')
+    }
+    throw error
+  }
 }
 
 http.interceptors.request.use((config) => {
