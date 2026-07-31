@@ -8,12 +8,13 @@ import logging
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.api.dependencies import ChatServiceDependency
+from app.api.dependencies import ChatRunCoordinatorDependency, ChatServiceDependency
 from app.api.schemas.chat import (
+    AgentRunResponse,
     AvailableProjectListResponse,
     AvailableProjectResponse,
     ConversationCreate,
@@ -24,19 +25,23 @@ from app.api.schemas.chat import (
     MessageCitationResponse,
     MessageResponse,
     QuestionCreate,
+    RunCancellationResponse,
     StreamDeltaResponse,
     StreamErrorResponse,
     StreamStartedResponse,
+    StreamStatusResponse,
     StructuredAnswerResponse,
 )
 from app.db.models.chat import Message, MessageCitation
-from app.errors import ApplicationError
+from app.errors import ApplicationError, ConflictError
 from app.services.chat import (
     ChatStreamCompleted,
     ChatStreamDelta,
     ChatStreamStarted,
+    ChatStreamStatus,
     PersistedAnswer,
 )
+from app.services.chat_runs import BufferedChatEvent, ChatRunError
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +76,13 @@ async def list_conversations(
     service: ChatServiceDependency,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, min_length=1, max_length=100),
 ) -> ConversationListResponse:
-    result = await service.list_conversations(page=page, page_size=page_size)
+    result = await service.list_conversations(
+        page=page,
+        page_size=page_size,
+        search=search,
+    )
     return ConversationListResponse(
         items=[ConversationResponse.model_validate(item) for item in result.items],
         total=result.total,
@@ -114,6 +124,35 @@ async def update_conversation(
     return ConversationResponse.model_validate(conversation)
 
 
+@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: UUID,
+    service: ChatServiceDependency,
+    coordinator: ChatRunCoordinatorDependency,
+) -> Response:
+    await service.delete_conversation(conversation_id)
+    try:
+        await coordinator.delete_thread(conversation_id)
+    except Exception:
+        logger.exception(
+            "unable to delete conversation checkpoint thread",
+            extra={"conversation_id": conversation_id},
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/{conversation_id}/runs/latest",
+    response_model=AgentRunResponse | None,
+)
+async def get_latest_conversation_run(
+    conversation_id: UUID,
+    service: ChatServiceDependency,
+) -> AgentRunResponse | None:
+    run = await service.get_latest_run(conversation_id)
+    return AgentRunResponse.model_validate(run) if run is not None else None
+
+
 @router.post(
     "/{conversation_id}/messages",
     response_model=StructuredAnswerResponse,
@@ -139,15 +178,24 @@ async def stream_answer_conversation(
     payload: QuestionCreate,
     request: Request,
     service: ChatServiceDependency,
+    coordinator: ChatRunCoordinatorDependency,
 ) -> StreamingResponse:
-    """通过 POST SSE 逐段发送回答，并在 complete 事件附带可信引用。"""
+    """启动独立生成任务，并通过 POST SSE 订阅其可重放事件。"""
 
+    run = await service.start_streaming_run(
+        conversation_id=conversation_id,
+        question=payload.question,
+        trace_id=_request_id(request),
+    )
+    coordinator.start(user_id=service.user_id, run=run)
     return StreamingResponse(
-        _answer_event_stream(
+        _coordinated_event_stream(
             conversation_id=conversation_id,
-            question=payload.question,
+            run_id=run.run_id,
+            after_sequence=0,
             request=request,
             service=service,
+            coordinator=coordinator,
         ),
         media_type="text/event-stream",
         headers={
@@ -157,51 +205,178 @@ async def stream_answer_conversation(
     )
 
 
-async def _answer_event_stream(
-    *,
+@router.post("/{conversation_id}/messages/{message_id}/regenerate/stream")
+async def regenerate_answer(
     conversation_id: UUID,
-    question: str,
+    message_id: UUID,
     request: Request,
     service: ChatServiceDependency,
-) -> AsyncIterator[str]:
-    sequence = 0
-    try:
-        async for event in service.stream_answer(
+    coordinator: ChatRunCoordinatorDependency,
+) -> StreamingResponse:
+    run = await service.regenerate_streaming_run(
+        conversation_id=conversation_id,
+        message_id=message_id,
+        trace_id=_request_id(request),
+    )
+    coordinator.start(user_id=service.user_id, run=run)
+    return StreamingResponse(
+        _coordinated_event_stream(
             conversation_id=conversation_id,
-            question=question,
-            trace_id=_request_id(request),
-        ):
-            sequence += 1
-            if isinstance(event, ChatStreamStarted):
-                yield _sse(
-                    event="start",
-                    event_id=sequence,
-                    payload=StreamStartedResponse(
-                        message_id=event.message_id,
-                        run_id=event.run_id,
-                    ),
-                )
-            elif isinstance(event, ChatStreamDelta):
-                yield _sse(
-                    event="delta",
-                    event_id=sequence,
-                    payload=StreamDeltaResponse(delta=event.text),
-                )
-            elif isinstance(event, ChatStreamCompleted):
+            run_id=run.run_id,
+            after_sequence=0,
+            request=request,
+            service=service,
+            coordinator=coordinator,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/{conversation_id}/runs/{run_id}/stream")
+async def resume_answer_stream(
+    conversation_id: UUID,
+    run_id: UUID,
+    request: Request,
+    service: ChatServiceDependency,
+    coordinator: ChatRunCoordinatorDependency,
+    after: int = Query(default=0, ge=0),
+) -> StreamingResponse:
+    await service.get_run(conversation_id, run_id)
+    return StreamingResponse(
+        _coordinated_event_stream(
+            conversation_id=conversation_id,
+            run_id=run_id,
+            after_sequence=after,
+            request=request,
+            service=service,
+            coordinator=coordinator,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
+    "/{conversation_id}/runs/{run_id}/cancel",
+    response_model=RunCancellationResponse,
+)
+async def cancel_answer_run(
+    conversation_id: UUID,
+    run_id: UUID,
+    service: ChatServiceDependency,
+    coordinator: ChatRunCoordinatorDependency,
+) -> RunCancellationResponse:
+    run = await service.get_run(conversation_id, run_id)
+    if run.status not in {"queued", "running"}:
+        raise ConflictError("agent run is already in a terminal state")
+    cancelled = await coordinator.cancel(run_id)
+    if not cancelled:
+        await service.cancel_run(conversation_id, run_id)
+    return RunCancellationResponse(run_id=run_id, status="cancelled")
+
+
+async def _coordinated_event_stream(
+    *,
+    conversation_id: UUID,
+    run_id: UUID,
+    after_sequence: int,
+    request: Request,
+    service: ChatServiceDependency,
+    coordinator: ChatRunCoordinatorDependency,
+) -> AsyncIterator[str]:
+    last_sequence = after_sequence
+    try:
+        if not coordinator.has_run(run_id):
+            persisted = await service.persisted_answer_for_run(conversation_id, run_id)
+            if persisted is not None:
                 yield _sse(
                     event="complete",
-                    event_id=sequence,
-                    payload=_structured_answer_response(event.answer),
+                    event_id=after_sequence + 1,
+                    payload=_structured_answer_response(persisted),
                 )
+                return
+            run = await service.get_run(conversation_id, run_id)
+            orphaned = run.status in {"queued", "running"}
+            if orphaned:
+                run = await service.cancel_run(conversation_id, run_id)
+            yield _sse(
+                event="error",
+                event_id=after_sequence + 1,
+                payload=StreamErrorResponse(
+                    code=(
+                        "run_recovery_unavailable"
+                        if orphaned
+                        else run.error_code or "run_recovery_unavailable"
+                    ),
+                    message=(
+                        "the previous server process ended; please retry the answer"
+                        if orphaned
+                        else "answer generation was cancelled"
+                        if run.status == "cancelled"
+                        else "answer generation could not be recovered"
+                    ),
+                    request_id=_request_id(request),
+                ),
+            )
+            return
+
+        async for coordinated in coordinator.subscribe(
+            run_id,
+            after_sequence=after_sequence,
+        ):
+            if isinstance(coordinated, ChatRunError):
+                last_sequence += 1
+                yield _sse(
+                    event="error",
+                    event_id=last_sequence,
+                    payload=StreamErrorResponse(
+                        code=coordinated.code,
+                        message=coordinated.message,
+                        request_id=_request_id(request),
+                    ),
+                )
+                return
+            if not isinstance(coordinated, BufferedChatEvent):
+                raise RuntimeError("unsupported coordinated chat event")
+            last_sequence = coordinated.sequence
+            event = coordinated.event
+            if isinstance(event, ChatStreamStarted):
+                payload: BaseModel = StreamStartedResponse(
+                    message_id=event.message_id,
+                    run_id=event.run_id,
+                )
+                event_name = "start"
+            elif isinstance(event, ChatStreamStatus):
+                payload = StreamStatusResponse(stage=event.stage)
+                event_name = "status"
+            elif isinstance(event, ChatStreamDelta):
+                payload = StreamDeltaResponse(delta=event.text)
+                event_name = "delta"
+            elif isinstance(event, ChatStreamCompleted):
+                payload = _structured_answer_response(event.answer)
+                event_name = "complete"
             else:
                 raise RuntimeError("unsupported chat stream event")
+            yield _sse(
+                event=event_name,
+                event_id=coordinated.sequence,
+                payload=payload,
+            )
     except asyncio.CancelledError:
+        # HTTP 订阅断开不取消后台模型任务；显式停止使用 cancel 端点。
         raise
     except ApplicationError as exc:
-        sequence += 1
+        last_sequence += 1
         yield _sse(
             event="error",
-            event_id=sequence,
+            event_id=last_sequence,
             payload=StreamErrorResponse(
                 code=exc.code,
                 message=exc.message,
@@ -210,10 +385,10 @@ async def _answer_event_stream(
         )
     except Exception:
         logger.exception("unhandled streaming answer error")
-        sequence += 1
+        last_sequence += 1
         yield _sse(
             event="error",
-            event_id=sequence,
+            event_id=last_sequence,
             payload=StreamErrorResponse(
                 code="internal_error",
                 message="an internal error occurred",

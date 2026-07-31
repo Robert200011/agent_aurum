@@ -758,7 +758,6 @@ async def get_income_expense_report(
 - 用户消息；
 - 模型回答；
 - 引用；
-- 反馈；
 - Agent 运行记录；
 - 搜索和导出。
 
@@ -770,7 +769,6 @@ messages
 message_citations
 agent_runs
 agent_tool_calls
-feedback
 ```
 
 ### 15.2 LangGraph Checkpoint

@@ -8,6 +8,13 @@ export type MessageStatus =
   | 'completed'
   | 'failed'
   | 'cancelled'
+export type AgentRunStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+export type ChatGenerationStage = 'retrieving' | 'generating' | 'finalizing'
 
 export interface ChatProject {
   id: string
@@ -70,6 +77,21 @@ export interface ConversationDetail extends Conversation {
   messages: ChatMessage[]
 }
 
+export interface AgentRun {
+  id: string
+  conversation_id: string
+  message_id: string | null
+  thread_id: string
+  trace_id: string | null
+  status: AgentRunStatus
+  graph_version: string | null
+  error_code: string | null
+  latency_ms: number | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+}
+
 export interface StructuredAnswer {
   message_id: string
   answer: string
@@ -85,6 +107,10 @@ export interface ChatStreamStarted {
 
 export interface ChatStreamDelta {
   delta: string
+}
+
+export interface ChatStreamStatus {
+  stage: ChatGenerationStage
 }
 
 export interface ChatStreamError {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -235,9 +236,22 @@ class StreamDeltaResponse(BaseModel):
     delta: str = Field(min_length=1)
 
 
+class StreamStatusResponse(BaseModel):
+    """SSE status 事件中的稳定用户可见阶段。"""
+
+    stage: Literal["retrieving", "generating", "finalizing"]
+
+
 class StreamErrorResponse(BaseModel):
     """HTTP 响应已经开始后仍可安全传递的流式错误。"""
 
     code: str
     message: str
     request_id: str | None = None
+
+
+class RunCancellationResponse(BaseModel):
+    """显式停止生成后的运行标识与终态。"""
+
+    run_id: UUID
+    status: Literal["cancelled"]

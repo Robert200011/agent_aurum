@@ -32,6 +32,7 @@ from app.providers.s3_object_storage import S3ObjectStorageProvider
 from app.providers.worker_health import RedisWorkerHealthStore
 from app.rag.rerankers.dashscope import DashScopeRerankerProvider
 from app.services.admin import bootstrap_admin
+from app.services.chat_runs import ChatRunCoordinator
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         serde=serializer,
                     )
                 )
-                yield
+                app.state.chat_run_coordinator = ChatRunCoordinator(
+                    settings=app_settings,
+                    session_factory=get_session_factory(),
+                    chat_provider=app.state.chat_model,
+                    reranker_provider=app.state.reranker,
+                    checkpointer=app.state.checkpointer,
+                )
+                try:
+                    yield
+                finally:
+                    await app.state.chat_run_coordinator.close()
         finally:
             await app.state.chat_model.close()
             if app.state.reranker is not None:

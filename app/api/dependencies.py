@@ -28,6 +28,7 @@ from app.security.auth import AccessTokenClaims, decode_access_token
 from app.services.answering import RagAnswerService
 from app.services.auth import AuthService
 from app.services.chat import ChatService
+from app.services.chat_runs import ChatRunCoordinator
 from app.services.finance import FinanceService
 from app.services.rag import RagAdminService
 from app.services.retrieval import RagRetrievalService
@@ -68,6 +69,10 @@ def get_checkpoint_saver(request: Request) -> BaseCheckpointSaver[str]:
     return cast(BaseCheckpointSaver[str], request.app.state.checkpointer)
 
 
+def get_chat_run_coordinator(request: Request) -> ChatRunCoordinator:
+    return cast(ChatRunCoordinator, request.app.state.chat_run_coordinator)
+
+
 SecurityStoreDependency = Annotated[SecurityStore, Depends(get_security_store)]
 ObjectStorageDependency = Annotated[ObjectStorageProvider, Depends(get_object_storage)]
 WorkerHealthStoreDependency = Annotated[WorkerHealthStore, Depends(get_worker_health_store)]
@@ -82,6 +87,10 @@ RerankerProviderDependency = Annotated[
 CheckpointSaverDependency = Annotated[
     BaseCheckpointSaver[str],
     Depends(get_checkpoint_saver),
+]
+ChatRunCoordinatorDependency = Annotated[
+    ChatRunCoordinator,
+    Depends(get_chat_run_coordinator),
 ]
 
 

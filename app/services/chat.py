@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +25,12 @@ from app.db.models.rag import AgentProject
 from app.db.repositories.chat import ChatRepository
 from app.db.repositories.rag import RagRepository
 from app.db.session import set_tenant_context
-from app.errors import ApplicationError, BusinessRuleError, NotFoundError
+from app.errors import (
+    ApplicationError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+)
 from app.services.answering import RagAnswerService
 
 logger = logging.getLogger(__name__)
@@ -71,17 +77,27 @@ class ChatStreamDelta:
 
 
 @dataclass(frozen=True, slots=True)
+class ChatStreamStatus:
+    """可直接展示给用户的有限生成阶段，不暴露内部图节点。"""
+
+    stage: Literal["retrieving", "generating", "finalizing"]
+
+
+@dataclass(frozen=True, slots=True)
 class ChatStreamCompleted:
     """最终回答和可信引用均已成功持久化。"""
 
     answer: PersistedAnswer
 
 
-type ChatAnswerStreamEvent = ChatStreamStarted | ChatStreamDelta | ChatStreamCompleted
+type ChatAnswerStreamEvent = (
+    ChatStreamStarted | ChatStreamStatus | ChatStreamDelta | ChatStreamCompleted
+)
 
 
 @dataclass(frozen=True, slots=True)
-class _StreamingRun:
+class StreamingRun:
+    conversation_id: UUID
     project_id: UUID
     thread_id: UUID
     question: str
@@ -105,6 +121,10 @@ class ChatService:
         self._answer_service = answer_service
         self._repository = ChatRepository(session)
         self._rag_repository = RagRepository(session)
+
+    @property
+    def user_id(self) -> UUID:
+        return self._user_id
 
     async def list_available_projects(self) -> list[AgentProject]:
         """List projects that can start a normal-user RAG conversation."""
@@ -140,12 +160,15 @@ class ChatService:
         *,
         page: int,
         page_size: int,
+        search: str | None = None,
     ) -> ConversationPage:
         await self._prepare()
+        normalized_search = search.strip() if search else None
         items, total = await self._repository.list_conversations(
             user_id=self._user_id,
             page=page,
             page_size=page_size,
+            search=normalized_search or None,
         )
         return ConversationPage(
             items=items,
@@ -191,6 +214,81 @@ class ChatService:
         conversation.updated_at = datetime.now(UTC)
         await self._session.commit()
         return conversation
+
+    async def delete_conversation(self, conversation_id: UUID) -> None:
+        """永久删除当前用户会话；运行中的问答必须先显式停止。"""
+
+        await self._prepare()
+        conversation = await self._owned_conversation(conversation_id, for_update=True)
+        running = await self._repository.get_running_agent_run(
+            user_id=self._user_id,
+            conversation_id=conversation.id,
+        )
+        if running is not None:
+            raise ConflictError("stop the running answer before deleting the conversation")
+        await self._repository.delete_conversation(conversation)
+        await self._session.commit()
+
+    async def get_latest_run(self, conversation_id: UUID) -> AgentRun | None:
+        await self._prepare()
+        conversation = await self._owned_conversation(conversation_id)
+        return await self._repository.get_latest_agent_run(
+            user_id=self._user_id,
+            conversation_id=conversation.id,
+        )
+
+    async def get_run(self, conversation_id: UUID, run_id: UUID) -> AgentRun:
+        await self._prepare()
+        await self._owned_conversation(conversation_id)
+        run = await self._required_run(run_id, for_update=False)
+        if run.conversation_id != conversation_id:
+            raise NotFoundError("agent run was not found")
+        return run
+
+    async def persisted_answer_for_run(
+        self,
+        conversation_id: UUID,
+        run_id: UUID,
+    ) -> PersistedAnswer | None:
+        run = await self.get_run(conversation_id, run_id)
+        if run.status != AgentRunStatus.COMPLETED.value or run.message_id is None:
+            return None
+        message = await self._required_message(run.message_id, for_update=False)
+        citations = await self._repository.list_citations(
+            user_id=self._user_id,
+            message_ids=[message.id],
+        )
+        return PersistedAnswer(message=message, citations=citations, run=run)
+
+    async def cancel_run(self, conversation_id: UUID, run_id: UUID) -> AgentRun:
+        """把无法在当前进程定位任务的运行安全收敛为取消终态。"""
+
+        await self._prepare()
+        await self._owned_conversation(conversation_id)
+        run = await self._required_run(run_id, for_update=True)
+        if run.conversation_id != conversation_id:
+            raise NotFoundError("agent run was not found")
+        if run.status not in {
+            AgentRunStatus.QUEUED.value,
+            AgentRunStatus.RUNNING.value,
+        }:
+            raise ConflictError("agent run is already in a terminal state")
+        completed_at = datetime.now(UTC)
+        run.status = AgentRunStatus.CANCELLED.value
+        run.error_code = "user_cancelled"
+        run.completed_at = completed_at
+        if run.started_at is not None:
+            run.latency_ms = max(
+                0,
+                round((completed_at - run.started_at).total_seconds() * 1000),
+            )
+        if run.message_id is not None:
+            message = await self._required_message(run.message_id, for_update=True)
+            message.status = MessageStatus.CANCELLED.value
+            message.content = ""
+            message.latency_ms = run.latency_ms
+        await self._session.commit()
+        return run
 
     async def answer(
         self,
@@ -328,7 +426,7 @@ class ChatService:
     ) -> AsyncIterator[ChatAnswerStreamEvent]:
         """持久化流式运行，并仅在可信引用校验成功后提交最终回答。"""
 
-        streaming_run = await self._start_streaming_run(
+        streaming_run = await self.start_streaming_run(
             conversation_id=conversation_id,
             question=question,
             trace_id=trace_id,
@@ -337,18 +435,123 @@ class ChatService:
             message_id=streaming_run.message_id,
             run_id=streaming_run.run_id,
         )
+        async for event in self.execute_streaming_run(streaming_run):
+            yield event
+
+    async def start_streaming_run(
+        self,
+        *,
+        conversation_id: UUID,
+        question: str,
+        trace_id: str | None,
+    ) -> StreamingRun:
+        """创建可由独立后台任务继续执行的持久化运行。"""
+
+        return await self._start_streaming_run(
+            conversation_id=conversation_id,
+            question=question,
+            trace_id=trace_id,
+        )
+
+    async def regenerate_streaming_run(
+        self,
+        *,
+        conversation_id: UUID,
+        message_id: UUID,
+        trace_id: str | None,
+    ) -> StreamingRun:
+        """复用原助手消息重新生成，保留旧 AgentRun 作为审计记录。"""
+
+        await self._prepare()
+        conversation = await self._owned_conversation(conversation_id, for_update=True)
+        if conversation.status != ConversationStatus.ACTIVE.value:
+            raise BusinessRuleError("only active conversations can regenerate answers")
+        if conversation.project_id is None:
+            raise BusinessRuleError("conversation project is no longer available")
+        await self._ensure_no_running_run(conversation.id)
+        assistant = await self._required_message(message_id, for_update=True)
+        if (
+            assistant.conversation_id != conversation.id
+            or assistant.role != MessageRole.ASSISTANT.value
+            or assistant.status
+            not in {
+                MessageStatus.COMPLETED.value,
+                MessageStatus.FAILED.value,
+                MessageStatus.CANCELLED.value,
+            }
+        ):
+            raise BusinessRuleError("only a terminal assistant answer can be regenerated")
+        user_message = await self._repository.get_previous_user_message(
+            user_id=self._user_id,
+            conversation_id=conversation.id,
+            before=assistant.created_at,
+        )
+        if user_message is None:
+            raise BusinessRuleError("the source question for this answer is unavailable")
+
+        started_at = datetime.now(UTC)
+        await self._repository.delete_message_citations(
+            user_id=self._user_id,
+            message_id=assistant.id,
+        )
+        assistant.content = ""
+        assistant.status = MessageStatus.STREAMING.value
+        assistant.model = None
+        assistant.prompt_tokens = None
+        assistant.completion_tokens = None
+        assistant.latency_ms = None
+        run = await self._repository.add(
+            AgentRun(
+                user_id=self._user_id,
+                conversation_id=conversation.id,
+                message_id=assistant.id,
+                thread_id=conversation.id,
+                trace_id=trace_id[:64] if trace_id else None,
+                status=AgentRunStatus.RUNNING.value,
+                graph_version=RAG_GRAPH_VERSION,
+                detail={
+                    "response_mode": "sse",
+                    "operation": "regenerate",
+                },
+                started_at=started_at,
+            )
+        )
+        conversation.updated_at = started_at
+        await self._session.commit()
+        return StreamingRun(
+            conversation_id=conversation.id,
+            project_id=conversation.project_id,
+            thread_id=conversation.id,
+            question=user_message.content,
+            message_id=assistant.id,
+            run_id=run.id,
+            started_at=started_at,
+        )
+
+    async def execute_streaming_run(
+        self,
+        streaming_run: StreamingRun,
+    ) -> AsyncIterator[ChatAnswerStreamEvent]:
+        """执行已持久化运行；可安全放入与 HTTP 请求解耦的后台任务。"""
+
         completed = False
+        generation_started = False
         try:
+            yield ChatStreamStatus("retrieving")
             async for event in self._answer_service.stream(
                 project_id=streaming_run.project_id,
                 question=streaming_run.question,
                 thread_id=streaming_run.thread_id,
             ):
                 if isinstance(event, RagAnswerDelta):
+                    if not generation_started:
+                        generation_started = True
+                        yield ChatStreamStatus("generating")
                     yield ChatStreamDelta(event.text)
                     continue
                 if not isinstance(event, RagAnswerCompleted):
                     raise RuntimeError("unsupported RAG stream event")
+                yield ChatStreamStatus("finalizing")
                 persisted = await self._persist_streamed_answer(
                     streaming_run=streaming_run,
                     result=event.result,
@@ -363,7 +566,7 @@ class ChatService:
                     streaming_run=streaming_run,
                     message_status=MessageStatus.CANCELLED,
                     run_status=AgentRunStatus.CANCELLED,
-                    error_code="client_disconnected",
+                    error_code="user_cancelled",
                 )
             raise
         except ApplicationError as exc:
@@ -391,13 +594,14 @@ class ChatService:
         conversation_id: UUID,
         question: str,
         trace_id: str | None,
-    ) -> _StreamingRun:
+    ) -> StreamingRun:
         await self._prepare()
         conversation = await self._owned_conversation(conversation_id, for_update=True)
         if conversation.status != ConversationStatus.ACTIVE.value:
             raise BusinessRuleError("only active conversations can receive messages")
         if conversation.project_id is None:
             raise BusinessRuleError("conversation project is no longer available")
+        await self._ensure_no_running_run(conversation.id)
 
         normalized_question = question.strip()
         if not normalized_question or len(normalized_question) > 2_000:
@@ -429,7 +633,10 @@ class ChatService:
                 trace_id=trace_id[:64] if trace_id else None,
                 status=AgentRunStatus.RUNNING.value,
                 graph_version=RAG_GRAPH_VERSION,
-                detail={"response_mode": "sse"},
+                detail={
+                    "response_mode": "sse",
+                    "operation": "answer",
+                },
                 started_at=started_at,
             )
         )
@@ -437,7 +644,8 @@ class ChatService:
             conversation.title = _automatic_title(normalized_question)
         conversation.updated_at = started_at
         await self._session.commit()
-        return _StreamingRun(
+        return StreamingRun(
+            conversation_id=conversation.id,
             project_id=conversation.project_id,
             thread_id=conversation.id,
             question=normalized_question,
@@ -449,7 +657,7 @@ class ChatService:
     async def _persist_streamed_answer(
         self,
         *,
-        streaming_run: _StreamingRun,
+        streaming_run: StreamingRun,
         result: RagAnswerResult,
     ) -> PersistedAnswer:
         await self._prepare()
@@ -505,7 +713,7 @@ class ChatService:
     async def _mark_stream_terminal(
         self,
         *,
-        streaming_run: _StreamingRun,
+        streaming_run: StreamingRun,
         message_status: MessageStatus,
         run_status: AgentRunStatus,
         error_code: str,
@@ -565,6 +773,14 @@ class ChatService:
 
     async def _prepare(self) -> None:
         await set_tenant_context(self._session, self._user_id)
+
+    async def _ensure_no_running_run(self, conversation_id: UUID) -> None:
+        running = await self._repository.get_running_agent_run(
+            user_id=self._user_id,
+            conversation_id=conversation_id,
+        )
+        if running is not None:
+            raise ConflictError("this conversation already has a running answer")
 
     async def _owned_conversation(
         self,

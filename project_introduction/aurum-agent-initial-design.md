@@ -520,7 +520,6 @@ V1 版本建议所有 Agent 工具只读。
 - `message_citations`
 - `agent_runs`
 - `agent_tool_calls`
-- `feedback`
 
 这些表用于：
 
@@ -528,7 +527,6 @@ V1 版本建议所有 Agent 工具只读。
 - 历史消息；
 - 会话搜索；
 - 引用追踪；
-- 用户反馈；
 - 运行统计；
 - 审计；
 - 错误诊断。
@@ -552,6 +550,15 @@ V1 版本建议所有 Agent 工具只读。
   `AURUM_LANGGRAPH_AES_KEY`；
 - `agent_runs.detail.checkpoint_id` 关联最终恢复点，产品消息仍以 `chat` schema
   中的业务表为准。
+
+当前聊天体验增强约束：
+
+- SSE HTTP 订阅断开不再自动取消生成，后台运行通过独立数据库会话继续完成；
+- 前端使用 `agent_run.id` 重新订阅并重放同一次生成事件，刷新页面后可恢复展示；
+- 用户点击“停止生成”时才调用取消端点并把消息、运行记录收敛为 `cancelled`；
+- 永久删除会话时同时级联清理业务消息、引用、运行记录和对应 Checkpoint thread；
+- 当前 Demo 的事件重放协调器面向单 API 进程；跨进程、容器重启后的实时续传留待后续用
+  Redis 事件流或持久化任务队列增强，最终消息与 Checkpoint 仍会持久化保留。
 
 产品会话表和 LangGraph Checkpoint 不能相互替代：
 
@@ -1125,7 +1132,7 @@ Ruff、Mypy、Alembic、Docker Compose 配置检查和前端生产构建全部�
 - [x] 管理员浏览器核心验收：项目/知识库生命周期、版本入库、真实向量检索、来源展示
   和检索日志 RLS 持久化。
 
-阶段一至阶段三已经完成；阶段四基础 RAG 浏览器问答 Demo 已可运行，当前进入增强项开发。
+阶段一至阶段三已经完成；阶段四基础 RAG 浏览器问答 Demo 及当前规划的聊天增强项已完成。
 
 ### 阶段四：基础 RAG 问答
 
@@ -1138,7 +1145,12 @@ Ruff、Mypy、Alembic、Docker Compose 配置检查和前端生产构建全部�
 - [x] 引用原文查看；
 - [x] 会话和消息保存；
 - [x] LangGraph Postgres Checkpoint；
-- [x] 历史会话恢复。
+- [x] 历史会话恢复；
+- [x] 会话删除与会话搜索；
+- [x] 重新生成回答与失败回答重试；
+- [x] 显式停止生成；
+- [x] SSE 检索、生成和引用收尾状态展示；
+- [x] 单 API 进程内跨请求恢复运行中的生成任务。
 
 ### 阶段五：个人财务 Agent
 
