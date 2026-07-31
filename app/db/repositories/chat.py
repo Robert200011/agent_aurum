@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import TypeVar, cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.models.chat import AgentRun, Conversation, Message, MessageCitation
 
@@ -50,8 +52,24 @@ class ChatRepository:
         user_id: UUID,
         page: int,
         page_size: int,
+        search: str | None = None,
     ) -> tuple[list[Conversation], int]:
-        filters = (Conversation.user_id == user_id,)
+        filters: list[ColumnElement[bool]] = [Conversation.user_id == user_id]
+        if search:
+            pattern = f"%{search.strip()}%"
+            matching_message = exists(
+                select(Message.id).where(
+                    Message.conversation_id == Conversation.id,
+                    Message.user_id == user_id,
+                    Message.content.ilike(pattern),
+                )
+            )
+            filters.append(
+                or_(
+                    Conversation.title.ilike(pattern),
+                    matching_message,
+                )
+            )
         total = int(
             await self._session.scalar(
                 select(func.count()).select_from(Conversation).where(*filters)
@@ -130,3 +148,74 @@ class ChatRepository:
         if for_update:
             statement = statement.with_for_update()
         return cast(AgentRun | None, await self._session.scalar(statement))
+
+    async def get_latest_agent_run(
+        self,
+        *,
+        user_id: UUID,
+        conversation_id: UUID,
+    ) -> AgentRun | None:
+        statement = (
+            select(AgentRun)
+            .where(
+                AgentRun.user_id == user_id,
+                AgentRun.conversation_id == conversation_id,
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(1)
+        )
+        return cast(AgentRun | None, await self._session.scalar(statement))
+
+    async def get_running_agent_run(
+        self,
+        *,
+        user_id: UUID,
+        conversation_id: UUID,
+    ) -> AgentRun | None:
+        statement = (
+            select(AgentRun)
+            .where(
+                AgentRun.user_id == user_id,
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.status.in_(("queued", "running")),
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(1)
+        )
+        return cast(AgentRun | None, await self._session.scalar(statement))
+
+    async def get_previous_user_message(
+        self,
+        *,
+        user_id: UUID,
+        conversation_id: UUID,
+        before: datetime,
+    ) -> Message | None:
+        statement = (
+            select(Message)
+            .where(
+                Message.user_id == user_id,
+                Message.conversation_id == conversation_id,
+                Message.role == "user",
+                Message.created_at < before,
+            )
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(1)
+        )
+        return cast(Message | None, await self._session.scalar(statement))
+
+    async def delete_message_citations(
+        self,
+        *,
+        user_id: UUID,
+        message_id: UUID,
+    ) -> None:
+        await self._session.execute(
+            delete(MessageCitation).where(
+                MessageCitation.user_id == user_id,
+                MessageCitation.message_id == message_id,
+            )
+        )
+
+    async def delete_conversation(self, conversation: Conversation) -> None:
+        await self._session.delete(conversation)

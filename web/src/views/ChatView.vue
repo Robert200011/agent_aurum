@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  DeleteOutlined,
   EditOutlined,
   FileSearchOutlined,
   InboxOutlined,
@@ -7,7 +8,9 @@ import {
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
+  SearchOutlined,
   SendOutlined,
+  StopOutlined,
   UserOutlined,
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
@@ -19,6 +22,8 @@ import AnswerContent from '@/components/chat/AnswerContent.vue'
 import { ChatStreamRequestError, chatApi } from '@/services/chat'
 import { apiErrorMessage } from '@/services/http'
 import type {
+  ChatGenerationStage,
+  ChatMessage,
   ChatProject,
   Conversation,
   ConversationDetail,
@@ -35,10 +40,16 @@ const sending = ref(false)
 const projects = ref<ChatProject[]>([])
 const conversations = ref<Conversation[]>([])
 const activeConversation = ref<ConversationDetail | null>(null)
+const conversationSearch = ref('')
 const question = ref('')
 const pendingQuestion = ref('')
 const streamingAnswer = ref('')
 const streamingCitations = ref<MessageCitation[]>([])
+const streamingMessageId = ref<string | null>(null)
+const activeRunId = ref<string | null>(null)
+const generationStage = ref<ChatGenerationStage>('retrieving')
+const streamMode = ref<'new' | 'regenerate' | 'resume'>('new')
+const stopping = ref(false)
 const errorText = ref('')
 const messageScroller = ref<HTMLElement | null>(null)
 let streamAbortController: AbortController | null = null
@@ -64,6 +75,11 @@ const canAsk = computed(
     Boolean(question.value.trim()) &&
     !sending.value,
 )
+const generationStatusText = computed(() => {
+  if (generationStage.value === 'generating') return '正在生成回答'
+  if (generationStage.value === 'finalizing') return '正在校验引用并保存'
+  return '正在检索项目知识'
+})
 
 function projectName(projectId: string | null): string {
   return (
@@ -77,7 +93,7 @@ async function loadWorkspace(): Promise<void> {
   try {
     const [projectList, conversationList] = await Promise.all([
       chatApi.listProjects(),
-      chatApi.listConversations(),
+      chatApi.listConversations(conversationSearch.value),
     ])
     projects.value = projectList.items
     conversations.value = conversationList.items
@@ -93,20 +109,61 @@ async function loadWorkspace(): Promise<void> {
 }
 
 async function refreshConversations(): Promise<void> {
-  conversations.value = (await chatApi.listConversations()).items
+  conversations.value = (
+    await chatApi.listConversations(conversationSearch.value)
+  ).items
 }
 
-async function selectConversation(conversationId: string): Promise<void> {
+async function searchConversations(): Promise<void> {
+  await refreshConversations()
+  if (
+    activeConversation.value &&
+    !conversations.value.some((item) => item.id === activeConversation.value?.id)
+  ) {
+    activeConversation.value = null
+  }
+}
+
+function handleConversationSearchChange(): void {
+  if (!conversationSearch.value) void searchConversations()
+}
+
+async function selectConversation(
+  conversationId: string,
+  recover = true,
+): Promise<void> {
   if (detailLoading.value) return
   detailLoading.value = true
   errorText.value = ''
   try {
     activeConversation.value = await chatApi.getConversation(conversationId)
     await scrollToBottom()
+    if (recover && !sending.value) {
+      void recoverRunningAnswer(conversationId)
+    }
   } catch (error) {
     message.error(apiErrorMessage(error, '会话加载失败'))
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function recoverRunningAnswer(conversationId: string): Promise<void> {
+  if (sending.value || activeConversation.value?.id !== conversationId) return
+  try {
+    const run = await chatApi.latestRun(conversationId)
+    if (!run || !['queued', 'running'].includes(run.status) || !run.message_id) {
+      return
+    }
+    activeRunId.value = run.id
+    streamingMessageId.value = run.message_id
+    streamMode.value = 'resume'
+    message.info('检测到尚未完成的回答，正在恢复连接')
+    await runGeneration(conversationId, (handlers, signal) =>
+      chatApi.resumeStream(conversationId, run.id, handlers, signal),
+    )
+  } catch (error) {
+    errorText.value = apiErrorMessage(error, '运行中的回答恢复失败')
   }
 }
 
@@ -191,24 +248,66 @@ function archiveConversation(): void {
   })
 }
 
-async function submitQuestion(): Promise<void> {
-  const conversation = activeConversation.value
-  const normalized = question.value.trim()
-  if (!conversation || !normalized || sending.value) return
+function deleteConversation(): void {
+  if (!activeConversation.value) return
+  const conversationId = activeConversation.value.id
+  Modal.confirm({
+    title: '永久删除当前会话？',
+    content: '会话消息、运行记录和可信引用将一并删除，且无法恢复。',
+    okText: '永久删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      try {
+        await chatApi.deleteConversation(conversationId)
+        activeConversation.value = null
+        await refreshConversations()
+        if (conversations.value[0]) {
+          await selectConversation(conversations.value[0].id)
+        }
+        message.success('会话已删除')
+      } catch (error) {
+        message.error(apiErrorMessage(error, '会话删除失败'))
+      }
+    },
+  })
+}
 
-  question.value = ''
-  pendingQuestion.value = normalized
+type StreamRequest = (
+  handlers: {
+    onStart: (event: { message_id: string; run_id: string }) => void
+    onStatus: (event: { stage: ChatGenerationStage }) => void
+    onDelta: (delta: string) => void
+    onComplete: (answer: {
+      answer: string
+      citations: MessageCitation[]
+    }) => void
+  },
+  signal: AbortSignal,
+) => Promise<unknown>
+
+async function runGeneration(
+  conversationId: string,
+  request: StreamRequest,
+): Promise<void> {
   streamingAnswer.value = ''
   streamingCitations.value = []
+  generationStage.value = 'retrieving'
   errorText.value = ''
+  stopping.value = false
   sending.value = true
   streamAbortController = new AbortController()
   await scrollToBottom()
   try {
-    await chatApi.askStream(
-      conversation.id,
-      normalized,
+    await request(
       {
+        onStart(event) {
+          activeRunId.value = event.run_id
+          streamingMessageId.value = event.message_id
+        },
+        onStatus(event) {
+          generationStage.value = event.stage
+        },
         onDelta(delta) {
           streamingAnswer.value += delta
           scheduleScrollToBottom()
@@ -221,30 +320,81 @@ async function submitQuestion(): Promise<void> {
       },
       streamAbortController.signal,
     )
-    await selectConversation(conversation.id)
-    try {
-      await refreshConversations()
-    } catch {
-      message.warning('回答已完成，但会话列表刷新失败')
-    }
   } catch (error) {
-    errorText.value =
-      error instanceof ChatStreamRequestError
-        ? error.message
-        : apiErrorMessage(error, '回答生成失败，请稍后重试')
-    question.value = normalized
-    try {
-      await selectConversation(conversation.id)
-    } catch {
-      // 原错误信息更有助于用户恢复，不用二次加载错误覆盖它。
+    if (!stopping.value && !(error instanceof DOMException && error.name === 'AbortError')) {
+      errorText.value =
+        error instanceof ChatStreamRequestError
+          ? error.message
+          : apiErrorMessage(error, '回答生成失败，请稍后重试')
     }
   } finally {
     streamAbortController = null
     pendingQuestion.value = ''
     streamingAnswer.value = ''
     streamingCitations.value = []
+    streamingMessageId.value = null
+    activeRunId.value = null
     sending.value = false
+    const shouldRecover = !stopping.value && Boolean(errorText.value)
+    stopping.value = false
+    await selectConversation(conversationId, shouldRecover)
+    try {
+      await refreshConversations()
+    } catch {
+      message.warning('回答状态已更新，但会话列表刷新失败')
+    }
     await scrollToBottom()
+  }
+}
+
+async function submitQuestion(): Promise<void> {
+  const conversation = activeConversation.value
+  const normalized = question.value.trim()
+  if (!conversation || !normalized || sending.value) return
+
+  question.value = ''
+  pendingQuestion.value = normalized
+  streamMode.value = 'new'
+  await runGeneration(conversation.id, (handlers, signal) =>
+    chatApi.askStream(
+      conversation.id,
+      normalized,
+      handlers,
+      signal,
+    ),
+  )
+}
+
+async function regenerateAnswer(chatMessage: ChatMessage): Promise<void> {
+  const conversation = activeConversation.value
+  if (!conversation || sending.value || chatMessage.role !== 'assistant') return
+  streamMode.value = 'regenerate'
+  streamingMessageId.value = chatMessage.id
+  chatMessage.content = ''
+  chatMessage.citations = []
+  chatMessage.status = 'streaming'
+  await runGeneration(conversation.id, (handlers, signal) =>
+    chatApi.regenerateStream(
+      conversation.id,
+      chatMessage.id,
+      handlers,
+      signal,
+    ),
+  )
+}
+
+async function stopGeneration(): Promise<void> {
+  const conversationId = activeConversation.value?.id
+  const runId = activeRunId.value
+  if (!conversationId || !runId || stopping.value) return
+  stopping.value = true
+  try {
+    await chatApi.cancelRun(conversationId, runId)
+    streamAbortController?.abort()
+    message.success('已停止生成')
+  } catch (error) {
+    stopping.value = false
+    message.error(apiErrorMessage(error, '停止生成失败'))
   }
 }
 
@@ -330,6 +480,17 @@ onMounted(loadWorkspace)
             <ReloadOutlined />
           </a-button>
         </div>
+        <div class="conversation-search">
+          <a-input
+            v-model:value="conversationSearch"
+            allow-clear
+            placeholder="搜索标题或历史消息"
+            @press-enter="searchConversations"
+            @change="handleConversationSearchChange"
+          >
+            <template #prefix><SearchOutlined /></template>
+          </a-input>
+        </div>
 
         <a-skeleton :loading="loading" active :paragraph="{ rows: 5 }">
           <div v-if="conversations.length" class="conversation-list">
@@ -410,9 +571,21 @@ onMounted(loadWorkspace)
                 <a-button
                   type="text"
                   aria-label="归档会话"
+                  :disabled="sending"
                   @click="archiveConversation"
                 >
                   <InboxOutlined />
+                </a-button>
+              </a-tooltip>
+              <a-tooltip title="永久删除">
+                <a-button
+                  type="text"
+                  danger
+                  aria-label="删除会话"
+                  :disabled="sending"
+                  @click="deleteConversation"
+                >
+                  <DeleteOutlined />
                 </a-button>
               </a-tooltip>
             </div>
@@ -453,11 +626,46 @@ onMounted(loadWorkspace)
                 </div>
                 <div
                   v-if="
-                    chatMessage.status === 'failed' && !chatMessage.content
+                    chatMessage.role === 'assistant' &&
+                      streamingMessageId === chatMessage.id &&
+                      sending
+                  "
+                  class="streamed-answer"
+                >
+                  <AnswerContent
+                    v-if="streamingAnswer"
+                    :answer="streamingAnswer"
+                    :citation-ids="
+                      streamingCitations.map((citation) => citation.citation_id)
+                    "
+                    @citation="
+                      (citationId) =>
+                        openCitation(streamingCitations, citationId)
+                    "
+                  />
+                  <div v-else class="thinking-indicator">
+                    <i /><i /><i />
+                    <span>{{ generationStatusText }}…</span>
+                  </div>
+                  <span
+                    v-if="streamingAnswer && !streamingCitations.length"
+                    class="streaming-caret"
+                    aria-hidden="true"
+                  />
+                </div>
+                <div
+                  v-else-if="
+                    chatMessage.role === 'assistant' &&
+                      ['failed', 'cancelled'].includes(chatMessage.status) &&
+                      !chatMessage.content
                   "
                   class="failed-answer"
                 >
-                  本次回答生成失败，可重新提交问题。
+                  {{
+                    chatMessage.status === 'cancelled'
+                      ? '本次回答已停止。'
+                      : '本次回答生成失败。'
+                  }}
                 </div>
                 <AnswerContent
                   v-else-if="chatMessage.role === 'assistant'"
@@ -474,7 +682,8 @@ onMounted(loadWorkspace)
                 <div
                   v-if="
                     chatMessage.role === 'assistant' &&
-                      chatMessage.citations.length
+                      chatMessage.citations.length &&
+                      streamingMessageId !== chatMessage.id
                   "
                   class="message-sources"
                 >
@@ -493,10 +702,34 @@ onMounted(loadWorkspace)
                     [{{ citation.citation_id }}] {{ citation.title }}
                   </button>
                 </div>
+                <div
+                  v-if="
+                    chatMessage.role === 'assistant' &&
+                      ['completed', 'failed', 'cancelled'].includes(
+                        chatMessage.status,
+                      ) &&
+                      activeConversation.status === 'active' &&
+                      !sending
+                  "
+                  class="message-actions"
+                >
+                  <a-button
+                    type="link"
+                    size="small"
+                    @click="regenerateAnswer(chatMessage)"
+                  >
+                    <ReloadOutlined />
+                    {{
+                      chatMessage.status === 'completed'
+                        ? '重新生成'
+                        : '重试回答'
+                    }}
+                  </a-button>
+                </div>
               </div>
             </article>
 
-            <template v-if="sending">
+            <template v-if="sending && streamMode === 'new'">
               <article class="message-row is-user pending">
                 <div class="message-avatar"><UserOutlined /></div>
                 <div class="message-body">
@@ -546,7 +779,7 @@ onMounted(loadWorkspace)
                   </div>
                   <div v-else class="thinking-indicator">
                     <i /><i /><i />
-                    <span>正在检索项目知识并生成回答…</span>
+                    <span>{{ generationStatusText }}…</span>
                   </div>
                 </div>
               </article>
@@ -578,13 +811,25 @@ onMounted(loadWorkspace)
                 @keydown="handleComposerKeydown"
               />
               <div class="composer-actions">
-                <span>Ctrl / ⌘ + Enter 发送</span>
+                <span>{{
+                  sending ? generationStatusText : 'Ctrl / ⌘ + Enter 发送'
+                }}</span>
                 <a-button
+                  v-if="sending"
+                  danger
+                  shape="round"
+                  :disabled="!activeRunId || stopping"
+                  :loading="stopping"
+                  @click="stopGeneration"
+                >
+                  <StopOutlined />停止生成
+                </a-button>
+                <a-button
+                  v-else
                   type="primary"
                   shape="circle"
                   size="large"
                   aria-label="发送问题"
-                  :loading="sending"
                   :disabled="!canAsk"
                   @click="submitQuestion"
                 >
@@ -772,9 +1017,18 @@ onMounted(loadWorkspace)
 .conversation-list {
   display: grid;
   gap: 6px;
-  max-height: calc(100vh - 290px);
+  max-height: calc(100vh - 344px);
   padding: 12px;
   overflow-y: auto;
+}
+
+.conversation-search {
+  padding: 11px 12px 0;
+}
+
+.conversation-search :deep(.ant-input-affix-wrapper) {
+  border-radius: 10px;
+  background: white;
 }
 
 .conversation-item {
@@ -1010,6 +1264,21 @@ onMounted(loadWorkspace)
   border-radius: 10px;
   color: var(--danger);
   background: rgb(216 79 79 / 6%);
+}
+
+.message-actions {
+  display: flex;
+  margin-top: 5px;
+}
+
+.message-actions :deep(.ant-btn) {
+  padding-inline: 0;
+  color: var(--ink-500);
+  font-size: 11px;
+}
+
+.message-actions :deep(.ant-btn:hover) {
+  color: var(--mint-700);
 }
 
 .message-sources {
