@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from time import perf_counter
 from typing import Any, cast
 from uuid import UUID
@@ -182,10 +182,13 @@ def _graph_config(thread_id: UUID) -> RunnableConfig:
     }
 
 
-def _current_date(timezone_name: str) -> date:
+def _current_date(timezone_name: str, *, at: datetime | None = None) -> date:
     """仅使用服务端配置的 IANA 时区解析相对日期。"""
 
-    return datetime.now(ZoneInfo(timezone_name)).date()
+    current_time = at or datetime.now(UTC)
+    if current_time.tzinfo is None:
+        raise ValueError("current time must be timezone-aware")
+    return current_time.astimezone(ZoneInfo(timezone_name)).date()
 
 
 def _latest_finance_data_time(results: tuple[object, ...]) -> datetime | None:

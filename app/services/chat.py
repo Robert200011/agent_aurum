@@ -283,7 +283,13 @@ class ChatService:
     async def get_run(self, conversation_id: UUID, run_id: UUID) -> AgentRun:
         await self._prepare()
         await self._owned_conversation(conversation_id)
-        run = await self._required_run(run_id, for_update=False)
+        run = await self._repository.get_agent_run(
+            user_id=self._user_id,
+            run_id=run_id,
+            for_update=False,
+        )
+        if run is None:
+            raise NotFoundError("agent run was not found")
         if run.conversation_id != conversation_id:
             raise NotFoundError("agent run was not found")
         return run
@@ -319,7 +325,13 @@ class ChatService:
 
         await self._prepare()
         await self._owned_conversation(conversation_id)
-        run = await self._required_run(run_id, for_update=True)
+        run = await self._repository.get_agent_run(
+            user_id=self._user_id,
+            run_id=run_id,
+            for_update=True,
+        )
+        if run is None:
+            raise NotFoundError("agent run was not found")
         if run.conversation_id != conversation_id:
             raise NotFoundError("agent run was not found")
         if run.status not in {
@@ -545,7 +557,13 @@ class ChatService:
         if conversation.project_id is None:
             raise BusinessRuleError("conversation project is no longer available")
         await self._ensure_no_running_run(conversation.id)
-        assistant = await self._required_message(message_id, for_update=True)
+        assistant = await self._repository.get_message(
+            user_id=self._user_id,
+            message_id=message_id,
+            for_update=True,
+        )
+        if assistant is None:
+            raise NotFoundError("assistant message was not found")
         if (
             assistant.conversation_id != conversation.id
             or assistant.role != MessageRole.ASSISTANT.value
