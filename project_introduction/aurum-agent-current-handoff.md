@@ -1,107 +1,74 @@
 # Aurum Agent 当前开发进度交接说明
 
-> 交接日期：2026-07-24
+> 交接日期：2026-08-02
 > 项目路径：`E:\agent_aurum`
-> 当前主分支：`master`
-> 当前基线：`ad3a1eb`
+> 当前阶段：阶段五已完成，下一步进入阶段六企业级加固
 
 ## 1. 当前结论
 
-Aurum Agent 已完成阶段一“架构和安全底座”、阶段二“个人财务数据基础”及覆盖前两个
-阶段的 Vue 3 Web 前端。四项高优先级安全审计遗留问题也已完成整改。下一步应进入
-阶段三“知识库管理”，LangGraph、RAG 问答和完整财务 Agent 尚未开始实现。
+Aurum Agent 已完成阶段一至阶段五。当前系统包含安全鉴权与租户隔离、个人财务账本、
+知识库入库与 Hybrid Retrieval、可信引用 RAG、SSE/Checkpoint 会话，以及受控编排的
+只读个人财务 Agent。阶段五最终图版本为 `finance-agent-p5.6-v1`，迁移头为
+`20260802_0012`。
 
-## 2. 已完成的主要能力
+P5.6 已补齐版本化评测、数值 Grounding、跨用户恢复接口边界、真实浏览器自动化和交付
+文档。模型无法指定用户、执行写工具或把受控证据之外的数字、行情、工具名和引用保存为
+最终答案。
 
-- FastAPI 分层后端、PostgreSQL、pgvector、Redis、Alembic 和 Docker Compose；
-- 用户注册、登录、改密、RBAC、JWT Access Token 和 HttpOnly Refresh Token Cookie；
-- Redis 登录失败锁定、单 IP 限流、全局限流和令牌撤销；
-- 账户、流水、预算、持仓、投资交易、行情快照和确定性财务报表；
-- CSV/XLSX 流水导入、幂等提交、逐行错误报告、行数限制和压缩炸弹防护；
-- 应用层 `user_id` 过滤与 PostgreSQL RLS 双重用户隔离；
-- 登录注册、响应式应用框架、财务总览、账户、流水、预算和投资管理前端；
-- JWT、初始管理员和数据库密码无可用代码默认值，并提供本地安全配置生成脚本。
+## 2. 阶段五交付
 
-## 3. 当前尚未实现
+- 10 个只读财务工具：摘要、账户、流水、收支、预算、组合、持仓、行情、异常和预算建议；
+- 服务端时间范围、比较窗口、时区、分币种与可审计汇率换算；
+- Decimal 预算执行、持仓盈亏、稳健异常分析和预算预测；
+- 知识、财务、投资、混合与高风险路由；
+- 财务工具审计、消息证据、数据时间、知识引用和风险提示持久化；
+- SSE 阶段、停止、恢复、重试、重新生成和历史展示；
+- 回答数字与工具名 Grounding、引用白名单和一次受控重答；
+- Edge + Vue + FastAPI + PostgreSQL + DashScope 的财务/混合场景验收。
 
-- 项目、知识库和文档管理；
-- 对象存储、文档解析、分块、Embedding 和 pgvector 检索；
-- LangGraph 工作流、RAG 回答、结构化引用和 SSE；
-- 会话历史、Checkpoint 和 Agent 工具编排；
-- 完整的生产部署资产、集中监控、自动备份与 CI/CD。
+详细契约与结果：
 
-## 4. 本地启动
+- [阶段五 API 与工具契约](./aurum-agent-phase-5-api-contract.md)
+- [阶段五 P5.6 验收报告](./aurum-agent-phase-5-acceptance.md)
+- [总体技术方案](./aurum-agent-initial-design.md)
 
-首次建立本地配置：
+## 3. 本地启动
 
 ```powershell
-.\scripts\generate-dev-env.ps1
 docker compose up --build -d
 docker compose ps
-```
+Invoke-RestMethod http://127.0.0.1:8010/api/v1/health/ready
 
-后端 OpenAPI 位于 `http://127.0.0.1:8010/docs`。前端启动：
-
-```powershell
 Set-Location web
 npm install
 npm run dev
 ```
 
-已有旧版 `.env` 时，不要直接覆盖数据库密码。只需轮换认证密钥可执行：
+服务地址：OpenAPI `http://127.0.0.1:8010/docs`，前端开发服务器
+`http://127.0.0.1:4173`。`.env` 包含本机敏感配置，不得提交。
+
+## 4. 验收基线
 
 ```powershell
-.\scripts\generate-dev-env.ps1 -RotateAuthSecrets
-```
-
-## 5. 验证基线
-
-当前交接使用以下命令验证：
-
-```powershell
-python -m ruff check app migrations tests
-python -m pytest
-python -m mypy app
-alembic check
-docker compose config --quiet
+.\.venv\Scripts\python.exe scripts\run_phase5_evaluation.py
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ruff check app migrations tests scripts
+.\.venv\Scripts\python.exe -m mypy app
+.\.venv\Scripts\python.exe -m alembic check
 
 Set-Location web
 npm run check
 npm run build
+npm run test:e2e
+npm audit
 ```
 
-2026-07-24 验证结果：
+确定性评测为 16/16；真实 Edge 浏览器财务与混合回答通过；生产依赖和全部 npm 依赖审计
+均为 0 个已知漏洞。后端 168 项测试和前端 18 项测试通过。真实 PostgreSQL 集成测试需
+通过环境变量提供迁移/测试所有者连接，不要把连接字符串写入仓库。
 
-| 检查 | 结果 |
-| --- | --- |
-| Ruff | 通过 |
-| Pytest | 59 项通过 |
-| Mypy | 74 个源文件通过 |
-| 前端类型、Lint 和测试 | 通过，10 项测试 |
-| 前端生产构建 | 通过 |
-| Alembic | 无待生成迁移 |
-| Docker Compose 配置 | 通过 |
-| API Docker 镜像构建 | 通过 |
+## 5. 下一步
 
-数据库迁移头为 `20260724_0003`。执行测试或启动服务前应确认 Docker Desktop 已启动，
-且本地 `.env` 已提供全部必填敏感配置。
-
-## 6. 下一阶段建议
-
-阶段三开始前先确认以下四项：
-
-1. 模型与 Embedding 供应商；
-2. 对象存储方案；
-3. 异步任务队列；
-4. 知识库可见范围。
-
-确认后按“知识库 CRUD → 文档上传与任务状态 → 解析与分块 → Embedding 与检索”的顺序
-形成纵向闭环，继续沿用现有权限、审计、租户隔离、测试和配置安全约束。
-
-## 7. 文档索引
-
-- [项目运行说明](./README.md)
-- [总体技术方案与实施路线](./aurum-agent-initial-design.md)
-- [总体架构设计](./aurum-agent-architecture.md)
-- [部署上线与运维方案](./aurum-agent-deployment-guide.md)
-- [阶段一交接与后续里程碑](./aurum-agent-phase-1-handoff.md)
+阶段六优先处理：用户/模型配额、日志脱敏、缓存与可观测性、RAG 回归、Prompt Injection、
+压力测试、备份恢复、灰度发布与回滚。阶段五仍保持只读边界；自然语言记账和任何财务写
+操作继续留在后续 Human-in-the-loop 方案中。

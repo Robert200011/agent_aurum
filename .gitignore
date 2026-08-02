@@ -55,3 +55,4 @@ playwright-report/
 *.swp
 *.swo
 /tests/
+/.claude/settings.local.json

@@ -2,13 +2,12 @@
 
 > 项目介绍与运行说明，统一归档于 `project_introduction/`。
 
-Aurum Agent 是面向个人财务、存款收支和投资知识问答的智能应用。本仓库目前完成
-“阶段一：架构和安全底座”“阶段二：个人财务数据基础”，以及覆盖前两阶段能力的
-Vue 3 前端。阶段三知识库管理第 1～6 步功能与真实 DashScope Key 核心验收已经完成：
-PDF、DOCX、Markdown、TXT、CSV、XLSX 均已接入异步解析、确定性分块、Embedding、
-pgvector 写入和原子发布链路，管理员项目/知识库、文档版本、任务状态与重试、
-Dense 检索测试前端也已接入现有 API。当前待完成阶段三最终回归和分支合并；
-LangGraph RAG 将在阶段四实现。
+Aurum Agent 是面向个人财务、存款收支和投资知识问答的智能应用。当前已完成阶段一至
+阶段五：安全与租户底座、个人财务账本、知识库入库与 Hybrid Retrieval、可信引用 RAG，
+以及受控编排的只读个人财务 Agent。PDF、DOCX、Markdown、TXT、CSV、XLSX 均已接入
+异步解析、确定性分块、Embedding、pgvector 和原子发布；聊天链路支持 SSE、加密
+Checkpoint、财务证据、知识引用、风险提示和历史恢复。阶段五最终图版本为
+`finance-agent-p5.6-v1`，下一步进入阶段六企业级加固。
 
 后端采用根目录 `app/` 包布局，不再使用 `src/aurum_agent/`。现有代码按 API、Agent、
 RAG、Finance、Provider、Database、Service、Worker、Observability 和 Security
@@ -22,7 +21,9 @@ RAG、Finance、Provider、Database、Service、Worker、Observability 和 Secur
 | 阶段二：个人财务数据基础 | 已完成 | 2026-07-24 |
 | 阶段一、二配套 Web 前端 | 已完成 | 2026-07-24 |
 | 阶段二收尾与四项安全审计整改 | 已完成 | 2026-07-24 |
-| 阶段三：知识库管理 | 功能与核心验收完成（待最终回归和合并） | — |
+| 阶段三：知识库管理 | 已完成 | 2026-07-29 |
+| 阶段四：基础 RAG 问答 | 已完成 | 2026-07-31 |
+| 阶段五：个人财务 Agent | 已完成 | 2026-08-02 |
 
 完整范围、验收结果和后续阶段见
 [总体技术方案](./aurum-agent-initial-design.md#0-项目里程碑与当前状态)。阶段三已固定使用

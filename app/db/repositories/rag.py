@@ -62,13 +62,21 @@ class RagRepository:
         return list((await self._session.scalars(statement)).all()), total
 
     async def list_available_chat_projects(self) -> list[AgentProject]:
-        """Return active projects backed by at least one published knowledge base."""
+        """返回至少包含一个可执行 Dense 检索 Chunk 的正常项目。"""
 
         published_knowledge_base = exists().where(
             ProjectKnowledgeBase.project_id == AgentProject.id,
             ProjectKnowledgeBase.knowledge_base_id == KnowledgeBase.id,
             KnowledgeBase.status == "published",
             KnowledgeBase.deleted_at.is_(None),
+            Document.knowledge_base_id == KnowledgeBase.id,
+            Document.status == "published",
+            Document.is_enabled.is_(True),
+            Document.deleted_at.is_(None),
+            Document.current_published_version_id == DocumentVersion.id,
+            DocumentVersion.status == "published",
+            DocumentChunk.document_version_id == DocumentVersion.id,
+            DocumentChunk.embedding.is_not(None),
         )
         statement = (
             select(AgentProject)

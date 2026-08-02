@@ -9,6 +9,10 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from app.agents.policies.finance_grounding import (
+    FinanceGroundingValidationError,
+    validate_finance_answer,
+)
 from app.agents.policies.finance_planner import plan_agent_question
 from app.agents.policies.rag_prompt import (
     NO_CONTEXT_ANSWER,
@@ -23,16 +27,27 @@ from app.agents.state import (
     RagAnswerUpdate,
 )
 from app.agents.tools.finance import FinanceToolExecutor, FinanceToolStatus
+from app.chat.types import ChatPromptRole
 from app.errors import ServiceUnavailableError
 from app.providers.model_provider import (
     ChatCompletionResult,
+    ChatMessage,
     ChatModelProvider,
     ChatModelProviderError,
+    ChatTokenUsage,
 )
-from app.rag.citations.structured import CitationValidationError, structure_citations
+from app.rag.citations.structured import (
+    CitationValidationError,
+    StructuredCitationResult,
+    structure_citations,
+)
 from app.services.retrieval import ProjectRetrievalResult, RagRetrievalService
 
-RAG_GRAPH_VERSION = "finance-agent-p5.5-v1"
+RAG_GRAPH_VERSION = "finance-agent-p5.6-v1"
+ANSWER_REPAIR_PROMPT = """上一次回答未通过服务端证据校验，请重新作答一次。
+只能复述受控财务数据中已经存在的数字、日期、行情和已执行工具名，不得自行计算、推断、
+举例或补充新的数字。只有受控知识上下文中实际存在来源时才能使用对应的 [S数字] 标记；
+sources 为空时不得输出任何引用标记。资料不足的部分直接说明无法确定。"""
 CompiledRagAnswerGraph = CompiledStateGraph[
     RagAnswerState,
     None,
@@ -169,25 +184,72 @@ def build_rag_answer_graph(
             "answer": answer,
         }
 
-    def validate_citations(state: RagAnswerState) -> RagAnswerUpdate:
-        write_stage(state, "finalizing")
+    def checked_answer(
+        state: RagAnswerState,
+        answer: str,
+    ) -> StructuredCitationResult:
         risk_checked_answer = apply_investment_risk_policy(
-            state["answer"],
+            answer,
             risk_policy=state["plan"].risk_policy,
         )
+        validate_finance_answer(
+            answer=risk_checked_answer,
+            finance_results=state["finance_results"],
+            context=state["context"],
+        )
+        return structure_citations(
+            answer=risk_checked_answer,
+            context=state["context"],
+            require_citation=bool(state["context"].sources),
+        )
+
+    async def validate_citations(state: RagAnswerState) -> RagAnswerUpdate:
+        write_stage(state, "finalizing")
         try:
-            structured = structure_citations(
-                answer=risk_checked_answer,
+            structured = checked_answer(state, state["answer"])
+            completion = state["completion"]
+        except (CitationValidationError, FinanceGroundingValidationError) as first_error:
+            original_completion = state["completion"]
+            if original_completion is None:
+                raise ServiceUnavailableError(
+                    "chat model returned invalid grounded answer"
+                ) from first_error
+            repair_messages = build_answer_messages(
+                question=state["question"],
                 context=state["context"],
-                require_citation=bool(state["context"].sources),
+                finance_results=state["finance_results"],
             )
-        except CitationValidationError as exc:
-            raise ServiceUnavailableError(
-                "chat model returned invalid citations"
-            ) from exc
+            repair_messages.extend(
+                (
+                    ChatMessage(
+                        role=ChatPromptRole.ASSISTANT,
+                        content=state["answer"],
+                    ),
+                    ChatMessage(
+                        role=ChatPromptRole.USER,
+                        content=ANSWER_REPAIR_PROMPT,
+                    ),
+                )
+            )
+            try:
+                repaired = await chat_provider.complete(repair_messages)
+                structured = checked_answer(state, repaired.content)
+            except ChatModelProviderError as exc:
+                raise ServiceUnavailableError(
+                    "chat model provider is unavailable"
+                ) from exc
+            except (CitationValidationError, FinanceGroundingValidationError) as exc:
+                message = (
+                    "chat model returned ungrounded finance facts"
+                    if isinstance(exc, FinanceGroundingValidationError)
+                    else "chat model returned invalid citations"
+                )
+                raise ServiceUnavailableError(message) from exc
+            completion = _merge_completion_usage(original_completion, repaired)
         return {
             "answer": structured.answer,
             "citations": structured.citations,
+            "completion": completion,
         }
 
     builder = StateGraph(
@@ -220,4 +282,28 @@ def _empty_retrieval(*, project_id: UUID, question: str) -> ProjectRetrievalResu
         embedding_model="",
         latency_ms=0,
         items=[],
+    )
+
+
+def _merge_completion_usage(
+    first: ChatCompletionResult,
+    repaired: ChatCompletionResult,
+) -> ChatCompletionResult:
+    """将一次受控修复的模型用量合并到最终运行审计。"""
+
+    usage = None
+    if first.usage is not None and repaired.usage is not None:
+        usage = ChatTokenUsage(
+            prompt_tokens=first.usage.prompt_tokens + repaired.usage.prompt_tokens,
+            completion_tokens=(
+                first.usage.completion_tokens + repaired.usage.completion_tokens
+            ),
+            total_tokens=first.usage.total_tokens + repaired.usage.total_tokens,
+        )
+    return ChatCompletionResult(
+        content=repaired.content,
+        model=repaired.model,
+        finish_reason=repaired.finish_reason,
+        request_id=repaired.request_id,
+        usage=usage,
     )

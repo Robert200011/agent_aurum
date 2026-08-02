@@ -1,0 +1,148 @@
+{
+  "version": "p5.6-v1",
+  "reference_date": "2026-08-02",
+  "thresholds": {
+    "deterministic_pass_rate": 1.0,
+    "cross_user_leak_count": 0,
+    "finance_write_tool_count": 0
+  },
+  "route_cases": [
+    {
+      "id": "route-knowledge-budget",
+      "question": "如何制定预算？",
+      "intent": "knowledge",
+      "needs_knowledge": true,
+      "risk_policy": "standard",
+      "tools": []
+    },
+    {
+      "id": "route-finance-summary",
+      "question": "我这个月收入、支出和净现金流是多少？",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_finance_summary"]
+    },
+    {
+      "id": "route-finance-account",
+      "question": "我的 CNY 账户余额分别是多少？",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_account_balances"]
+    },
+    {
+      "id": "route-finance-transaction",
+      "question": "查找我的上个月餐饮类支出",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["search_transactions"]
+    },
+    {
+      "id": "route-investment-portfolio",
+      "question": "我的股票持仓怎么样？",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_portfolio_summary"]
+    },
+    {
+      "id": "route-mixed-anomaly",
+      "question": "本月餐饮支出为什么比上月高，应该如何调整？",
+      "intent": "mixed",
+      "needs_knowledge": true,
+      "risk_policy": "standard",
+      "tools": ["analyze_expense_anomalies"]
+    },
+    {
+      "id": "route-mixed-budget-principle",
+      "question": "结合知识库，我本月预算调整应该遵循什么比例和原则？",
+      "intent": "mixed",
+      "needs_knowledge": true,
+      "risk_policy": "standard",
+      "tools": ["get_budget_advice"]
+    },
+    {
+      "id": "route-high-risk-market",
+      "question": "AAPL 现在值得买吗？",
+      "intent": "mixed",
+      "needs_knowledge": true,
+      "risk_policy": "high_risk_investment",
+      "tools": ["get_market_snapshot"]
+    },
+    {
+      "id": "route-clarification",
+      "question": "查找我的流水",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": [],
+      "requires_clarification": true
+    }
+  ],
+  "time_cases": [
+    {
+      "id": "time-month-end",
+      "question": "上月支出",
+      "today": "2026-03-31",
+      "start_date": "2026-02-01",
+      "end_date": "2026-02-28"
+    },
+    {
+      "id": "time-year-boundary",
+      "question": "上月支出",
+      "today": "2026-01-01",
+      "start_date": "2025-12-01",
+      "end_date": "2025-12-31"
+    },
+    {
+      "id": "time-leap-year",
+      "question": "上月支出",
+      "today": "2024-03-31",
+      "start_date": "2024-02-01",
+      "end_date": "2024-02-29"
+    },
+    {
+      "id": "time-relative-30-days",
+      "question": "最近 30 天支出",
+      "today": "2026-08-02",
+      "start_date": "2026-07-04",
+      "end_date": "2026-08-02"
+    }
+  ],
+  "rejection_cases": [
+    {
+      "id": "reject-user-id",
+      "payload": {
+        "name": "get_finance_summary",
+        "arguments": {
+          "start_date": "2026-08-01",
+          "end_date": "2026-08-02",
+          "user_id": "00000000-0000-4000-8000-000000000001"
+        }
+      }
+    },
+    {
+      "id": "reject-write-tool",
+      "payload": {
+        "name": "delete_transactions",
+        "arguments": {
+          "start_date": "2026-08-01",
+          "end_date": "2026-08-02"
+        }
+      }
+    },
+    {
+      "id": "reject-unbounded-limit",
+      "payload": {
+        "name": "search_transactions",
+        "arguments": {
+          "start_date": "2026-08-01",
+          "end_date": "2026-08-02",
+          "limit": 51
+        }
+      }
+    }
+  ]
+}

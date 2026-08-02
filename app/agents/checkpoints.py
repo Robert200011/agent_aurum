@@ -9,8 +9,12 @@ from sqlalchemy.engine import make_url
 from app.db.base import AGENT_SCHEMA
 
 CHECKPOINT_MSGPACK_ALLOWLIST = [
+    ("app.agents.policies.finance_planner", "AgentQuestionPlan"),
     ("app.agents.state", "ControlledContextSource"),
     ("app.agents.state", "ControlledRagContext"),
+    ("app.agents.tools.finance", "FinanceToolName"),
+    ("app.agents.tools.finance", "FinanceToolResult"),
+    ("app.agents.tools.finance", "FinanceToolStatus"),
     ("app.providers.model_provider", "ChatCompletionResult"),
     ("app.providers.model_provider", "ChatTokenUsage"),
     ("app.rag.citations.structured", "TrustedCitation"),
