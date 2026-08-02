@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -70,6 +71,9 @@ class Settings(BaseSettings):
     embedding_dimensions: int = Field(default=DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS, ge=1, le=2048)
     embedding_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
     embedding_batch_size: int = Field(default=16, ge=1, le=64)
+    finance_market_stale_after_hours: int = Field(default=72, ge=1, le=720)
+    finance_exchange_rate_stale_after_hours: int = Field(default=24, ge=1, le=720)
+    finance_timezone: str = Field(default="Asia/Shanghai", min_length=1, max_length=64)
 
     object_storage_endpoint: str = "http://127.0.0.1:9000"
     object_storage_bucket: str = "aurum-knowledge"
@@ -189,6 +193,16 @@ class Settings(BaseSettings):
         """模型名称去除配置文件中意外带入的首尾空白。"""
 
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("finance_timezone")
+    @classmethod
+    def validate_finance_timezone(cls, value: str) -> str:
+        normalized = value.strip()
+        try:
+            ZoneInfo(normalized)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("finance timezone must be a valid IANA timezone") from exc
+        return normalized
 
     @field_validator("langgraph_aes_key", mode="before")
     @classmethod

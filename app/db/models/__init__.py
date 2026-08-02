@@ -1,8 +1,16 @@
 """Import all model modules so Alembic can discover complete metadata."""
 
-from app.db.models.chat import AgentRun, Conversation, Message, MessageCitation
+from app.db.models.chat import (
+    AgentRun,
+    AgentToolCall,
+    Conversation,
+    Message,
+    MessageCitation,
+    MessageEvidence,
+)
 from app.db.models.finance import (
     Budget,
+    ExchangeRateSnapshot,
     FinancialAccount,
     FinancialTransaction,
     InvestmentHolding,
@@ -26,6 +34,7 @@ from app.db.models.rag import (
 __all__ = [
     "AgentProject",
     "AgentRun",
+    "AgentToolCall",
     "AuditLog",
     "Budget",
     "Conversation",
@@ -33,6 +42,7 @@ __all__ = [
     "DocumentChunk",
     "DocumentUploadRequest",
     "DocumentVersion",
+    "ExchangeRateSnapshot",
     "FinancialAccount",
     "FinancialTransaction",
     "IngestionJob",
@@ -42,6 +52,7 @@ __all__ = [
     "MarketPriceSnapshot",
     "Message",
     "MessageCitation",
+    "MessageEvidence",
     "OutboxEvent",
     "ProjectKnowledgeBase",
     "RefreshToken",

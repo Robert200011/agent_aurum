@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ValidationError as PydanticValidationError
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.finance import (
     Budget,
+    ExchangeRateSnapshot,
     # 规划状态用于与分类支出比较。
     FinancialAccount,
     # 每次账本变更都会同步核对现金状态。
@@ -27,6 +28,12 @@ from app.db.repositories.finance import FinanceRepository
 from app.db.repositories.identity import AuditRepository
 from app.db.session import set_tenant_context
 from app.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.finance.analytics import (
+    BudgetProjection,
+    ExpenseAnomalyAnalysis,
+    build_budget_projection,
+    build_expense_anomaly_analysis,
+)
 from app.finance.calculators.investments import apply_investment_trade
 from app.finance.importers.tabular import ParsedTransactionRow
 from app.finance.types import AccountType, TransactionType
@@ -42,6 +49,7 @@ from app.finance.validators.transactions import ImportedTransaction
 MONEY_QUANTUM = Decimal("0.0001")
 QUANTITY_QUANTUM = Decimal("0.0000000001")
 PERCENT_QUANTUM = Decimal("0.01")
+EXCHANGE_RATE_QUANTUM = Decimal("0.000000000001")
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +96,34 @@ class BudgetExecution:
 
 
 @dataclass(frozen=True, slots=True)
+class BudgetStatusEntry:
+    """单项预算在请求窗口与自身覆盖区间交集内的执行状态。"""
+
+    budget_id: UUID
+    category: str
+    start_date: date
+    end_date: date
+    budget_amount: Decimal
+    spent_amount: Decimal
+    remaining_amount: Decimal
+    utilization_percent: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetStatusReport:
+    """有明确统计窗口和币种的预算执行汇总。"""
+
+    start_date: date
+    end_date: date
+    currency: str
+    total_budget_amount: Decimal
+    total_spent_amount: Decimal
+    total_remaining_amount: Decimal
+    budgets: list[BudgetStatusEntry]
+    data_as_of: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class FinanceSummary:
     """同时包含区间指标与当前指标的单币种快照。"""
 
@@ -108,11 +144,44 @@ class FinanceSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class CategoryCashFlow:
+    """单个收支分类在报表窗口内的确定性合计。"""
+
+    category: str
+    amount: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class IncomeExpensePeriod:
+    """一个包含首尾日期的单币种收支统计窗口。"""
+
+    start_date: date
+    end_date: date
+    currency: str
+    income: Decimal
+    expense: Decimal
+    net_cash_flow: Decimal
+    income_by_category: list[CategoryCashFlow]
+    expense_by_category: list[CategoryCashFlow]
+
+
+@dataclass(frozen=True, slots=True)
+class IncomeExpenseReport:
+    """主统计窗口及可选的等口径对比窗口。"""
+
+    period: IncomeExpensePeriod
+    comparison: IncomeExpensePeriod | None
+    data_as_of: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class HoldingPerformance:
     """单个持仓的成本及可选最新价格估值。"""
 
     holding_id: UUID
     symbol: str
+    asset_type: str
+    currency: str
     quantity: Decimal
     cost_basis: Decimal
     cost_value: Decimal
@@ -121,7 +190,17 @@ class HoldingPerformance:
     current_price: Decimal | None
     market_value: Decimal | None
     unrealized_gain: Decimal | None
+    unrealized_return_percent: Decimal | None
     price_recorded_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class HoldingPerformanceReport:
+    """按持仓标识或证券代码返回的有界收益表现集合。"""
+
+    holdings: list[HoldingPerformance]
+    total_count: int
+    data_as_of: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +212,42 @@ class PortfolioSummary:
     total_market_value: Decimal | None
     total_unrealized_gain: Decimal | None
     holdings: list[HoldingPerformance]
+    data_as_of: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ExchangeRateQuote:
+    """从单个直接或反向快照推导出的可审计换算报价。"""
+
+    source_currency: str
+    target_currency: str
+    rate: Decimal
+    direction: Literal["identity", "direct", "inverse"]
+    snapshot_base_currency: str | None
+    snapshot_quote_currency: str | None
+    snapshot_rate: Decimal | None
+    data_source: str | None
+    observed_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExpenseAnomalyReport:
+    """单币种开支异常分析及生成时间。"""
+
+    analysis: ExpenseAnomalyAnalysis
+    data_as_of: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetAdviceReport:
+    """一个请求窗口内有界的单币种预算预测集合。"""
+
+    start_date: date
+    end_date: date
+    as_of_date: date
+    currency: str
+    projections: list[BudgetProjection]
+    total_count: int
     data_as_of: datetime
 
 
@@ -1176,6 +1291,173 @@ class FinanceService:
             raise NotFoundError("market price snapshot was not found")
         return snapshot
 
+    async def create_exchange_rate_snapshot(
+        self,
+        *,
+        base_currency: str,
+        quote_currency: str,
+        rate: Decimal,
+        data_source: str,
+        observed_at: datetime,
+    ) -> ExchangeRateSnapshot:
+        """发布一条不可变汇率观测，供 Agent 执行可追溯换算。"""
+
+        await self._prepare()
+        if base_currency == quote_currency:
+            raise BusinessRuleError("exchange rate currencies must be different")
+        snapshot = ExchangeRateSnapshot(
+            base_currency=base_currency,
+            quote_currency=quote_currency,
+            rate=rate.quantize(EXCHANGE_RATE_QUANTUM, rounding=ROUND_HALF_UP),
+            data_source=data_source,
+            observed_at=observed_at,
+        )
+        await self._repository.add(snapshot)
+        await self._commit("this exchange rate snapshot already exists")
+        return snapshot
+
+    async def get_exchange_rate_quote(
+        self,
+        *,
+        source_currency: str,
+        target_currency: str,
+    ) -> ExchangeRateQuote:
+        """仅用一个直接或反向快照解析汇率，明确禁止多跳。"""
+
+        await self._prepare()
+        if source_currency == target_currency:
+            return ExchangeRateQuote(
+                source_currency=source_currency,
+                target_currency=target_currency,
+                rate=Decimal("1"),
+                direction="identity",
+                snapshot_base_currency=None,
+                snapshot_quote_currency=None,
+                snapshot_rate=None,
+                data_source=None,
+                observed_at=None,
+            )
+        snapshot = await self._exchange_rate_snapshot(source_currency, target_currency)
+        direct = (
+            snapshot.base_currency == source_currency
+            and snapshot.quote_currency == target_currency
+        )
+        applied_rate = (
+            snapshot.rate
+            if direct
+            else (Decimal("1") / snapshot.rate).quantize(
+                EXCHANGE_RATE_QUANTUM,
+                rounding=ROUND_HALF_UP,
+            )
+        )
+        return ExchangeRateQuote(
+            source_currency=source_currency,
+            target_currency=target_currency,
+            rate=applied_rate,
+            direction="direct" if direct else "inverse",
+            snapshot_base_currency=snapshot.base_currency,
+            snapshot_quote_currency=snapshot.quote_currency,
+            snapshot_rate=snapshot.rate,
+            data_source=snapshot.data_source,
+            observed_at=snapshot.observed_at,
+        )
+
+    async def get_exchange_rate_snapshot(
+        self,
+        *,
+        source_currency: str,
+        target_currency: str,
+    ) -> ExchangeRateSnapshot:
+        """返回直接或反向解析实际采用的原始汇率快照。"""
+
+        await self._prepare()
+        if source_currency == target_currency:
+            raise BusinessRuleError("exchange rate currencies must be different")
+        return await self._exchange_rate_snapshot(source_currency, target_currency)
+
+    async def _exchange_rate_snapshot(
+        self,
+        source_currency: str,
+        target_currency: str,
+    ) -> ExchangeRateSnapshot:
+        snapshot = await self._repository.latest_exchange_rate_snapshot(
+            source_currency,
+            target_currency,
+        )
+        if snapshot is None:
+            raise NotFoundError(
+                f"exchange rate snapshot for {source_currency}/{target_currency} was not found"
+            )
+        return snapshot
+
+    async def finance_summary_currencies(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[str]:
+        """列出摘要窗口涉及的币种，不在服务端混合其金额。"""
+
+        await self._prepare()
+        return await self._repository.finance_summary_currencies(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    async def cash_flow_currencies(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[str]:
+        """列出现金流窗口实际存在的币种。"""
+
+        await self._prepare()
+        return await self._repository.cash_flow_currencies(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    async def expense_currencies(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[str]:
+        """列出异常分析窗口及其历史范围实际存在的支出币种。"""
+
+        await self._prepare()
+        return await self._repository.expense_currencies(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    async def budget_currencies(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        category: str | None,
+    ) -> list[str]:
+        """列出预算窗口涉及的币种。"""
+
+        await self._prepare()
+        return await self._repository.budget_currencies(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+            category=category,
+        )
+
+    async def holding_currencies(self) -> list[str]:
+        """列出当前租户持仓涉及的币种。"""
+
+        await self._prepare()
+        return await self._repository.holding_currencies(self._user_id)
+
     async def get_finance_summary(
         self,
         *,
@@ -1262,6 +1544,143 @@ class FinanceService:
             data_as_of=datetime.now(UTC),
         )
 
+    async def get_budget_status(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        currency: str,
+        category: str | None = None,
+    ) -> BudgetStatusReport:
+        """返回预算自身覆盖区间与请求窗口交集内的确定性执行状态。"""
+
+        await self._prepare()
+        self._validate_date_range(start_date, end_date)
+        rows = await self._repository.budgets_with_spending_for_period(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+            currency=currency,
+            category=category,
+        )
+        entries: list[BudgetStatusEntry] = []
+        for budget, raw_spent in rows:
+            spent = self._money(raw_spent)
+            amount = self._money(budget.amount)
+            utilization = (
+                (spent / amount * Decimal("100")).quantize(PERCENT_QUANTUM)
+                if amount
+                else Decimal("0")
+            )
+            entries.append(
+                BudgetStatusEntry(
+                    budget_id=budget.id,
+                    category=budget.category,
+                    start_date=budget.start_date,
+                    end_date=budget.end_date,
+                    budget_amount=amount,
+                    spent_amount=spent,
+                    remaining_amount=self._money(amount - spent),
+                    utilization_percent=utilization,
+                )
+            )
+        total_budget = self._money(
+            sum((item.budget_amount for item in entries), Decimal("0"))
+        )
+        total_spent = self._money(
+            sum((item.spent_amount for item in entries), Decimal("0"))
+        )
+        return BudgetStatusReport(
+            start_date=start_date,
+            end_date=end_date,
+            currency=currency,
+            total_budget_amount=total_budget,
+            total_spent_amount=total_spent,
+            total_remaining_amount=self._money(total_budget - total_spent),
+            budgets=entries,
+            data_as_of=datetime.now(UTC),
+        )
+
+    async def get_income_expense_report(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        currency: str,
+        comparison_start_date: date | None = None,
+        comparison_end_date: date | None = None,
+    ) -> IncomeExpenseReport:
+        """生成分类收支报表，并可用完全相同的口径查询对比窗口。"""
+
+        await self._prepare()
+        self._validate_date_range(start_date, end_date)
+        if (comparison_start_date is None) != (comparison_end_date is None):
+            raise BusinessRuleError("comparison date range must be complete")
+        if comparison_start_date is not None and comparison_end_date is not None:
+            self._validate_date_range(comparison_start_date, comparison_end_date)
+
+        period = await self._income_expense_period(
+            start_date=start_date,
+            end_date=end_date,
+            currency=currency,
+        )
+        comparison = (
+            await self._income_expense_period(
+                start_date=comparison_start_date,
+                end_date=comparison_end_date,
+                currency=currency,
+            )
+            if comparison_start_date is not None and comparison_end_date is not None
+            else None
+        )
+        return IncomeExpenseReport(
+            period=period,
+            comparison=comparison,
+            data_as_of=datetime.now(UTC),
+        )
+
+    async def _income_expense_period(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        currency: str,
+    ) -> IncomeExpensePeriod:
+        income, expense = await self._repository.cash_flow_totals(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+            currency=currency,
+        )
+        rows = await self._repository.cash_flow_by_category(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+            currency=currency,
+        )
+        income_by_category = [
+            CategoryCashFlow(category=category, amount=self._money(amount))
+            for transaction_type, category, amount in rows
+            if transaction_type == TransactionType.INCOME.value
+        ]
+        expense_by_category = [
+            CategoryCashFlow(category=category, amount=self._money(amount))
+            for transaction_type, category, amount in rows
+            if transaction_type == TransactionType.EXPENSE.value
+        ]
+        normalized_income = self._money(income)
+        normalized_expense = self._money(expense)
+        return IncomeExpensePeriod(
+            start_date=start_date,
+            end_date=end_date,
+            currency=currency,
+            income=normalized_income,
+            expense=normalized_expense,
+            net_cash_flow=self._money(normalized_income - normalized_expense),
+            income_by_category=income_by_category,
+            expense_by_category=expense_by_category,
+        )
+
     async def get_portfolio_summary(self, *, currency: str) -> PortfolioSummary:
         """使用最新可用价格估算所有同币种持仓。
         任一价格缺失都会使市场汇总值明确变为未知。
@@ -1274,41 +1693,10 @@ class FinanceService:
             self._user_id,
             currency,
         )
-        snapshots = await self._repository.latest_market_snapshots(
-            {holding.symbol for holding in holdings},
-            currency=currency,
+        performance = await self._holding_performances(holdings)
+        complete_market_data = all(
+            item.current_price is not None for item in performance
         )
-        performance: list[HoldingPerformance] = []
-        complete_market_data = True
-        for holding in holdings:
-            # 成本估值始终可由持仓状态得到。
-            # 没有观测时，市场估值刻意保持可空。
-            snapshot = snapshots.get(holding.symbol)
-            cost_value = self._money(holding.quantity * holding.cost_basis)
-            if snapshot is None:
-                complete_market_data = False
-                market_value = None
-                unrealized_gain = None
-            else:
-                market_value = self._money(holding.quantity * snapshot.price)
-                unrealized_gain = self._money(market_value - cost_value)
-            # 价格时间戳向 API 使用方展示估值新鲜度。
-            # 本层不会静默应用过期价格阈值。
-            performance.append(
-                HoldingPerformance(
-                    holding_id=holding.id,
-                    symbol=holding.symbol,
-                    # 数量和平均成本复现持久化持仓。
-                    # 下方派生值仅在缺少市场数据时允许为空。
-                    quantity=holding.quantity,
-                    cost_basis=holding.cost_basis,
-                    cost_value=cost_value,
-                    current_price=snapshot.price if snapshot else None,
-                    market_value=market_value,
-                    unrealized_gain=unrealized_gain,
-                    price_recorded_at=snapshot.recorded_at if snapshot else None,
-                )
-            )
 
         # 即使一个或多个价格缺失，总成本仍有意义。
         # 市场汇总要求完整覆盖，避免展示不完整总和。
@@ -1339,6 +1727,223 @@ class FinanceService:
             holdings=performance,
             data_as_of=datetime.now(UTC),
         )
+
+    async def get_holding_performance(
+        self,
+        *,
+        holding_id: UUID | None,
+        symbol: str | None,
+        currency: str | None,
+        limit: int,
+    ) -> HoldingPerformanceReport:
+        """按一个自有持仓或证券代码查询有界收益表现。"""
+
+        await self._prepare()
+        if (holding_id is None) == (symbol is None):
+            raise BusinessRuleError("provide exactly one of holding_id or symbol")
+        if holding_id is not None:
+            holding = await self._holding(holding_id)
+            if currency is not None:
+                self._ensure_currency(holding.currency, currency)
+            holdings = [holding]
+            total_count = 1
+        else:
+            holdings, total_count = await self._repository.list_holdings(
+                self._user_id,
+                account_id=None,
+                symbol=symbol,
+                currency=currency,
+                page=1,
+                page_size=limit,
+            )
+        return HoldingPerformanceReport(
+            holdings=await self._holding_performances(holdings),
+            total_count=total_count,
+            data_as_of=datetime.now(UTC),
+        )
+
+    async def analyze_expense_anomalies(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        currency: str,
+        history_window_count: int,
+    ) -> ExpenseAnomalyReport:
+        """比较等长历史窗口，并在样本充足时执行中位数/MAD 分析。"""
+
+        await self._prepare()
+        if end_date < start_date:
+            raise BusinessRuleError("end_date must be on or after start_date")
+        if not 1 <= history_window_count <= 24:
+            raise BusinessRuleError("history_window_count must be between 1 and 24")
+        current = await self._repository.expense_by_category(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+            currency=currency,
+        )
+        window_days = (end_date - start_date).days + 1
+        history: list[dict[str, Decimal]] = []
+        history_end = start_date - timedelta(days=1)
+        for _ in range(history_window_count):
+            history_start = history_end - timedelta(days=window_days - 1)
+            history.append(
+                await self._repository.expense_by_category(
+                    self._user_id,
+                    start_date=history_start,
+                    end_date=history_end,
+                    currency=currency,
+                )
+            )
+            history_end = history_start - timedelta(days=1)
+        return ExpenseAnomalyReport(
+            analysis=build_expense_anomaly_analysis(
+                start_date=start_date,
+                end_date=end_date,
+                currency=currency,
+                current_by_category=current,
+                history_by_window=history,
+            ),
+            data_as_of=datetime.now(UTC),
+        )
+
+    async def get_budget_advice(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        as_of_date: date,
+        currency: str,
+        category: str | None,
+        history_period_count: int,
+        limit: int,
+    ) -> BudgetAdviceReport:
+        """根据预算进度、当前日均和历史期间支出生成确定性预测。"""
+
+        await self._prepare()
+        if end_date < start_date:
+            raise BusinessRuleError("end_date must be on or after start_date")
+        if not 1 <= history_period_count <= 12:
+            raise BusinessRuleError("history_period_count must be between 1 and 12")
+        if not 1 <= limit <= 100:
+            raise BusinessRuleError("budget advice limit must be between 1 and 100")
+        budgets = await self._repository.budgets_for_period(
+            self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+            currency=currency,
+        )
+        if category is not None:
+            budgets = [
+                budget for budget in budgets if budget.category.casefold() == category.casefold()
+            ]
+        total_count = len(budgets)
+        projections: list[BudgetProjection] = []
+        for budget in budgets[:limit]:
+            effective_end = min(as_of_date, budget.end_date)
+            if effective_end < budget.start_date:
+                spent = Decimal("0")
+            else:
+                current_spending = await self._repository.expense_by_category(
+                    self._user_id,
+                    start_date=budget.start_date,
+                    end_date=effective_end,
+                    currency=currency,
+                )
+                spent = current_spending.get(budget.category, Decimal("0"))
+            period_days = (budget.end_date - budget.start_date).days + 1
+            historical_amounts: list[Decimal] = []
+            history_end = budget.start_date - timedelta(days=1)
+            for _ in range(history_period_count):
+                history_start = history_end - timedelta(days=period_days - 1)
+                historical_spending = await self._repository.expense_by_category(
+                    self._user_id,
+                    start_date=history_start,
+                    end_date=history_end,
+                    currency=currency,
+                )
+                historical_amounts.append(
+                    historical_spending.get(budget.category, Decimal("0"))
+                )
+                history_end = history_start - timedelta(days=1)
+            projections.append(
+                build_budget_projection(
+                    budget_id=budget.id,
+                    category=budget.category,
+                    currency=budget.currency,
+                    start_date=budget.start_date,
+                    end_date=budget.end_date,
+                    as_of_date=as_of_date,
+                    budget_amount=budget.amount,
+                    spent_to_date=spent,
+                    historical_period_amounts=historical_amounts,
+                )
+            )
+        return BudgetAdviceReport(
+            start_date=start_date,
+            end_date=end_date,
+            as_of_date=as_of_date,
+            currency=currency,
+            projections=projections,
+            total_count=total_count,
+            data_as_of=datetime.now(UTC),
+        )
+
+    async def _holding_performances(
+        self,
+        holdings: list[InvestmentHolding],
+    ) -> list[HoldingPerformance]:
+        """按持仓币种批量匹配最新价格，并计算成本与未实现收益。"""
+
+        symbols_by_currency: dict[str, set[str]] = {}
+        for holding in holdings:
+            symbols_by_currency.setdefault(holding.currency, set()).add(holding.symbol)
+        snapshots: dict[tuple[str, str], MarketPriceSnapshot] = {}
+        for currency, symbols in symbols_by_currency.items():
+            latest = await self._repository.latest_market_snapshots(
+                symbols,
+                currency=currency,
+            )
+            snapshots.update(
+                {(symbol, currency): snapshot for symbol, snapshot in latest.items()}
+            )
+
+        results: list[HoldingPerformance] = []
+        for holding in holdings:
+            snapshot = snapshots.get((holding.symbol, holding.currency))
+            cost_value = self._money(holding.quantity * holding.cost_basis)
+            if snapshot is None:
+                market_value = None
+                unrealized_gain = None
+                unrealized_return = None
+            else:
+                market_value = self._money(holding.quantity * snapshot.price)
+                unrealized_gain = self._money(market_value - cost_value)
+                unrealized_return = (
+                    (unrealized_gain / cost_value * Decimal("100")).quantize(
+                        PERCENT_QUANTUM
+                    )
+                    if cost_value
+                    else None
+                )
+            results.append(
+                HoldingPerformance(
+                    holding_id=holding.id,
+                    symbol=holding.symbol,
+                    asset_type=holding.asset_type,
+                    currency=holding.currency,
+                    quantity=holding.quantity,
+                    cost_basis=holding.cost_basis,
+                    cost_value=cost_value,
+                    current_price=snapshot.price if snapshot else None,
+                    market_value=market_value,
+                    unrealized_gain=unrealized_gain,
+                    unrealized_return_percent=unrealized_return,
+                    price_recorded_at=snapshot.recorded_at if snapshot else None,
+                )
+            )
+        return results
 
     @staticmethod
     def parse_decimal(value: object, field: str) -> Decimal:

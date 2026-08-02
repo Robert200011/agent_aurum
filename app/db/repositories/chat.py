@@ -11,7 +11,14 @@ from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.db.models.chat import AgentRun, Conversation, Message, MessageCitation
+from app.db.models.chat import (
+    AgentRun,
+    AgentToolCall,
+    Conversation,
+    Message,
+    MessageCitation,
+    MessageEvidence,
+)
 
 ModelT = TypeVar("ModelT")
 
@@ -119,6 +126,62 @@ class ChatRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
+    async def list_message_evidence(
+        self,
+        *,
+        user_id: UUID,
+        message_ids: Sequence[UUID],
+    ) -> list[MessageEvidence]:
+        """按消息和展示顺序加载当前租户的财务证据。"""
+
+        if not message_ids:
+            return []
+        statement = (
+            select(MessageEvidence)
+            .where(
+                MessageEvidence.user_id == user_id,
+                MessageEvidence.message_id.in_(message_ids),
+            )
+            .order_by(MessageEvidence.message_id, MessageEvidence.rank)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def list_agent_runs_for_messages(
+        self,
+        *,
+        user_id: UUID,
+        message_ids: Sequence[UUID],
+    ) -> list[AgentRun]:
+        """按新到旧加载消息运行，供历史回答恢复最新元数据。"""
+
+        if not message_ids:
+            return []
+        statement = (
+            select(AgentRun)
+            .where(
+                AgentRun.user_id == user_id,
+                AgentRun.message_id.in_(message_ids),
+            )
+            .order_by(AgentRun.message_id, AgentRun.created_at.desc(), AgentRun.id.desc())
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def list_agent_tool_calls(
+        self,
+        *,
+        user_id: UUID,
+        run_id: UUID,
+    ) -> list[AgentToolCall]:
+        statement = (
+            select(AgentToolCall)
+            .where(
+                AgentToolCall.user_id == user_id,
+                AgentToolCall.run_id == run_id,
+            )
+            .order_by(AgentToolCall.created_at, AgentToolCall.id)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     async def get_message(
         self,
         *,
@@ -214,6 +277,19 @@ class ChatRepository:
             delete(MessageCitation).where(
                 MessageCitation.user_id == user_id,
                 MessageCitation.message_id == message_id,
+            )
+        )
+
+    async def delete_message_evidence(
+        self,
+        *,
+        user_id: UUID,
+        message_id: UUID,
+    ) -> None:
+        await self._session.execute(
+            delete(MessageEvidence).where(
+                MessageEvidence.user_id == user_id,
+                MessageEvidence.message_id == message_id,
             )
         )
 

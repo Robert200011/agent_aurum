@@ -13,14 +13,28 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.graph import RAG_GRAPH_VERSION
-from app.agents.state import RagAnswerCompleted, RagAnswerDelta, RagAnswerResult
+from app.agents.policies.rag_prompt import HIGH_RISK_INVESTMENT_DISCLAIMER
+from app.agents.state import (
+    RagAnswerCompleted,
+    RagAnswerDelta,
+    RagAnswerResult,
+    RagAnswerStage,
+)
+from app.chat.finance_evidence import build_finance_persistence_record
 from app.chat.types import (
     AgentRunStatus,
     ConversationStatus,
     MessageRole,
     MessageStatus,
 )
-from app.db.models.chat import AgentRun, Conversation, Message, MessageCitation
+from app.db.models.chat import (
+    AgentRun,
+    AgentToolCall,
+    Conversation,
+    Message,
+    MessageCitation,
+    MessageEvidence,
+)
 from app.db.models.rag import AgentProject
 from app.db.repositories.chat import ChatRepository
 from app.db.repositories.rag import RagRepository
@@ -44,6 +58,8 @@ class ConversationDetail:
     conversation: Conversation
     messages: list[Message]
     citations_by_message: dict[UUID, list[MessageCitation]]
+    evidence_by_message: dict[UUID, list[MessageEvidence]]
+    runs_by_message: dict[UUID, AgentRun]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +75,9 @@ class PersistedAnswer:
     message: Message
     citations: list[MessageCitation]
     run: AgentRun
+    evidence: list[MessageEvidence]
+    data_as_of: datetime | None = None
+    risk_notice: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +99,14 @@ class ChatStreamDelta:
 class ChatStreamStatus:
     """可直接展示给用户的有限生成阶段，不暴露内部图节点。"""
 
-    stage: Literal["retrieving", "generating", "finalizing"]
+    stage: Literal[
+        "understanding",
+        "retrieving",
+        "querying_finance",
+        "analyzing",
+        "generating",
+        "finalizing",
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,10 +217,27 @@ class ChatService:
         citations_by_message: dict[UUID, list[MessageCitation]] = {}
         for citation in citations:
             citations_by_message.setdefault(citation.message_id, []).append(citation)
+        evidence = await self._repository.list_message_evidence(
+            user_id=self._user_id,
+            message_ids=[message.id for message in messages],
+        )
+        evidence_by_message: dict[UUID, list[MessageEvidence]] = {}
+        for item in evidence:
+            evidence_by_message.setdefault(item.message_id, []).append(item)
+        runs = await self._repository.list_agent_runs_for_messages(
+            user_id=self._user_id,
+            message_ids=[message.id for message in messages],
+        )
+        runs_by_message: dict[UUID, AgentRun] = {}
+        for run in runs:
+            if run.message_id is not None:
+                runs_by_message.setdefault(run.message_id, run)
         return ConversationDetail(
             conversation=conversation,
             messages=messages,
             citations_by_message=citations_by_message,
+            evidence_by_message=evidence_by_message,
+            runs_by_message=runs_by_message,
         )
 
     async def update_conversation(
@@ -258,7 +301,18 @@ class ChatService:
             user_id=self._user_id,
             message_ids=[message.id],
         )
-        return PersistedAnswer(message=message, citations=citations, run=run)
+        evidence = await self._repository.list_message_evidence(
+            user_id=self._user_id,
+            message_ids=[message.id],
+        )
+        return PersistedAnswer(
+            message=message,
+            citations=citations,
+            run=run,
+            evidence=evidence,
+            data_as_of=_detail_datetime(run.detail.get("data_as_of")),
+            risk_notice=_detail_text(run.detail.get("risk_notice")),
+        )
 
     async def cancel_run(self, conversation_id: UUID, run_id: UUID) -> AgentRun:
         """把无法在当前进程定位任务的运行安全收敛为取消终态。"""
@@ -376,11 +430,19 @@ class ChatService:
                 for citation in result.citations
             ]
             await self._repository.add_all(citations)
+            evidence = await self._persist_finance_evidence(
+                run_id=persisted_run.id,
+                message_id=assistant.id,
+                results=result.finance_results,
+            )
             persisted_run.status = AgentRunStatus.COMPLETED.value
             persisted_run.latency_ms = result.latency_ms
             persisted_run.completed_at = completed_at
             persisted_run.detail = {
-                "retrieval_source": "hybrid",
+                "intent": result.plan.intent if result.plan is not None else "knowledge",
+                "retrieval_source": (
+                    "hybrid" if result.retrieval.knowledge_base_ids else "not_requested"
+                ),
                 "retrieval_result_count": len(result.retrieval.items),
                 "citation_count": len(citations),
                 "embedding_model": result.retrieval.embedding_model,
@@ -393,12 +455,26 @@ class ChatService:
                 ),
                 "checkpoint_id": result.checkpoint_id,
                 "checkpoint_namespace": "",
+                "data_as_of": (
+                    result.data_as_of.isoformat() if result.data_as_of is not None else None
+                ),
+                "finance_tool_count": len(result.finance_results),
+                "finance_tool_statuses": [
+                    tool_result.status.value for tool_result in result.finance_results
+                ],
+                "risk_policy": (
+                    result.plan.risk_policy if result.plan is not None else "standard"
+                ),
+                "risk_notice": _risk_notice(result),
             }
             await self._session.commit()
             return PersistedAnswer(
                 message=assistant,
                 citations=citations,
                 run=persisted_run,
+                evidence=evidence,
+                data_as_of=result.data_as_of,
+                risk_notice=_risk_notice(result),
             )
         except ApplicationError as exc:
             await self._mark_failed(
@@ -494,6 +570,10 @@ class ChatService:
             user_id=self._user_id,
             message_id=assistant.id,
         )
+        await self._repository.delete_message_evidence(
+            user_id=self._user_id,
+            message_id=assistant.id,
+        )
         assistant.content = ""
         assistant.status = MessageStatus.STREAMING.value
         assistant.model = None
@@ -536,22 +616,36 @@ class ChatService:
 
         completed = False
         generation_started = False
+        finalizing_started = False
+        last_stage: str = "understanding"
         try:
-            yield ChatStreamStatus("retrieving")
+            yield ChatStreamStatus("understanding")
             async for event in self._answer_service.stream(
                 project_id=streaming_run.project_id,
                 question=streaming_run.question,
                 thread_id=streaming_run.thread_id,
             ):
+                if isinstance(event, RagAnswerStage):
+                    if event.stage == last_stage:
+                        continue
+                    if event.stage == "generating":
+                        generation_started = True
+                    if event.stage == "finalizing":
+                        finalizing_started = True
+                    last_stage = event.stage
+                    yield ChatStreamStatus(event.stage)
+                    continue
                 if isinstance(event, RagAnswerDelta):
                     if not generation_started:
                         generation_started = True
+                        last_stage = "generating"
                         yield ChatStreamStatus("generating")
                     yield ChatStreamDelta(event.text)
                     continue
                 if not isinstance(event, RagAnswerCompleted):
                     raise RuntimeError("unsupported RAG stream event")
-                yield ChatStreamStatus("finalizing")
+                if not finalizing_started:
+                    yield ChatStreamStatus("finalizing")
                 persisted = await self._persist_streamed_answer(
                     streaming_run=streaming_run,
                     result=event.result,
@@ -688,12 +782,20 @@ class ChatService:
             for citation in result.citations
         ]
         await self._repository.add_all(citations)
+        evidence = await self._persist_finance_evidence(
+            run_id=run.id,
+            message_id=assistant.id,
+            results=result.finance_results,
+        )
         run.status = AgentRunStatus.COMPLETED.value
         run.latency_ms = result.latency_ms
         run.completed_at = completed_at
         run.detail = {
             "response_mode": "sse",
-            "retrieval_source": "hybrid",
+            "intent": result.plan.intent if result.plan is not None else "knowledge",
+            "retrieval_source": (
+                "hybrid" if result.retrieval.knowledge_base_ids else "not_requested"
+            ),
             "retrieval_result_count": len(result.retrieval.items),
             "citation_count": len(citations),
             "embedding_model": result.retrieval.embedding_model,
@@ -706,9 +808,79 @@ class ChatService:
             ),
             "checkpoint_id": result.checkpoint_id,
             "checkpoint_namespace": "",
+            "data_as_of": (
+                result.data_as_of.isoformat() if result.data_as_of is not None else None
+            ),
+            "finance_tool_count": len(result.finance_results),
+            "finance_tool_statuses": [
+                tool_result.status.value for tool_result in result.finance_results
+            ],
+            "risk_policy": (
+                result.plan.risk_policy if result.plan is not None else "standard"
+            ),
+            "risk_notice": _risk_notice(result),
         }
         await self._session.commit()
-        return PersistedAnswer(message=assistant, citations=citations, run=run)
+        return PersistedAnswer(
+            message=assistant,
+            citations=citations,
+            run=run,
+            evidence=evidence,
+            data_as_of=result.data_as_of,
+            risk_notice=_risk_notice(result),
+        )
+
+    async def _persist_finance_evidence(
+        self,
+        *,
+        run_id: UUID,
+        message_id: UUID,
+        results: tuple[object, ...],
+    ) -> list[MessageEvidence]:
+        """独立持久化工具审计，并将成功结果关联为消息财务证据。"""
+
+        from app.agents.tools.finance import FinanceToolResult, FinanceToolStatus
+
+        typed_results = [item for item in results if isinstance(item, FinanceToolResult)]
+        tool_calls: list[AgentToolCall] = []
+        records = []
+        for result in typed_results:
+            record = build_finance_persistence_record(result)
+            records.append(record)
+            tool_calls.append(
+                AgentToolCall(
+                    user_id=self._user_id,
+                    run_id=run_id,
+                    call_id=result.call_id,
+                    tool_name=result.name.value,
+                    arguments=record.arguments,
+                    status=result.status.value,
+                    duration_ms=result.duration_ms,
+                    data_as_of=result.data_as_of,
+                    result_summary=record.result_summary,
+                    result_hash=record.result_hash,
+                    error_code=result.error.code if result.error is not None else None,
+                )
+            )
+        await self._repository.add_all(tool_calls)
+        evidence: list[MessageEvidence] = []
+        for result, tool_call, record in zip(
+            typed_results, tool_calls, records, strict=True
+        ):
+            if result.status != FinanceToolStatus.SUCCEEDED or result.data is None:
+                continue
+            evidence.append(
+                MessageEvidence(
+                    user_id=self._user_id,
+                    message_id=message_id,
+                    tool_call_id=tool_call.id,
+                    rank=len(evidence) + 1,
+                    evidence_type="finance",
+                    evidence_snapshot=record.evidence_snapshot,
+                )
+            )
+        await self._repository.add_all(evidence)
+        return evidence
 
     async def _mark_stream_terminal(
         self,
@@ -826,3 +998,23 @@ class ChatService:
 def _automatic_title(question: str) -> str:
     compact = " ".join(question.split())
     return compact[:MAX_AUTOMATIC_TITLE_LENGTH] or DEFAULT_CONVERSATION_TITLE
+
+
+def _detail_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _detail_text(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _risk_notice(result: RagAnswerResult) -> str | None:
+    if result.plan is None or result.plan.risk_policy != "high_risk_investment":
+        return None
+    return HIGH_RISK_INVESTMENT_DISCLAIMER

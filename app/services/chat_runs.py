@@ -12,6 +12,7 @@ from uuid import UUID
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agents.tools.finance import FinanceToolExecutor
 from app.config import Settings
 from app.errors import ApplicationError
 from app.providers.model_provider import ChatModelProvider, RerankerProvider
@@ -23,6 +24,7 @@ from app.services.chat import (
     ChatStreamStarted,
     StreamingRun,
 )
+from app.services.finance import FinanceService
 from app.services.retrieval import RagRetrievalService
 
 logger = logging.getLogger(__name__)
@@ -188,6 +190,16 @@ class ChatRunCoordinator:
                     context_max_characters=self._settings.rag_context_max_characters,
                     context_source_max_characters=(
                         self._settings.rag_context_source_max_characters
+                    ),
+                    finance_timezone=self._settings.finance_timezone,
+                    finance_tools=FinanceToolExecutor(
+                        FinanceService(session=session, user_id=user_id),
+                        market_stale_after_hours=(
+                            self._settings.finance_market_stale_after_hours
+                        ),
+                        exchange_rate_stale_after_hours=(
+                            self._settings.finance_exchange_rate_stale_after_hours
+                        ),
                     ),
                 )
                 service = ChatService(

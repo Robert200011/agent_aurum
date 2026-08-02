@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request, Response, status
@@ -23,6 +24,7 @@ from app.api.schemas.chat import (
     ConversationResponse,
     ConversationUpdate,
     MessageCitationResponse,
+    MessageEvidenceResponse,
     MessageResponse,
     QuestionCreate,
     RunCancellationResponse,
@@ -32,7 +34,7 @@ from app.api.schemas.chat import (
     StreamStatusResponse,
     StructuredAnswerResponse,
 )
-from app.db.models.chat import Message, MessageCitation
+from app.db.models.chat import AgentRun, Message, MessageCitation, MessageEvidence
 from app.errors import ApplicationError, ConflictError
 from app.services.chat import (
     ChatStreamCompleted,
@@ -103,6 +105,8 @@ async def get_conversation(
             _message_response(
                 message,
                 detail.citations_by_message.get(message.id, []),
+                detail.evidence_by_message.get(message.id, []),
+                detail.runs_by_message.get(message.id),
             )
             for message in detail.messages
         ],
@@ -150,7 +154,7 @@ async def get_latest_conversation_run(
     service: ChatServiceDependency,
 ) -> AgentRunResponse | None:
     run = await service.get_latest_run(conversation_id)
-    return AgentRunResponse.model_validate(run) if run is not None else None
+    return _agent_run_response(run) if run is not None else None
 
 
 @router.post(
@@ -402,6 +406,21 @@ def _structured_answer_response(persisted: PersistedAnswer) -> StructuredAnswerR
         message_id=persisted.message.id,
         answer=persisted.message.content,
         citations=[_citation_response(citation) for citation in persisted.citations],
+        evidence=[_evidence_response(item) for item in persisted.evidence],
+        data_as_of=persisted.data_as_of,
+        risk_notice=persisted.risk_notice,
+    )
+
+
+def _agent_run_response(run: AgentRun) -> AgentRunResponse:
+    response = AgentRunResponse.model_validate(run)
+    count = run.detail.get("finance_tool_count")
+    return response.model_copy(
+        update={
+            "finance_tool_count": count if isinstance(count, int) and count >= 0 else 0,
+            "data_as_of": _run_detail_datetime(run, "data_as_of"),
+            "risk_notice": _run_detail_text(run, "risk_notice"),
+        }
     )
 
 
@@ -417,11 +436,20 @@ def _sse(*, event: str, event_id: int, payload: BaseModel) -> str:
 def _message_response(
     message: Message,
     citations: list[MessageCitation],
+    evidence: list[MessageEvidence],
+    run: AgentRun | None,
 ) -> MessageResponse:
     response = MessageResponse.model_validate(message)
     return response.model_copy(
         update={
             "citations": [_citation_response(citation) for citation in citations],
+            "evidence": [_evidence_response(item) for item in evidence],
+            "data_as_of": (
+                _run_detail_datetime(run, "data_as_of") if run is not None else None
+            ),
+            "risk_notice": (
+                _run_detail_text(run, "risk_notice") if run is not None else None
+            ),
         }
     )
 
@@ -435,6 +463,33 @@ def _citation_response(citation: MessageCitation) -> MessageCitationResponse:
             "score": citation.score,
         }
     )
+
+
+def _evidence_response(evidence: MessageEvidence) -> MessageEvidenceResponse:
+    return MessageEvidenceResponse.model_validate(
+        evidence.evidence_snapshot
+        | {
+            "evidence_id": evidence.id,
+            "tool_call_id": evidence.tool_call_id,
+            "rank": evidence.rank,
+        }
+    )
+
+
+def _run_detail_datetime(run: AgentRun, key: str) -> datetime | None:
+    value = run.detail.get(key)
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _run_detail_text(run: AgentRun, key: str) -> str | None:
+    value = run.detail.get(key)
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _request_id(request: Request) -> str | None:

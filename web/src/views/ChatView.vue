@@ -19,6 +19,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import AnswerContent from '@/components/chat/AnswerContent.vue'
+import FinanceEvidencePanel from '@/components/chat/FinanceEvidencePanel.vue'
 import { ChatStreamRequestError, chatApi } from '@/services/chat'
 import { apiErrorMessage } from '@/services/http'
 import type {
@@ -28,6 +29,7 @@ import type {
   Conversation,
   ConversationDetail,
   MessageCitation,
+  MessageEvidence,
 } from '@/types/chat'
 import { citationLocation } from '@/utils/chat'
 
@@ -45,9 +47,12 @@ const question = ref('')
 const pendingQuestion = ref('')
 const streamingAnswer = ref('')
 const streamingCitations = ref<MessageCitation[]>([])
+const streamingEvidence = ref<MessageEvidence[]>([])
+const streamingDataAsOf = ref<string | null>(null)
+const streamingRiskNotice = ref<string | null>(null)
 const streamingMessageId = ref<string | null>(null)
 const activeRunId = ref<string | null>(null)
-const generationStage = ref<ChatGenerationStage>('retrieving')
+const generationStage = ref<ChatGenerationStage>('understanding')
 const streamMode = ref<'new' | 'regenerate' | 'resume'>('new')
 const stopping = ref(false)
 const errorText = ref('')
@@ -76,6 +81,9 @@ const canAsk = computed(
     !sending.value,
 )
 const generationStatusText = computed(() => {
+  if (generationStage.value === 'understanding') return '正在理解问题'
+  if (generationStage.value === 'querying_finance') return '正在查询个人财务数据'
+  if (generationStage.value === 'analyzing') return '正在分析财务证据和知识依据'
   if (generationStage.value === 'generating') return '正在生成回答'
   if (generationStage.value === 'finalizing') return '正在校验引用并保存'
   return '正在检索项目知识'
@@ -86,6 +94,11 @@ function projectName(projectId: string | null): string {
     projects.value.find((project) => project.id === projectId)?.name ??
     '项目不可用'
   )
+}
+
+function displayAnswer(content: string, riskNotice: string | null): string {
+  if (!riskNotice || !content.trimEnd().endsWith(riskNotice)) return content
+  return content.trimEnd().slice(0, -riskNotice.length).trimEnd()
 }
 
 async function loadWorkspace(): Promise<void> {
@@ -281,6 +294,9 @@ type StreamRequest = (
     onComplete: (answer: {
       answer: string
       citations: MessageCitation[]
+      evidence: MessageEvidence[]
+      data_as_of: string | null
+      risk_notice: string | null
     }) => void
   },
   signal: AbortSignal,
@@ -292,7 +308,10 @@ async function runGeneration(
 ): Promise<void> {
   streamingAnswer.value = ''
   streamingCitations.value = []
-  generationStage.value = 'retrieving'
+  streamingEvidence.value = []
+  streamingDataAsOf.value = null
+  streamingRiskNotice.value = null
+  generationStage.value = 'understanding'
   errorText.value = ''
   stopping.value = false
   sending.value = true
@@ -315,6 +334,9 @@ async function runGeneration(
         onComplete(answer) {
           streamingAnswer.value = answer.answer
           streamingCitations.value = answer.citations
+          streamingEvidence.value = answer.evidence
+          streamingDataAsOf.value = answer.data_as_of
+          streamingRiskNotice.value = answer.risk_notice
           scheduleScrollToBottom()
         },
       },
@@ -332,6 +354,9 @@ async function runGeneration(
     pendingQuestion.value = ''
     streamingAnswer.value = ''
     streamingCitations.value = []
+    streamingEvidence.value = []
+    streamingDataAsOf.value = null
+    streamingRiskNotice.value = null
     streamingMessageId.value = null
     activeRunId.value = null
     sending.value = false
@@ -372,6 +397,9 @@ async function regenerateAnswer(chatMessage: ChatMessage): Promise<void> {
   streamingMessageId.value = chatMessage.id
   chatMessage.content = ''
   chatMessage.citations = []
+  chatMessage.evidence = []
+  chatMessage.data_as_of = null
+  chatMessage.risk_notice = null
   chatMessage.status = 'streaming'
   await runGeneration(conversation.id, (handlers, signal) =>
     chatApi.regenerateStream(
@@ -632,9 +660,17 @@ onMounted(loadWorkspace)
                   "
                   class="streamed-answer"
                 >
+                  <FinanceEvidencePanel
+                    :evidence="streamingEvidence"
+                    :data-as-of="streamingDataAsOf"
+                    :risk-notice="streamingRiskNotice"
+                  />
+                  <div v-if="streamingAnswer" class="answer-section-label">
+                    分析建议
+                  </div>
                   <AnswerContent
                     v-if="streamingAnswer"
-                    :answer="streamingAnswer"
+                    :answer="displayAnswer(streamingAnswer, streamingRiskNotice)"
                     :citation-ids="
                       streamingCitations.map((citation) => citation.citation_id)
                     "
@@ -653,8 +689,17 @@ onMounted(loadWorkspace)
                     aria-hidden="true"
                   />
                 </div>
-                <div
+                <FinanceEvidencePanel
                   v-else-if="
+                    chatMessage.role === 'assistant' &&
+                      (chatMessage.evidence.length || chatMessage.risk_notice)
+                  "
+                  :evidence="chatMessage.evidence"
+                  :data-as-of="chatMessage.data_as_of"
+                  :risk-notice="chatMessage.risk_notice"
+                />
+                <div
+                  v-if="
                     chatMessage.role === 'assistant' &&
                       ['failed', 'cancelled'].includes(chatMessage.status) &&
                       !chatMessage.content
@@ -667,9 +712,23 @@ onMounted(loadWorkspace)
                       : '本次回答生成失败。'
                   }}
                 </div>
+                <div
+                  v-if="
+                    chatMessage.role === 'assistant' &&
+                      chatMessage.content &&
+                      !(streamingMessageId === chatMessage.id && sending)
+                  "
+                  class="answer-section-label"
+                >
+                  分析建议
+                </div>
                 <AnswerContent
-                  v-else-if="chatMessage.role === 'assistant'"
-                  :answer="chatMessage.content"
+                  v-if="
+                    chatMessage.role === 'assistant' &&
+                      chatMessage.content &&
+                      !(streamingMessageId === chatMessage.id && sending)
+                  "
+                  :answer="displayAnswer(chatMessage.content, chatMessage.risk_notice)"
                   :citation-ids="
                     chatMessage.citations.map((citation) => citation.citation_id)
                   "
@@ -678,7 +737,9 @@ onMounted(loadWorkspace)
                       openCitation(chatMessage.citations, citationId)
                   "
                 />
-                <p v-else class="user-question">{{ chatMessage.content }}</p>
+                <p v-if="chatMessage.role === 'user'" class="user-question">
+                  {{ chatMessage.content }}
+                </p>
                 <div
                   v-if="
                     chatMessage.role === 'assistant' &&
@@ -687,7 +748,7 @@ onMounted(loadWorkspace)
                   "
                   class="message-sources"
                 >
-                  <span>参考来源</span>
+                  <span>知识库依据</span>
                   <button
                     v-for="citation in chatMessage.citations"
                     :key="citation.chunk_id"
@@ -742,8 +803,14 @@ onMounted(loadWorkspace)
                 <div class="message-body">
                   <div class="message-meta"><strong>Aurum</strong></div>
                   <div v-if="streamingAnswer" class="streamed-answer">
+                    <FinanceEvidencePanel
+                      :evidence="streamingEvidence"
+                      :data-as-of="streamingDataAsOf"
+                      :risk-notice="streamingRiskNotice"
+                    />
+                    <div class="answer-section-label">分析建议</div>
                     <AnswerContent
-                      :answer="streamingAnswer"
+                      :answer="displayAnswer(streamingAnswer, streamingRiskNotice)"
                       :citation-ids="
                         streamingCitations.map((citation) => citation.citation_id)
                       "
@@ -761,7 +828,7 @@ onMounted(loadWorkspace)
                       v-if="streamingCitations.length"
                       class="message-sources"
                     >
-                      <span>参考来源</span>
+                      <span>知识库依据</span>
                       <button
                         v-for="citation in streamingCitations"
                         :key="citation.chunk_id"
@@ -1264,6 +1331,14 @@ onMounted(loadWorkspace)
   border-radius: 10px;
   color: var(--danger);
   background: rgb(216 79 79 / 6%);
+}
+
+.answer-section-label {
+  margin: 4px 0 7px;
+  color: var(--ink-500);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
 }
 
 .message-actions {
