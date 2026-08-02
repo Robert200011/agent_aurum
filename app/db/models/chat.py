@@ -147,6 +147,7 @@ class MessageCitation(UUIDPrimaryKeyMixin, Base):
 class AgentRun(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
+        UniqueConstraint("id", "user_id", name="agent_run_user_identity"),
         ForeignKeyConstraint(
             ["conversation_id", "user_id"],
             [f"{CHAT_SCHEMA}.conversations.id", f"{CHAT_SCHEMA}.conversations.user_id"],
@@ -192,6 +193,111 @@ class AgentRun(UUIDPrimaryKeyMixin, Base):
     detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AgentToolCall(UUIDPrimaryKeyMixin, Base):
+    """一次只读 Agent 工具调用的脱敏审计记录。"""
+
+    __tablename__ = "agent_tool_calls"
+    __table_args__ = (
+        UniqueConstraint("id", "user_id", name="agent_tool_call_user_identity"),
+        ForeignKeyConstraint(
+            ["run_id", "user_id"],
+            [f"{CHAT_SCHEMA}.agent_runs.id", f"{CHAT_SCHEMA}.agent_runs.user_id"],
+            name="fk_agent_tool_calls_run_user",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "status IN ('succeeded', 'failed')",
+            name="agent_tool_call_status_valid",
+        ),
+        CheckConstraint(
+            "duration_ms >= 0",
+            name="agent_tool_call_duration_nonnegative",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(arguments) = 'object'",
+            name="agent_tool_call_arguments_object",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(result_summary) = 'object'",
+            name="agent_tool_call_result_summary_object",
+        ),
+        CheckConstraint(
+            "result_hash ~ '^[0-9a-f]{64}$'",
+            name="agent_tool_call_result_hash_valid",
+        ),
+        Index("ix_agent_tool_calls_run_created", "run_id", "created_at"),
+        Index("ix_agent_tool_calls_run_call", "run_id", "call_id", unique=True),
+        {"schema": CHAT_SCHEMA},
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[UUID] = mapped_column(nullable=False)
+    call_id: Mapped[UUID] = mapped_column(nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    data_as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    result_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    result_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class MessageEvidence(UUIDPrimaryKeyMixin, Base):
+    """回答使用的消息级财务事实快照及其工具来源。"""
+
+    __tablename__ = "message_evidence"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["message_id", "user_id"],
+            [f"{CHAT_SCHEMA}.messages.id", f"{CHAT_SCHEMA}.messages.user_id"],
+            name="fk_message_evidence_message_user",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["tool_call_id", "user_id"],
+            [
+                f"{CHAT_SCHEMA}.agent_tool_calls.id",
+                f"{CHAT_SCHEMA}.agent_tool_calls.user_id",
+            ],
+            name="fk_message_evidence_tool_call_user",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("rank > 0", name="message_evidence_rank_positive"),
+        CheckConstraint(
+            "evidence_type = 'finance'",
+            name="message_evidence_type_valid",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_snapshot) = 'object' "
+            "AND evidence_snapshot ?& ARRAY["
+            "'tool_name', 'label', 'data_as_of', 'calculation_basis', "
+            "'currencies', 'facts', 'warning_codes'"
+            "]",
+            name="message_evidence_snapshot_valid",
+        ),
+        Index("ix_message_evidence_message_rank", "message_id", "rank", unique=True),
+        {"schema": CHAT_SCHEMA},
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False
+    )
+    message_id: Mapped[UUID] = mapped_column(nullable=False)
+    tool_call_id: Mapped[UUID] = mapped_column(nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    evidence_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

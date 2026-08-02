@@ -466,6 +466,47 @@ class MarketSnapshotResponse(BaseModel):
     data_source: str
 
 
+class ExchangeRateSnapshotCreate(BaseModel):
+    """由管理员发布的可审计直接汇率观测。"""
+
+    base_currency: CurrencyCode
+    quote_currency: CurrencyCode
+    rate: Decimal = Field(gt=0, max_digits=28, decimal_places=12)
+    data_source: str = Field(min_length=1, max_length=64)
+    observed_at: datetime
+
+    @field_validator("data_source")
+    @classmethod
+    def normalize_exchange_source(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("observed_at")
+    @classmethod
+    def require_exchange_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("observed_at must include a timezone")
+        return value
+
+    @model_validator(mode="after")
+    def require_distinct_exchange_currencies(self) -> ExchangeRateSnapshotCreate:
+        if self.base_currency == self.quote_currency:
+            raise ValueError("base_currency and quote_currency must be different")
+        return self
+
+
+class ExchangeRateSnapshotResponse(BaseModel):
+    """持久化汇率快照，不包含隐式或多跳推导。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    base_currency: str
+    quote_currency: str
+    rate: Decimal
+    data_source: str
+    observed_at: datetime
+
+
 class BudgetExecutionResponse(BaseModel):
     """单个预算的确定性支出进度。"""
 

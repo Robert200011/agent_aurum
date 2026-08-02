@@ -11,6 +11,8 @@ from fastapi import APIRouter, Query, Response, status
 # 发布市场数据还需要管理员依赖。
 from app.api.dependencies import AdminContextDependency, FinanceServiceDependency
 from app.api.schemas.finance import (
+    ExchangeRateSnapshotCreate,
+    ExchangeRateSnapshotResponse,
     HoldingCreate,
     HoldingListResponse,
     HoldingPerformanceResponse,
@@ -32,7 +34,42 @@ investment_router = APIRouter(
     tags=["finance-investment-transactions"],
 )
 market_router = APIRouter(prefix="/finance/market-snapshots", tags=["finance-market"])
+exchange_router = APIRouter(prefix="/finance/exchange-rates", tags=["finance-exchange"])
 portfolio_router = APIRouter(prefix="/finance/portfolio", tags=["finance-portfolio"])
+
+
+@exchange_router.post(
+    "",
+    response_model=ExchangeRateSnapshotResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_exchange_rate_snapshot(
+    payload: ExchangeRateSnapshotCreate,
+    _admin: AdminContextDependency,
+    service: FinanceServiceDependency,
+) -> ExchangeRateSnapshotResponse:
+    """仅允许管理员发布带来源和观测时间的直接汇率。"""
+
+    snapshot = await service.create_exchange_rate_snapshot(**payload.model_dump())
+    return ExchangeRateSnapshotResponse.model_validate(snapshot)
+
+
+@exchange_router.get(
+    "/{source_currency}/{target_currency}/latest",
+    response_model=ExchangeRateSnapshotResponse,
+)
+async def get_latest_exchange_rate_snapshot(
+    source_currency: str,
+    target_currency: str,
+    service: FinanceServiceDependency,
+) -> ExchangeRateSnapshotResponse:
+    """返回解析直接或反向报价时实际使用的原始快照。"""
+
+    snapshot = await service.get_exchange_rate_snapshot(
+        source_currency=source_currency.strip().upper(),
+        target_currency=target_currency.strip().upper(),
+    )
+    return ExchangeRateSnapshotResponse.model_validate(snapshot)
 
 
 # 期初持仓表示已有头寸，不会被伪造为买入交易。

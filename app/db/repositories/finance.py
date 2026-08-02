@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # 仓储方法只在调用方请求级事务中执行参数化 SQLAlchemy 语句。
 from app.db.models.finance import (
     Budget,
+    ExchangeRateSnapshot,
     FinancialAccount,
     FinancialTransaction,
     InvestmentHolding,
@@ -459,6 +460,43 @@ class FinanceRepository:
         row = (await self._session.execute(statement)).one()
         return Decimal(row[0]), Decimal(row[1])
 
+    async def cash_flow_by_category(
+        self,
+        user_id: UUID,
+        *,
+        start_date: date,
+        end_date: date,
+        currency: str,
+    ) -> list[tuple[str, str, Decimal]]:
+        """按收支类型和分类聚合一个确定的单币种报表窗口。"""
+
+        statement = (
+            select(
+                FinancialTransaction.transaction_type,
+                FinancialTransaction.category,
+                func.sum(FinancialTransaction.amount),
+            )
+            .where(
+                FinancialTransaction.user_id == user_id,
+                FinancialTransaction.transaction_date.between(start_date, end_date),
+                FinancialTransaction.currency == currency,
+            )
+            .group_by(
+                FinancialTransaction.transaction_type,
+                FinancialTransaction.category,
+            )
+            .order_by(
+                FinancialTransaction.transaction_type,
+                func.sum(FinancialTransaction.amount).desc(),
+                FinancialTransaction.category,
+            )
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [
+            (str(transaction_type), str(category), Decimal(amount))
+            for transaction_type, category, amount in rows
+        ]
+
     async def active_account_balance(self, user_id: UUID, currency: str) -> Decimal:
         """汇总单一币种下当前有效账户的余额。"""
 
@@ -494,6 +532,57 @@ class FinanceRepository:
             .order_by(Budget.category, Budget.start_date, Budget.id)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def budgets_with_spending_for_period(
+        self,
+        user_id: UUID,
+        *,
+        start_date: date,
+        end_date: date,
+        currency: str,
+        category: str | None = None,
+    ) -> list[tuple[Budget, Decimal]]:
+        """加载相交预算及其各自有效覆盖区间内的支出。"""
+
+        spent = (
+            select(
+                func.coalesce(
+                    func.sum(FinancialTransaction.amount),
+                    Decimal("0"),
+                )
+            )
+            .where(
+                FinancialTransaction.user_id == user_id,
+                FinancialTransaction.transaction_type == "expense",
+                FinancialTransaction.currency == currency,
+                FinancialTransaction.category == Budget.category,
+                FinancialTransaction.transaction_date >= func.greatest(
+                    Budget.start_date,
+                    start_date,
+                ),
+                FinancialTransaction.transaction_date <= func.least(
+                    Budget.end_date,
+                    end_date,
+                ),
+            )
+            .correlate(Budget)
+            .scalar_subquery()
+        )
+        filters = [
+            Budget.user_id == user_id,
+            Budget.currency == currency,
+            Budget.start_date <= end_date,
+            Budget.end_date >= start_date,
+        ]
+        if category is not None:
+            filters.append(func.lower(Budget.category) == category.casefold())
+        statement = (
+            select(Budget, spent.label("spent_amount"))
+            .where(*filters)
+            .order_by(Budget.category, Budget.start_date, Budget.id)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [(budget, Decimal(spent_amount)) for budget, spent_amount in rows]
 
     # 支出按分类聚合，因为预算使用相同的键。
     # 服务稍后会将缺失分类映射为 Decimal 零值。
@@ -620,4 +709,140 @@ class FinanceRepository:
         # 公开路由不提供删除功能，此方法为未来管理员流程预留。
         await self._session.execute(
             delete(MarketPriceSnapshot).where(MarketPriceSnapshot.id == snapshot_id)
+        )
+
+    async def finance_summary_currencies(
+        self,
+        user_id: UUID,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[str]:
+        """返回财务摘要所涉及账户、流水或预算币种的并集。"""
+
+        statements = (
+            select(FinancialAccount.currency).where(
+                FinancialAccount.user_id == user_id,
+                FinancialAccount.is_active.is_(True),
+            ).distinct(),
+            select(FinancialTransaction.currency).where(
+                FinancialTransaction.user_id == user_id,
+                FinancialTransaction.transaction_date.between(start_date, end_date),
+            ).distinct(),
+            select(Budget.currency).where(
+                Budget.user_id == user_id,
+                Budget.start_date <= end_date,
+                Budget.end_date >= start_date,
+            ).distinct(),
+        )
+        currencies: set[str] = set()
+        for statement in statements:
+            currencies.update(str(value) for value in await self._session.scalars(statement))
+        return sorted(currencies)
+
+    async def cash_flow_currencies(
+        self,
+        user_id: UUID,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[str]:
+        """返回一个或多个现金流窗口内实际存在的币种。"""
+
+        statement = (
+            select(FinancialTransaction.currency)
+            .where(
+                FinancialTransaction.user_id == user_id,
+                FinancialTransaction.transaction_date.between(start_date, end_date),
+            )
+            .distinct()
+            .order_by(FinancialTransaction.currency)
+        )
+        return [str(value) for value in await self._session.scalars(statement)]
+
+    async def expense_currencies(
+        self,
+        user_id: UUID,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[str]:
+        """返回窗口内实际存在支出记录的币种。"""
+
+        statement = (
+            select(FinancialTransaction.currency)
+            .where(
+                FinancialTransaction.user_id == user_id,
+                FinancialTransaction.transaction_type == "expense",
+                FinancialTransaction.transaction_date.between(start_date, end_date),
+            )
+            .distinct()
+            .order_by(FinancialTransaction.currency)
+        )
+        return [str(value) for value in await self._session.scalars(statement)]
+
+    async def budget_currencies(
+        self,
+        user_id: UUID,
+        *,
+        start_date: date,
+        end_date: date,
+        category: str | None,
+    ) -> list[str]:
+        """返回覆盖请求窗口和可选分类的预算币种。"""
+
+        filters = [
+            Budget.user_id == user_id,
+            Budget.start_date <= end_date,
+            Budget.end_date >= start_date,
+        ]
+        if category is not None:
+            filters.append(func.lower(Budget.category) == category.casefold())
+        statement = (
+            select(Budget.currency)
+            .where(*filters)
+            .distinct()
+            .order_by(Budget.currency)
+        )
+        return [str(value) for value in await self._session.scalars(statement)]
+
+    async def holding_currencies(self, user_id: UUID) -> list[str]:
+        """返回当前租户持仓使用的所有币种。"""
+
+        statement = (
+            select(InvestmentHolding.currency)
+            .where(InvestmentHolding.user_id == user_id)
+            .distinct()
+            .order_by(InvestmentHolding.currency)
+        )
+        return [str(value) for value in await self._session.scalars(statement)]
+
+    async def latest_exchange_rate_snapshot(
+        self,
+        source_currency: str,
+        target_currency: str,
+    ) -> ExchangeRateSnapshot | None:
+        """选择直接或反向币种对中观测时间最新的快照。"""
+
+        statement = (
+            select(ExchangeRateSnapshot)
+            .where(
+                (
+                    (ExchangeRateSnapshot.base_currency == source_currency)
+                    & (ExchangeRateSnapshot.quote_currency == target_currency)
+                )
+                | (
+                    (ExchangeRateSnapshot.base_currency == target_currency)
+                    & (ExchangeRateSnapshot.quote_currency == source_currency)
+                )
+            )
+            .order_by(
+                ExchangeRateSnapshot.observed_at.desc(),
+                ExchangeRateSnapshot.id.desc(),
+            )
+            .limit(1)
+        )
+        return cast(
+            ExchangeRateSnapshot | None,
+            await self._session.scalar(statement),
         )

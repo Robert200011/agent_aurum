@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import date, datetime
 from time import perf_counter
 from typing import Any, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -17,8 +19,10 @@ from app.agents.state import (
     RagAnswerInput,
     RagAnswerOutput,
     RagAnswerResult,
+    RagAnswerStage,
     RagAnswerStreamEvent,
 )
+from app.agents.tools.finance import FinanceToolExecutor
 from app.providers.model_provider import ChatModelProvider
 from app.services.retrieval import RagRetrievalService
 
@@ -34,6 +38,8 @@ class RagAnswerService:
         retrieval_limit: int,
         context_max_characters: int,
         context_source_max_characters: int,
+        finance_tools: FinanceToolExecutor | None = None,
+        finance_timezone: str = "Asia/Shanghai",
         checkpointer: BaseCheckpointSaver[str] | None = None,
     ) -> None:
         self._checkpoint_enabled = checkpointer is not None
@@ -42,11 +48,13 @@ class RagAnswerService:
         self._chat_provider = chat_provider
         self._context_max_characters = context_max_characters
         self._context_source_max_characters = context_source_max_characters
+        self._finance_timezone = finance_timezone
         self._graph = build_rag_answer_graph(
             retrieval_service=retrieval_service,
             chat_provider=chat_provider,
             context_max_characters=context_max_characters,
             context_source_max_characters=context_source_max_characters,
+            finance_tools=finance_tools,
             checkpointer=checkpointer,
         )
 
@@ -66,6 +74,7 @@ class RagAnswerService:
             retrieval_limit=self._retrieval_limit,
             min_score=None,
             response_mode="complete",
+            current_date=_current_date(self._finance_timezone),
         )
         config = _graph_config(thread_id)
         output = cast(
@@ -84,6 +93,9 @@ class RagAnswerService:
             completion=output["completion"],
             latency_ms=latency_ms,
             checkpoint_id=await self._latest_checkpoint_id(config),
+            plan=output["plan"],
+            finance_results=output["finance_results"],
+            data_as_of=_latest_finance_data_time(output["finance_results"]),
         )
 
     async def stream(
@@ -102,6 +114,7 @@ class RagAnswerService:
             retrieval_limit=self._retrieval_limit,
             min_score=None,
             response_mode="stream",
+            current_date=_current_date(self._finance_timezone),
         )
         config = _graph_config(thread_id)
         output: RagAnswerOutput | None = None
@@ -112,7 +125,18 @@ class RagAnswerService:
         ):
             if mode == "custom":
                 event = cast(dict[str, Any], data)
-                if event.get("type") == "answer_delta" and isinstance(
+                if event.get("type") == "stage" and isinstance(event.get("stage"), str):
+                    stage = cast(str, event["stage"])
+                    if stage in {
+                        "understanding",
+                        "retrieving",
+                        "querying_finance",
+                        "analyzing",
+                        "generating",
+                        "finalizing",
+                    }:
+                        yield RagAnswerStage(cast(Any, stage))
+                elif event.get("type") == "answer_delta" and isinstance(
                     event.get("text"), str
                 ):
                     yield RagAnswerDelta(cast(str, event["text"]))
@@ -132,6 +156,9 @@ class RagAnswerService:
                 completion=output["completion"],
                 latency_ms=max(0, round((perf_counter() - started) * 1000)),
                 checkpoint_id=await self._latest_checkpoint_id(config),
+                plan=output["plan"],
+                finance_results=output["finance_results"],
+                data_as_of=_latest_finance_data_time(output["finance_results"]),
             )
         )
 
@@ -153,3 +180,20 @@ def _graph_config(thread_id: UUID) -> RunnableConfig:
             "checkpoint_ns": "",
         }
     }
+
+
+def _current_date(timezone_name: str) -> date:
+    """仅使用服务端配置的 IANA 时区解析相对日期。"""
+
+    return datetime.now(ZoneInfo(timezone_name)).date()
+
+
+def _latest_finance_data_time(results: tuple[object, ...]) -> datetime | None:
+    from app.agents.tools.finance import FinanceToolResult
+
+    timestamps = [
+        result.data_as_of
+        for result in results
+        if isinstance(result, FinanceToolResult)
+    ]
+    return max(timestamps) if timestamps else None

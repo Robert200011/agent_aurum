@@ -20,6 +20,26 @@ if config.config_file_name is not None:
 
 config.set_main_option("sqlalchemy.url", get_settings().migration_database_url)
 target_metadata = Base.metadata
+LANGGRAPH_CHECKPOINT_TABLES = {
+    "checkpoint_migrations",
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
+}
+
+
+def include_name(
+    name: str | None,
+    type_: str,
+    parent_names: dict[str, str | None],
+) -> bool:
+    """把由 LangGraph 自行维护的 checkpoint 表排除在 Alembic 模型比较之外。"""
+
+    return not (
+        type_ == "table"
+        and parent_names.get("schema_name") == "agent"
+        and name in LANGGRAPH_CHECKPOINT_TABLES
+    )
 
 
 def run_migrations_offline() -> None:
@@ -30,6 +50,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         include_schemas=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -41,6 +62,7 @@ def do_run_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,
         include_schemas=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()

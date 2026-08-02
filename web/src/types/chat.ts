@@ -14,7 +14,13 @@ export type AgentRunStatus =
   | 'completed'
   | 'failed'
   | 'cancelled'
-export type ChatGenerationStage = 'retrieving' | 'generating' | 'finalizing'
+export type ChatGenerationStage =
+  | 'understanding'
+  | 'retrieving'
+  | 'querying_finance'
+  | 'analyzing'
+  | 'generating'
+  | 'finalizing'
 
 export interface ChatProject {
   id: string
@@ -59,6 +65,28 @@ export interface MessageCitation {
   score: number | null
 }
 
+export interface FinanceEvidenceFact {
+  label: string
+  value: string
+  currency: string | null
+  context: string | null
+}
+
+export interface MessageEvidence {
+  evidence_id: string
+  tool_call_id: string
+  rank: number
+  tool_name: string
+  label: string
+  data_as_of: string
+  period_start: string | null
+  period_end: string | null
+  currencies: string[]
+  calculation_basis: string
+  facts: FinanceEvidenceFact[]
+  warning_codes: string[]
+}
+
 export interface ChatMessage {
   id: string
   conversation_id: string
@@ -71,6 +99,9 @@ export interface ChatMessage {
   latency_ms: number | null
   created_at: string
   citations: MessageCitation[]
+  evidence: MessageEvidence[]
+  data_as_of: string | null
+  risk_notice: string | null
 }
 
 export interface ConversationDetail extends Conversation {
@@ -90,12 +121,16 @@ export interface AgentRun {
   started_at: string | null
   completed_at: string | null
   created_at: string
+  finance_tool_count: number
+  data_as_of: string | null
+  risk_notice: string | null
 }
 
 export interface StructuredAnswer {
   message_id: string
   answer: string
   citations: MessageCitation[]
+  evidence: MessageEvidence[]
   data_as_of: string | null
   risk_notice: string | null
 }

@@ -7,7 +7,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal, cast
 
-from dashscope import TextEmbedding  # type: ignore[import-untyped]
+from dashscope import TextEmbedding  # type: ignore[import-untyped, unused-ignore]
 
 from app.config import Settings
 from app.providers.model_provider import EmbeddingProvider

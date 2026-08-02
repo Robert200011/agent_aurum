@@ -30,6 +30,7 @@ from app.db.base import (
 
 MONEY = Numeric(20, 4)
 QUANTITY = Numeric(28, 10)
+EXCHANGE_RATE = Numeric(28, 12)
 
 
 class FinancialAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -193,3 +194,34 @@ class MarketPriceSnapshot(UUIDPrimaryKeyMixin, Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     data_source: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class ExchangeRateSnapshot(UUIDPrimaryKeyMixin, Base):
+    """带来源和观测时间的不可变直接汇率快照。"""
+
+    __tablename__ = "exchange_rate_snapshots"
+    __table_args__ = (
+        CheckConstraint("rate > 0", name="rate_positive"),
+        CheckConstraint("base_currency <> quote_currency", name="currencies_distinct"),
+        Index(
+            "uq_exchange_rate_pair_source_time",
+            "base_currency",
+            "quote_currency",
+            "data_source",
+            "observed_at",
+            unique=True,
+        ),
+        Index(
+            "ix_exchange_rate_pair_observed",
+            "base_currency",
+            "quote_currency",
+            "observed_at",
+        ),
+        {"schema": FINANCE_SCHEMA},
+    )
+
+    base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    quote_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(EXCHANGE_RATE, nullable=False)
+    data_source: Mapped[str] = mapped_column(String(64), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

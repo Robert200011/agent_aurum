@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -170,6 +170,32 @@ class MessageCitationResponse(CitationSourceSnapshot):
         return value.strip() if isinstance(value, str) else value
 
 
+class FinanceEvidenceFactResponse(BaseModel):
+    """财务证据卡片中一个可读的数值事实。"""
+
+    label: str = Field(min_length=1, max_length=64)
+    value: str = Field(min_length=1, max_length=128)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    context: str | None = Field(default=None, max_length=256)
+
+
+class MessageEvidenceResponse(BaseModel):
+    """不伪装成文档引用的消息级财务证据。"""
+
+    evidence_id: UUID
+    tool_call_id: UUID
+    rank: int = Field(ge=1)
+    tool_name: str = Field(min_length=1, max_length=64)
+    label: str = Field(min_length=1, max_length=128)
+    data_as_of: datetime
+    period_start: date | None = None
+    period_end: date | None = None
+    currencies: list[str] = Field(default_factory=list)
+    calculation_basis: str = Field(min_length=1, max_length=512)
+    facts: list[FinanceEvidenceFactResponse] = Field(default_factory=list)
+    warning_codes: list[str] = Field(default_factory=list)
+
+
 class MessageResponse(BaseModel):
     """可恢复的单条产品消息及其引用。"""
 
@@ -186,6 +212,9 @@ class MessageResponse(BaseModel):
     latency_ms: int | None = Field(default=None, ge=0)
     created_at: datetime
     citations: list[MessageCitationResponse] = Field(default_factory=list)
+    evidence: list[MessageEvidenceResponse] = Field(default_factory=list)
+    data_as_of: datetime | None = None
+    risk_notice: str | None = None
 
 
 class ConversationDetailResponse(ConversationResponse):
@@ -211,6 +240,9 @@ class AgentRunResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
+    finance_tool_count: int = Field(default=0, ge=0)
+    data_as_of: datetime | None = None
+    risk_notice: str | None = None
 
 
 class StructuredAnswerResponse(BaseModel):
@@ -219,6 +251,7 @@ class StructuredAnswerResponse(BaseModel):
     message_id: UUID
     answer: str = Field(min_length=1)
     citations: list[MessageCitationResponse] = Field(default_factory=list)
+    evidence: list[MessageEvidenceResponse] = Field(default_factory=list)
     data_as_of: datetime | None = None
     risk_notice: str | None = None
 
@@ -239,7 +272,14 @@ class StreamDeltaResponse(BaseModel):
 class StreamStatusResponse(BaseModel):
     """SSE status 事件中的稳定用户可见阶段。"""
 
-    stage: Literal["retrieving", "generating", "finalizing"]
+    stage: Literal[
+        "understanding",
+        "retrieving",
+        "querying_finance",
+        "analyzing",
+        "generating",
+        "finalizing",
+    ]
 
 
 class StreamErrorResponse(BaseModel):
