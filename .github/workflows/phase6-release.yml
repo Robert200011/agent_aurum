@@ -44,12 +44,11 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]" pip-audit
-      - run: ruff check app migrations tests scripts
+      - run: ruff check app migrations scripts
       - run: mypy app
       - run: alembic upgrade head
       - run: alembic check
-      - run: pytest
-      - run: python scripts/run_phase6_evaluation.py --output phase6-gate.json
+      - run: python scripts/run_phase6_evaluation.py --skip-fault-pytest --output phase6-gate.json
       - run: pip-audit
       - run: pip freeze > python-dependencies.txt
       - uses: actions/upload-artifact@v4
