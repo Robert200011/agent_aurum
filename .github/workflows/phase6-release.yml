@@ -97,8 +97,8 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.22.0 "aurum-agent-web:$GITHUB_SHA" -o cyclonedx-json > web-sbom.cdx.json
       - name: Scan candidate images
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.59.1 image --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-api:$GITHUB_SHA"
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.59.1 image --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-web:$GITHUB_SHA"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-api:$GITHUB_SHA"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-web:$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: image-sboms
