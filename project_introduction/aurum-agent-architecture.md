@@ -1,12 +1,12 @@
 # Aurum Agent 总体架构设计
 
-> 文档状态：总体架构设计，已按阶段一、二实现持续校准  
+> 文档状态：总体架构设计，已按阶段一至六实现持续校准
 > 项目目录：`E:\agent_aurum`  
 > 初步方案：[aurum-agent-initial-design.md](./aurum-agent-initial-design.md)  
 > 部署方案：[aurum-agent-deployment-guide.md](./aurum-agent-deployment-guide.md)  
 > 当前交接：[aurum-agent-current-handoff.md](./aurum-agent-current-handoff.md)  
 > 编写日期：2026-07-23  
-> 最后更新：2026-07-24
+> 最后更新：2026-08-03
 
 ## 1. 文档目标
 
@@ -1053,7 +1053,9 @@ KnowledgeRepository  → PgVectorKnowledgeRepository
 12. 回答引用必须来自实际检索结果；
 13. V1 Agent 只读；
 14. 未来写操作必须经过 Human-in-the-loop；
-15. 所有外部模型和存储通过 Provider 接口隔离。
+15. 所有外部模型和存储通过 Provider 接口隔离；
+16. 阶段六单机生产基线使用开发栈与生产蓝绿栈分离的 Compose 项目；
+17. 当前功能基线为 `e8aa6ea`，真实生产切流仍须通过候选环境门禁。
 
 ### 23.1 P6.3 回归门禁边界
 
