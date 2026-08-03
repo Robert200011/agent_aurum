@@ -49,7 +49,7 @@ jobs:
       - run: alembic upgrade head
       - run: alembic check
       - run: python scripts/run_phase6_evaluation.py --skip-fault-pytest --output phase6-gate.json
-      - run: pip-audit
+      - run: pip-audit .
       - run: pip freeze > python-dependencies.txt
       - uses: actions/upload-artifact@v4
         with:
