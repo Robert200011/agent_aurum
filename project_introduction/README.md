@@ -3,12 +3,14 @@
 > 项目介绍与运行说明，统一归档于 `project_introduction/`。
 
 Aurum Agent 是面向个人财务、存款收支和投资知识问答的智能应用。当前已完成阶段一至
-阶段五：安全与租户底座、个人财务账本、知识库入库与 Hybrid Retrieval、可信引用 RAG，
-以及受控编排的只读个人财务 Agent。PDF、DOCX、Markdown、TXT、CSV、XLSX 均已接入
+阶段六的工程开发：安全与租户底座、个人财务账本、知识库入库与 Hybrid Retrieval、可信
+引用 RAG、受控编排的只读个人财务 Agent，以及可观测、配额、缓存、回归门禁、备份恢复和
+蓝绿发布能力。PDF、DOCX、Markdown、TXT、CSV、XLSX 均已接入
 异步解析、确定性分块、Embedding、pgvector 和原子发布；聊天链路支持 SSE、加密
 Checkpoint、财务证据、知识引用、风险提示和历史恢复。阶段五最终图版本为
 `finance-agent-p5.6-v1`，当前加固图版本为 `finance-agent-p6.3-v1`。阶段六 P6.1～P6.5
 工程开发与本地发布/回滚演练已经完成，正式公网发布保留候选环境操作门禁。
+阶段六已通过 PR #11 合入 `master`，当前功能基线为 `e8aa6ea`；阶段七尚未开始。
 
 后端采用根目录 `app/` 包布局，不再使用 `src/aurum_agent/`。现有代码按 API、Agent、
 RAG、Finance、Provider、Database、Service、Worker、Observability 和 Security
@@ -30,6 +32,8 @@ RAG、Finance、Provider、Database、Service、Worker、Observability 和 Secur
 | 阶段六 P6.3：RAG、安全与性能回归门禁 | 已完成 | 2026-08-02 |
 | 阶段六 P6.4：备份、恢复与数据保留 | 已完成 | 2026-08-02 |
 | 阶段六 P6.5：生产部署、灰度发布与回滚 | 已完成 | 2026-08-02 |
+| 阶段六总体验收与合入 | 工程完成，候选环境待验收 | 2026-08-03 |
+| 阶段七：后续增强 | 尚未开始 | — |
 
 完整范围、验收结果和后续阶段见
 [总体技术方案](./aurum-agent-initial-design.md#0-项目里程碑与当前状态)。阶段三已固定使用
@@ -150,7 +154,7 @@ Copy-Item .env.example .env
 npm run dev
 ```
 
-浏览器访问 `http://127.0.0.1:5173`。开发服务器会把 `/api` 请求代理到
+浏览器访问 `http://127.0.0.1:4173`。开发服务器会把 `/api` 请求代理到
 `http://127.0.0.1:8010`，通常不需要额外处理跨域。前端生产构建命令：
 
 ```powershell
@@ -220,6 +224,9 @@ npm run build
 npm audit --audit-level=high
 ```
 
+`tests/` 按当前项目约定仅保留在本地并被 Git 忽略。GitHub Actions 不执行完整 Pytest，
+因此每个阶段结束时仍应在受控本地环境执行 `python -m pytest` 并记录结果。
+
 ## 项目结构
 
 ```text
@@ -239,7 +246,7 @@ agent_aurum/
 │   └── main.py
 ├── web/                     # Vue 3、TypeScript、Vite 和 Ant Design Vue 前端
 ├── migrations/              # Alembic 数据库迁移
-├── tests/
+├── tests/                    # 本地测试资产，当前不纳入 Git 管理
 │   ├── unit/
 │   ├── integration/
 │   ├── contract/
