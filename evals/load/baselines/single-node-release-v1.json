@@ -1,0 +1,13 @@
+{
+  "version": "p6.3-single-node-baseline-v1",
+  "profile_version": "p6.3-load-single-node-v1",
+  "status": "provisional_until_first_candidate_run",
+  "p95_ms": {
+    "ordinary-conversation-list": 500,
+    "rag-retrieval": 3000,
+    "real-model-smoke": 30000,
+    "sse-stream": 30000,
+    "document-ingestion": 3000,
+    "ingestion-recovery-poll": 500
+  }
+}

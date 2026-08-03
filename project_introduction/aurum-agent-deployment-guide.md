@@ -746,6 +746,12 @@ LangGraph Checkpoint、会话、引用、用户、知识库元数据和个人财
 
 Redis 主要用于缓存和队列，不应成为唯一业务数据源。
 
+P6.2 同时将 Redis 用作高成本入口的原子配额和短期并发租约。部署前应根据 API/Worker
+副本数和模型容量审阅全部 `AURUM_QUOTA_*` 配置；租约 TTL 必须覆盖正常任务时长但不能
+代替 Worker 终态释放。Redis 不可用时模型问答和文档上传会 fail-closed，已发布检索缓存
+自动旁路 PostgreSQL 回源。`AURUM_RETRIEVAL_CACHE_*` 只控制短 TTL、抖动和单飞锁，不得
+用于缓存最终回答或财务明细。
+
 需要根据用途决定：
 
 - 是否开启 AOF；
@@ -894,6 +900,16 @@ PREVIOUS_VERSION=v0.1.9
 - 是否发生回滚。
 
 ## 18. 监控、日志和告警
+
+P6.1 已提供可执行的本地观测栈：
+
+```powershell
+docker compose -f compose.yaml -f compose.observability.yaml up -d --build
+```
+
+配置和运行说明位于 `deploy/observability/README.md`。Prometheus 和 Grafana 仅绑定
+本机端口；生产 Gateway 必须继续屏蔽 `/metrics`。当前 Collector 使用 `debug`
+exporter 验证链路，正式环境应替换为组织选定的 Trace 后端。
 
 ### 18.1 指标
 
@@ -1214,7 +1230,45 @@ deploy/scripts/backup.sh
 deploy/scripts/rollback.sh <previous-version>
 ```
 
-## 24. 下一步实施顺序
+## 24. P6.3 候选发布质量门禁
+
+候选实例切流前必须先执行统一评测和 `single-node-release` 负载档。Provider 证据只允许
+记录环境、Chat/Embedding/Reranker Provider 与模型名和冒烟布尔结果，不得记录 API Key、
+Token、Prompt 或响应正文。示例和完整夹具变量见 `evals/load/README.md`。
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_phase6_evaluation.py --mode candidate `
+  --candidate-evidence .test-results\candidate-evidence.json `
+  --output .test-results\phase6-candidate-gate.json
+
+.\.venv\Scripts\python.exe scripts\run_phase6_load.py `
+  --profile evals\load\single-node-release.json `
+  --output .test-results\phase6-load-release.json
+```
+
+缺失夹具、任一必选场景跳过、非预期状态达到 1%、网络错误、跨用户/项目标记、P95 超过
+锁定基线 20%，或 SSE/队列/数据库连接持续增长时均停止发布。首版单机基线标记为暂定，
+只能用首次稳定候选运行经评审锁定；不得在同一发布中同时放宽阈值并声明回归通过。
+
+## 25. P6.4 备份与隔离恢复
+
+备份和恢复入口位于 `deploy/scripts/backup.ps1` 与 `restore.ps1`。正式运行前必须从外部
+密钥系统注入专用 32 字节 base64 备份密钥，并把副本目录放到独立磁盘、主机或受控对象
+存储。脚本只允许恢复到不存在的新数据库和新 bucket，不支持原地覆盖。
+
+```powershell
+.\deploy\scripts\backup.ps1 -OutputDirectory C:\AurumBackups\primary `
+  -ReplicaDirectory D:\AurumBackups\replica
+
+.\deploy\scripts\retention.ps1             # preview
+.\deploy\scripts\retention.ps1 -Apply      # 审批后执行并记审计
+```
+
+完整的密钥、调度、保留和演练要求见 `deploy/backup-policy.md`。备份生成的
+`aurum_backup.prom` 应挂载到 node-exporter textfile collector；缺失或 25 小时未更新会触发
+Prometheus 告警。
+
+## 26. 下一步实施顺序
 
 部署能力建议按照以下顺序实现：
 
@@ -1226,11 +1280,21 @@ deploy/scripts/rollback.sh <previous-version>
 6. 创建生产 Docker Compose；
 7. 创建 Caddyfile；
 8. 创建冒烟测试脚本；
-9. 创建备份和恢复脚本；
+9. 接入外部备份密钥和异地介质；
 10. 创建 CI 镜像构建；
 11. 创建测试环境自动部署；
 12. 创建生产环境人工批准发布；
 13. 完成回滚演练；
-14. 完成恢复演练；
+14. 在候选环境复跑恢复演练和真实 Provider 冒烟；
 15. 正式上线。
+
+## 27. P6.5 可执行生产发布
+
+P6.5 已实现 `deploy/compose.production.yaml`、Caddy Gateway、生产 Web 镜像、发布 Manifest、
+`release.ps1`、`rollback.ps1` 和 GitHub Actions 发布门禁。生产切流需要显式人工批准，任何
+切流后观测异常都会回滚到上一槽；自动回滚不执行数据库 `downgrade`。
+
+完整参数、阈值、证据和演练命令见 `deploy/release-runbook.md`。开发机已完成成功切换与候选
+故障回滚，本节所称“可执行”不表示已发布公网；真实 Provider、目标容量、正式 TLS/密钥与
+异地备份仍须在候选服务器验收。
 

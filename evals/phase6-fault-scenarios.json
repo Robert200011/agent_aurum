@@ -1,0 +1,38 @@
+{
+  "version": "p6.3-faults-v1",
+  "thresholds": {
+    "minimum_required_fault_coverage": 1.0
+  },
+  "cases": [
+    {
+      "id": "fault-quota-rejection-before-provider",
+      "fault": "quota_rejection",
+      "automated_check": "tests/unit/test_phase6_quota_and_cache.py::test_chat_quota_rejects_before_lease_and_returns_stable_code",
+      "expected_outcome": "HTTP 429 semantics and zero provider calls"
+    },
+    {
+      "id": "fault-provider-timeout-safe-error",
+      "fault": "provider_timeout",
+      "automated_check": "tests/unit/test_dashscope_chat.py::test_provider_status_error_is_safely_classified",
+      "expected_outcome": "safe retryable provider error without response leakage"
+    },
+    {
+      "id": "fault-stream-cancel-releases-run",
+      "fault": "stream_cancel",
+      "automated_check": "tests/unit/test_chat_service.py::test_stream_cancellation_marks_message_and_run_cancelled",
+      "expected_outcome": "cancelled terminal state and concurrent lease release"
+    },
+    {
+      "id": "fault-cache-publish-state-revalidation",
+      "fault": "cache_invalidation",
+      "automated_check": "tests/unit/test_project_retrieval.py::test_project_cache_hit_revalidates_chunks_and_skips_expensive_providers",
+      "expected_outcome": "PostgreSQL scope/version revalidation before cached chunks are returned"
+    },
+    {
+      "id": "fault-reranker-provider-degradation",
+      "fault": "provider_degradation",
+      "automated_check": "tests/unit/test_project_retrieval.py::test_project_retrieval_falls_back_to_rrf_when_reranker_fails",
+      "expected_outcome": "deterministic RRF fallback with safe diagnostic code"
+    }
+  ]
+}

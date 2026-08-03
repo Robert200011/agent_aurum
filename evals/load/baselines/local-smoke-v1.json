@@ -1,0 +1,10 @@
+{
+  "version": "p6.3-local-baseline-v1",
+  "profile_version": "p6.3-load-local-v1",
+  "status": "locked",
+  "p95_ms": {
+    "health-live": 100,
+    "health-ready": 250,
+    "fake-sse": 5000
+  }
+}

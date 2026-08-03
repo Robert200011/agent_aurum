@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import sys
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
+from time import perf_counter
 from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from redis.asyncio import Redis
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.agents.checkpoints import (
@@ -26,8 +29,24 @@ from app.chat.providers.dashscope import DashScopeChatModelProvider
 from app.config import Settings, get_settings
 from app.db.session import get_engine, get_session_factory
 from app.errors import ApplicationError, RateLimitError
+from app.observability.context import reset_context, set_context
 from app.observability.logging import configure_logging
+from app.observability.metrics import (
+    QUEUE_DEPTH,
+    QUOTA_CONCURRENCY,
+    WORKER_READY,
+    MetricsMiddleware,
+    metrics_payload,
+    update_database_pool_metrics,
+)
+from app.observability.tracing import (
+    current_trace_id,
+    instrument_fastapi,
+    instrument_runtime,
+)
 from app.providers.identity import RedisSecurityStore
+from app.providers.quota_store import RedisQuotaStore
+from app.providers.retrieval_cache import RedisRetrievalCache
 from app.providers.s3_object_storage import S3ObjectStorageProvider
 from app.providers.worker_health import RedisWorkerHealthStore
 from app.rag.rerankers.dashscope import DashScopeRerankerProvider
@@ -35,21 +54,51 @@ from app.services.admin import bootstrap_admin
 from app.services.chat_runs import ChatRunCoordinator
 
 logger = logging.getLogger(__name__)
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
-    """Attach a correlation ID and conservative browser security headers."""
+    """传播关联 ID、输出请求摘要并添加保守的浏览器安全响应头。"""
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
-        request_id = request.headers.get("x-request-id") or str(uuid4())
-        request.state.request_id = request_id[:128]
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request.state.request_id
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        return response
+        supplied_request_id = request.headers.get("x-request-id", "")
+        request_id = (
+            supplied_request_id
+            if _REQUEST_ID_PATTERN.fullmatch(supplied_request_id)
+            else str(uuid4())
+        )
+        request.state.request_id = request_id
+        trace_id = current_trace_id()
+        request.state.trace_id = trace_id
+        tokens = set_context(
+            request_id=request.state.request_id,
+            trace_id=trace_id,
+            conversation_id=None,
+            agent_run_id=None,
+            user_hash=None,
+        )
+        started = perf_counter()
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request.state.request_id
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+            logger.info(
+                "http request completed",
+                extra={
+                    "event": "http_request_completed",
+                    "method": request.method,
+                    "route": getattr(request.scope.get("route"), "path", "unmatched"),
+                    "status_code": response.status_code,
+                    "duration_ms": round((perf_counter() - started) * 1000),
+                    "outcome": "success" if response.status_code < 500 else "error",
+                },
+            )
+            return response
+        finally:
+            reset_context(tokens)
 
 
 def _error_payload(request: Request, *, code: str, message: str) -> dict[str, object]:
@@ -64,7 +113,7 @@ def _error_payload(request: Request, *, code: str, message: str) -> dict[str, ob
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or get_settings()
-    configure_logging(app_settings.log_level)
+    configure_logging(app_settings.log_level, app_settings.otel_service_name)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -72,13 +121,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         worker_health_store = RedisWorkerHealthStore.from_settings(app_settings)
         app.state.security_store = security_store
         app.state.worker_health_store = worker_health_store
+        app.state.quota_store = RedisQuotaStore.from_settings(app_settings)
+        app.state.retrieval_cache = RedisRetrievalCache.from_settings(app_settings)
+        app.state.metrics_redis = Redis.from_url(app_settings.redis_url)
         app.state.object_storage = S3ObjectStorageProvider(app_settings)
-        app.state.chat_model = DashScopeChatModelProvider(app_settings)
+        app.state.chat_model = DashScopeChatModelProvider(
+            app_settings,
+            quota_store=app.state.quota_store,
+        )
         app.state.reranker = (
             DashScopeRerankerProvider(app_settings)
             if app_settings.rag_reranker_enabled
             else None
         )
+        instrument_runtime(app_settings, engine=get_engine())
         if app_settings.bootstrap_admin:
             await bootstrap_admin(get_session_factory(), app_settings)
         serializer = encrypted_checkpoint_serializer(
@@ -105,6 +161,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     chat_provider=app.state.chat_model,
                     reranker_provider=app.state.reranker,
                     checkpointer=app.state.checkpointer,
+                    quota_store=app.state.quota_store,
+                    retrieval_cache=app.state.retrieval_cache,
                 )
                 try:
                     yield
@@ -116,6 +174,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await app.state.reranker.close()
             await worker_health_store.close()
             await security_store.close()
+            await app.state.quota_store.close()
+            await app.state.retrieval_cache.close()
+            await app.state.metrics_redis.aclose()
             await get_engine().dispose()
 
     app = FastAPI(
@@ -127,6 +188,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url="/redoc" if not app_settings.is_production else None,
     )
     app.state.settings = app_settings
+    if app_settings.metrics_enabled:
+        app.add_middleware(MetricsMiddleware)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
@@ -177,7 +240,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
         )
 
+    if app_settings.metrics_enabled:
+
+        @app.get("/metrics", include_in_schema=False)
+        async def prometheus_metrics() -> Response:
+            update_database_pool_metrics(get_engine())
+            try:
+                WORKER_READY.set(await app.state.worker_health_store.is_ready())
+                QUEUE_DEPTH.set(
+                    await app.state.metrics_redis.llen(app_settings.ingestion_queue_name)
+                )
+                agent_concurrency, upload_concurrency = (
+                    await app.state.quota_store.current_global_concurrency()
+                )
+                QUOTA_CONCURRENCY.labels(resource="agent", scope="global").set(
+                    agent_concurrency
+                )
+                QUOTA_CONCURRENCY.labels(resource="upload", scope="global").set(
+                    upload_concurrency
+                )
+            except Exception:
+                logger.warning("runtime metric collection failed", exc_info=True)
+            return Response(
+                content=metrics_payload(),
+                media_type="text/plain; version=0.0.4; charset=utf-8",
+            )
+
     app.include_router(v1_router, prefix=app_settings.api_v1_prefix)
+    instrument_fastapi(app, app_settings)
     return app
 
 
@@ -199,6 +289,8 @@ def run_server() -> None:
         host=settings.server_host,
         port=settings.direct_server_port,
         log_level=settings.log_level.lower(),
+        log_config=None,
+        access_log=False,
         loop=(
             "app.main:windows_selector_loop_factory"
             if sys.platform == "win32"

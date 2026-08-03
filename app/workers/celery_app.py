@@ -2,15 +2,60 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
+from time import perf_counter
+
 from celery import Celery  # type: ignore[import-untyped]
 from celery.signals import (  # type: ignore[import-untyped]
+    task_postrun,
+    task_prerun,
     worker_process_init,
     worker_process_shutdown,
     worker_shutdown,
 )
 
 from app.config import Settings, get_settings
+from app.observability.context import reset_context, set_context
+from app.observability.logging import configure_logging
+from app.observability.metrics import WORKER_DURATION, WORKER_TASKS
+from app.observability.tracing import instrument_runtime
 from app.workers.async_runtime import worker_async_runtime
+
+_TASK_STARTED: ContextVar[float | None] = ContextVar("aurum_task_started", default=None)
+_TASK_CONTEXT: ContextVar[tuple[tuple[str, Token[str | None]], ...] | None] = ContextVar(
+    "aurum_task_context",
+    default=None,
+)
+
+
+@task_prerun.connect(weak=False)  # type: ignore[untyped-decorator]
+def observe_task_start(task_id: str | None = None, **_: object) -> None:
+    """为 Worker 任务建立可安全传播的关联上下文。"""
+
+    _TASK_STARTED.set(perf_counter())
+    tokens = set_context(request_id=task_id)
+    _TASK_CONTEXT.set(tokens)
+
+
+@task_postrun.connect(weak=False)  # type: ignore[untyped-decorator]
+def observe_task_end(
+    task: object = None,
+    state: str | None = None,
+    **_: object,
+) -> None:
+    """按固定任务名和有限终态记录 Worker 指标。"""
+
+    name = str(getattr(task, "name", "unknown"))
+    outcome = "success" if state == "SUCCESS" else "error"
+    WORKER_TASKS.labels(task=name, outcome=outcome).inc()
+    started = _TASK_STARTED.get()
+    if started is not None:
+        WORKER_DURATION.labels(task=name).observe(perf_counter() - started)
+    tokens = _TASK_CONTEXT.get()
+    if tokens is not None:
+        reset_context(tokens)
+    _TASK_STARTED.set(None)
+    _TASK_CONTEXT.set(None)
 
 
 @worker_process_init.connect(weak=False)  # type: ignore[untyped-decorator]
@@ -77,7 +122,11 @@ def create_celery_app(settings: Settings) -> Celery:
         task_reject_on_worker_lost=True,
         worker_prefetch_multiplier=1,
         broker_connection_retry_on_startup=True,
+        worker_hijack_root_logger=False,
+        worker_redirect_stdouts=False,
     )
+    configure_logging(settings.log_level, settings.otel_service_name)
+    instrument_runtime(settings, celery_app=application)
     return application
 
 

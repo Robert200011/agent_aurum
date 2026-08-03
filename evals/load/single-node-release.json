@@ -1,0 +1,104 @@
+{
+  "version": "p6.3-load-single-node-v1",
+  "name": "single-node-release",
+  "base_url": "${AURUM_LOAD_BASE_URL}",
+  "baseline_file": "baselines/single-node-release-v1.json",
+  "metrics_path": "/metrics",
+  "request_timeout_seconds": 60,
+  "thresholds": {
+    "maximum_server_error_rate": 0.01,
+    "maximum_network_errors": 0,
+    "maximum_cross_user_leak_count": 0,
+    "maximum_p95_regression_ratio": 1.2
+  },
+  "observed_metric_prefixes": [
+    "aurum_api_requests_total",
+    "aurum_model_requests_total",
+    "aurum_sse_connections",
+    "aurum_ingestion_queue_depth",
+    "aurum_database_pool_connections"
+  ],
+  "maximum_resource_growth": {
+    "aurum_sse_connections": 0,
+    "aurum_ingestion_queue_depth": 0,
+    "aurum_database_pool_connections{state=\"checked_out\"}": 2
+  },
+  "scenarios": [
+    {
+      "id": "ordinary-conversation-list",
+      "kind": "ordinary_api",
+      "method": "GET",
+      "path": "/api/v1/conversations?page=1&page_size=20",
+      "headers": {"Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"},
+      "requests": 100,
+      "concurrency": 10,
+      "expected_statuses": [200],
+      "forbidden_response_markers": ["${AURUM_LOAD_OTHER_USER_MARKER}"]
+    },
+    {
+      "id": "rag-retrieval",
+      "kind": "rag_retrieval",
+      "method": "POST",
+      "path": "/api/v1/admin/knowledge-bases/${AURUM_LOAD_KNOWLEDGE_BASE_ID}/retrieve",
+      "headers": {"Authorization": "Bearer ${AURUM_LOAD_ADMIN_TOKEN}"},
+      "json": {"query": "阶段六测试基准条款", "limit": 10},
+      "requests": 30,
+      "concurrency": 3,
+      "expected_statuses": [200],
+      "forbidden_response_markers": ["${AURUM_LOAD_OTHER_PROJECT_MARKER}"]
+    },
+    {
+      "id": "real-model-smoke",
+      "kind": "real_model_smoke",
+      "method": "POST",
+      "path": "/api/v1/conversations/${AURUM_LOAD_CONVERSATION_ID}/messages",
+      "headers": {"Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"},
+      "json": {"question": "用一句话总结当前项目知识，并提供有效引用。"},
+      "requests": 3,
+      "concurrency": 1,
+      "expected_statuses": [201],
+      "forbidden_response_markers": ["${AURUM_LOAD_OTHER_USER_MARKER}"]
+    },
+    {
+      "id": "sse-stream",
+      "kind": "sse",
+      "method": "POST",
+      "path": "/api/v1/conversations/${AURUM_LOAD_CONVERSATION_ID}/messages/stream",
+      "headers": {"Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"},
+      "json": {"question": "返回阶段六门禁摘要。"},
+      "requests": 10,
+      "concurrency": 2,
+      "expected_statuses": [200],
+      "forbidden_response_markers": ["${AURUM_LOAD_OTHER_USER_MARKER}"]
+    },
+    {
+      "id": "document-ingestion",
+      "kind": "document_ingestion",
+      "method": "POST",
+      "path": "/api/v1/admin/knowledge-bases/${AURUM_LOAD_KNOWLEDGE_BASE_ID}/documents",
+      "headers": {
+        "Authorization": "Bearer ${AURUM_LOAD_ADMIN_TOKEN}",
+        "Idempotency-Key": "p6.3-load-${AURUM_LOAD_RUN_ID}"
+      },
+      "upload": {
+        "field": "file",
+        "path": "${AURUM_LOAD_DOCUMENT_PATH}",
+        "content_type": "text/markdown",
+        "form": {"metadata": "{\"suite\":\"p6.3-load\"}"}
+      },
+      "requests": 1,
+      "concurrency": 1,
+      "expected_statuses": [202]
+    },
+    {
+      "id": "ingestion-recovery-poll",
+      "kind": "ingestion_recovery",
+      "method": "GET",
+      "path": "/api/v1/admin/ingestion-jobs/${AURUM_LOAD_INGESTION_JOB_ID}",
+      "headers": {"Authorization": "Bearer ${AURUM_LOAD_ADMIN_TOKEN}"},
+      "requests": 20,
+      "concurrency": 2,
+      "expected_statuses": [200]
+    }
+  ]
+}

@@ -2,18 +2,44 @@
 
 > 交接日期：2026-08-02
 > 项目路径：`E:\agent_aurum`
-> 当前阶段：阶段五已完成，下一步进入阶段六企业级加固
+> 当前阶段：阶段六 P6.1～P6.5 工程开发完成，待统一提交与候选环境上线验收
 
 ## 1. 当前结论
 
 Aurum Agent 已完成阶段一至阶段五。当前系统包含安全鉴权与租户隔离、个人财务账本、
 知识库入库与 Hybrid Retrieval、可信引用 RAG、SSE/Checkpoint 会话，以及受控编排的
-只读个人财务 Agent。阶段五最终图版本为 `finance-agent-p5.6-v1`，迁移头为
+只读个人财务 Agent。阶段五最终图版本为 `finance-agent-p5.6-v1`，当前加固图版本为
+`finance-agent-p6.3-v1`，迁移头为
 `20260802_0012`。
 
 P5.6 已补齐版本化评测、数值 Grounding、跨用户恢复接口边界、真实浏览器自动化和交付
 文档。模型无法指定用户、执行写工具或把受控证据之外的数字、行情、工具名和引用保存为
 最终答案。
+
+阶段六 P6.1 已完成字段白名单 JSON 日志、统一脱敏、`contextvars` 关联上下文、
+OpenTelemetry OTLP Trace、Prometheus 指标、3 个 Grafana 面板和 6 条告警规则。完整
+观测栈已在本地 Compose 中启动并通过抓取、面板加载和告警触发/恢复测试。
+
+阶段六 P6.2 已完成 Redis Lua 原子配额、Token 预留/实际结算、Agent 与上传处理租约、
+稳定 429/`Retry-After` 语义，以及仅保存已发布 Chunk 标识和分数的检索缓存。聊天和上传在
+高成本操作前 fail-closed；缓存故障旁路，缓存命中仍以 PostgreSQL 当前项目权限和发布版本
+重建引用。缓存 Key 仅含不可逆哈希、资源版本和算法参数，不含问题、文档正文或最终回答。
+
+阶段六 P6.3 已完成版本化 RAG 黄金结果和 Prompt Injection 攻击集、最终模型输出安全
+兜底、阶段五/六统一机器门禁、五类故障场景自动化，以及 `local-smoke` 和
+`single-node-release` 两档负载配置。PR 门禁已通过；本机 60 次必选负载请求无错误、无
+资源持续增长。真实 Provider 与完整发布负载由候选环境强制提供版本元数据和夹具，不能
+用本地跳过结果替代。
+
+阶段六 P6.4 已完成 PostgreSQL/MinIO 全版本 AES-256-GCM 加密备份、独立副本接口、
+恢复目标防覆盖、恢复后 Alembic/RLS/业务计数/引用/checkpoint/对象哈希校验，以及默认
+preview、apply 后留审计记录的数据保留执行器。本地已恢复到隔离数据库和 bucket，最终
+演练 RPO 0.96 秒、RTO 12.21 秒，详见 P6.4 验收报告。
+
+阶段六 P6.5 已完成单机生产 Compose、API/Web 生产镜像、Caddy Gateway、供应链 CI、发布
+Manifest、发布前备份、一次性迁移、蓝绿切流、指标决策和一键回滚。独立生产栈演练中绿槽
+20/20 请求成功、P95 43.56ms，故障注入后蓝槽回滚 10/10 成功；内部 MinIO TLS 与独立对象
+域名的预签名下载也已通过，详见 P6.5 验收报告。
 
 ## 2. 阶段五交付
 
@@ -51,6 +77,8 @@ npm run dev
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_phase5_evaluation.py
+.\.venv\Scripts\python.exe scripts\run_phase6_evaluation.py
+.\.venv\Scripts\python.exe scripts\run_phase6_load.py --profile evals/load/local-smoke.json
 .\.venv\Scripts\python.exe -m pytest
 .\.venv\Scripts\python.exe -m ruff check app migrations tests scripts
 .\.venv\Scripts\python.exe -m mypy app
@@ -64,11 +92,20 @@ npm audit
 ```
 
 确定性评测为 16/16；真实 Edge 浏览器财务与混合回答通过；生产依赖和全部 npm 依赖审计
-均为 0 个已知漏洞。后端 168 项测试和前端 18 项测试通过。真实 PostgreSQL 集成测试需
+均为 0 个已知漏洞。后端测试和前端 18 项测试通过。真实 PostgreSQL 集成测试需
 通过环境变量提供迁移/测试所有者连接，不要把连接字符串写入仓库。
 
 ## 5. 下一步
 
-阶段六优先处理：用户/模型配额、日志脱敏、缓存与可观测性、RAG 回归、Prompt Injection、
-压力测试、备份恢复、灰度发布与回滚。阶段五仍保持只读边界；自然语言记账和任何财务写
-操作继续留在后续 Human-in-the-loop 方案中。
+先按用户要求将阶段六全部未提交文件统一审阅并提交；随后进入候选环境上线验收：配置正式
+域名/TLS、镜像 digest、外部密钥和异地备份，复跑真实 Provider 冒烟与目标容量负载，再由
+授权人员批准切流。阶段五仍保持只读边界；自然语言记账和任何财务写操作继续留在后续
+Human-in-the-loop 方案中。阶段六整体顺序、范围和验收
+标准见[阶段六企业级加固开发方案](./aurum-agent-phase-6-plan.md)，P6.1 结果见
+[P6.1 验收报告](./aurum-agent-phase-6-p6.1-acceptance.md)，P6.2 结果见
+[P6.2 验收报告](./aurum-agent-phase-6-p6.2-acceptance.md)。
+[P6.3 验收报告](./aurum-agent-phase-6-p6.3-acceptance.md)记录了本地门禁结果，以及仍需在
+候选环境执行的真实 Provider/单机负载证据；
+[P6.4 验收报告](./aurum-agent-phase-6-p6.4-acceptance.md)记录了隔离恢复演练。
+[P6.5 验收报告](./aurum-agent-phase-6-p6.5-acceptance.md)记录蓝绿发布和故障回滚演练，
+[阶段六验收汇总](./aurum-agent-phase-6-acceptance.md)记录整体状态和上线前剩余门禁。

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -21,6 +23,7 @@ from app.db.models.rag import (
 from app.db.repositories.rag import RagRepository
 from app.db.session import set_tenant_context
 from app.errors import BusinessRuleError, NotFoundError, ServiceUnavailableError
+from app.observability.metrics import observe_retrieval
 from app.providers.model_provider import (
     QueryEmbeddingProvider,
     RerankerProvider,
@@ -28,6 +31,11 @@ from app.providers.model_provider import (
 )
 from app.providers.pgtrigram_store import PgTrigramStoreProvider
 from app.providers.pgvector_store import PgVectorStoreProvider
+from app.providers.retrieval_cache import (
+    CachedRetrievalItem,
+    RedisRetrievalCache,
+    RetrievalCacheEntry,
+)
 from app.providers.sparse_store import SparseStoreProvider
 from app.providers.vector_store import VectorSearchResult, VectorStoreProvider
 from app.rag.embeddings.dashscope import EmbeddingProviderFailure
@@ -91,6 +99,7 @@ class RagRetrievalService:
         reranker_provider: RerankerProvider | None = None,
         hybrid_candidate_multiplier: int = 4,
         rrf_k: int = 60,
+        cache: RedisRetrievalCache | None = None,
     ) -> None:
         if hybrid_candidate_multiplier < 1:
             raise ValueError("hybrid candidate multiplier must be positive")
@@ -105,7 +114,9 @@ class RagRetrievalService:
         self._reranker_provider = reranker_provider
         self._hybrid_candidate_multiplier = hybrid_candidate_multiplier
         self._rrf_k = rrf_k
+        self._cache = cache
 
+    @observe_retrieval("knowledge_base")
     async def retrieve(
         self,
         *,
@@ -173,6 +184,7 @@ class RagRetrievalService:
             items=items,
         )
 
+    @observe_retrieval("project")
     async def retrieve_project(
         self,
         *,
@@ -205,42 +217,113 @@ class RagRetrievalService:
                 "project query embedding configuration is unavailable"
             )
 
-        query_vector = await self._embed_query(query)
         knowledge_base_ids = tuple(knowledge_base.id for knowledge_base in knowledge_bases)
         candidate_limit = limit * self._hybrid_candidate_multiplier
-        dense_hits = await self._vector_store.search(
-            knowledge_base_ids=knowledge_base_ids,
-            vector=query_vector,
-            limit=candidate_limit,
+        cache_digest = (
+            await self._project_cache_digest(
+                project_id=project.id,
+                knowledge_bases=knowledge_bases,
+                query=query,
+                limit=limit,
+                min_score=min_score,
+            )
+            if self._cache is not None
+            else ""
+        )
+        cache_entry = await self._cache.get(cache_digest) if self._cache is not None else None
+        cached_items = await self._validated_cached_items(
+            entry=cache_entry,
             project_id=project.id,
         )
-        sparse_hits = await self._sparse_store.search(
-            knowledge_base_ids=knowledge_base_ids,
-            query=query,
-            limit=candidate_limit,
-            project_id=project.id,
-        )
-        fused_hits = reciprocal_rank_fuse(
-            dense_hits=dense_hits,
-            sparse_hits=sparse_hits,
-            limit=candidate_limit,
-            rrf_k=self._rrf_k,
-        )
-        persisted = await self._repository.get_retrieval_chunks(
-            [hit.chunk_id for hit in fused_hits],
-            project_id=project.id,
-        )
-        candidates = self._reconstruct_items(
-            hits=fused_hits,
-            persisted=persisted,
-            min_score=None,
-        )
-        items, reranker_applied, reranker_fallback_code = await self._rerank_candidates(
-            query=query,
-            candidates=candidates,
-            limit=limit,
-            min_score=min_score,
-        )
+        cache_hit = cached_items is not None
+        dense_hits: Sequence[VectorSearchResult] = ()
+        sparse_hits: Sequence[Any] = ()
+        candidates: list[RetrievedChunk] = []
+        if cache_hit:
+            items = cached_items or []
+            reranker_applied = cache_entry.reranker_applied if cache_entry is not None else False
+            reranker_fallback_code = (
+                cache_entry.reranker_fallback_code if cache_entry is not None else None
+            )
+        else:
+            fill_owner = (
+                await self._cache.acquire_fill(cache_digest)
+                if self._cache is not None
+                else None
+            )
+            if self._cache is not None and fill_owner is None:
+                waited = await self._cache.wait_for_fill(cache_digest)
+                cached_items = await self._validated_cached_items(
+                    entry=waited,
+                    project_id=project.id,
+                )
+                if cached_items is not None:
+                    cache_hit = True
+                    cache_entry = waited
+                    items = cached_items
+                    reranker_applied = waited.reranker_applied if waited is not None else False
+                    reranker_fallback_code = (
+                        waited.reranker_fallback_code if waited is not None else None
+                    )
+            if not cache_hit:
+                try:
+                    query_vector = await self._embed_query(query)
+                    dense_hits = await self._vector_store.search(
+                        knowledge_base_ids=knowledge_base_ids,
+                        vector=query_vector,
+                        limit=candidate_limit,
+                        project_id=project.id,
+                    )
+                    sparse_hits = await self._sparse_store.search(
+                        knowledge_base_ids=knowledge_base_ids,
+                        query=query,
+                        limit=candidate_limit,
+                        project_id=project.id,
+                    )
+                    fused_hits = reciprocal_rank_fuse(
+                        dense_hits=dense_hits,
+                        sparse_hits=sparse_hits,
+                        limit=candidate_limit,
+                        rrf_k=self._rrf_k,
+                    )
+                    persisted = await self._repository.get_retrieval_chunks(
+                        [hit.chunk_id for hit in fused_hits],
+                        project_id=project.id,
+                    )
+                    candidates = self._reconstruct_items(
+                        hits=fused_hits,
+                        persisted=persisted,
+                        min_score=None,
+                    )
+                    items, reranker_applied, reranker_fallback_code = (
+                        await self._rerank_candidates(
+                            query=query,
+                            candidates=candidates,
+                            limit=limit,
+                            min_score=min_score,
+                        )
+                    )
+                    if self._cache is not None:
+                        await self._cache.set(
+                            cache_digest,
+                            RetrievalCacheEntry(
+                                items=tuple(
+                                    CachedRetrievalItem(
+                                        chunk_id=item.chunk_id,
+                                        document_version_id=item.document_version_id,
+                                        knowledge_base_id=item.knowledge_base_id,
+                                        score=item.score,
+                                        retrieval_source=item.retrieval_source,
+                                    )
+                                    for item in items
+                                ),
+                                reranker_applied=reranker_applied,
+                                reranker_fallback_code=reranker_fallback_code,
+                            ),
+                        )
+                finally:
+                    if self._cache is not None and fill_owner is not None:
+                        await self._cache.release_fill(cache_digest, fill_owner)
 
         latency_ms = max(0, round((perf_counter() - started) * 1000))
         items_by_knowledge_base = {
@@ -261,7 +344,11 @@ class RagRetrievalService:
                     top_score=scoped_items[0].score if scoped_items else None,
                     detail={
                         "retrieval_source": (
-                            "hybrid_rerank" if reranker_applied else "hybrid"
+                            "cache"
+                            if cache_hit
+                            else "hybrid_rerank"
+                            if reranker_applied
+                            else "hybrid"
                         ),
                         "scope": "project",
                         "project_id": str(project.id),
@@ -305,6 +392,83 @@ class RagRetrievalService:
             latency_ms=latency_ms,
             items=items,
         )
+
+    async def _project_cache_digest(
+        self,
+        *,
+        project_id: UUID,
+        knowledge_bases: Sequence[KnowledgeBase],
+        query: str,
+        limit: int,
+        min_score: float | None,
+    ) -> str:
+        document_state = await self._repository.get_project_retrieval_version_state(
+            project_id=project_id,
+            knowledge_base_ids=[item.id for item in knowledge_bases],
+        )
+        scope = {
+            "schema": 1,
+            "actor": hashlib.sha256(self._actor_user_id.bytes).hexdigest(),
+            "project": str(project_id),
+            "knowledge_bases": [
+                (
+                    str(item.id),
+                    item.published_at.isoformat() if item.published_at is not None else None,
+                    item.pipeline_version,
+                    item.embedding_provider,
+                    item.embedding_model,
+                    item.embedding_dimensions,
+                )
+                for item in knowledge_bases
+            ],
+            "documents": [tuple(str(value) for value in row) for row in document_state],
+            "query_hash": hashlib.sha256(query.casefold().encode("utf-8")).hexdigest(),
+            "embedding": (
+                self._embedding_provider.provider_name,
+                self._embedding_provider.model_name,
+                self._embedding_provider.dimensions,
+            ),
+            "reranker": (
+                self._reranker_provider.provider_name,
+                self._reranker_provider.model_name,
+            )
+            if self._reranker_provider is not None
+            else None,
+            "parameters": (
+                limit,
+                min_score,
+                self._hybrid_candidate_multiplier,
+                self._rrf_k,
+            ),
+        }
+        serialized = json.dumps(scope, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    async def _validated_cached_items(
+        self,
+        *,
+        entry: RetrievalCacheEntry | None,
+        project_id: UUID,
+    ) -> list[RetrievedChunk] | None:
+        if entry is None:
+            return None
+        persisted = await self._repository.get_retrieval_chunks(
+            [item.chunk_id for item in entry.items],
+            project_id=project_id,
+        )
+        if len(persisted) != len(entry.items):
+            return None
+        hits = [
+            HybridSearchResult(
+                chunk_id=item.chunk_id,
+                document_version_id=item.document_version_id,
+                knowledge_base_id=item.knowledge_base_id,
+                score=item.score,
+                retrieval_source=item.retrieval_source,
+            )
+            for item in entry.items
+        ]
+        return self._reconstruct_items(hits=hits, persisted=persisted, min_score=None)
 
     async def _rerank_candidates(
         self,

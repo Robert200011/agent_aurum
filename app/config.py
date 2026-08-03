@@ -57,6 +57,25 @@ class Settings(BaseSettings):
     chat_model_max_tokens: int = Field(default=2_048, ge=1, le=65_536)
     chat_model_temperature: float = Field(default=0.1, gt=0.0, lt=2.0)
     chat_model_max_retries: int = Field(default=2, ge=0, le=10)
+    quota_chat_user_requests_per_minute: int = Field(default=10, ge=1, le=10_000)
+    quota_chat_global_requests_per_minute: int = Field(default=100, ge=1, le=100_000)
+    quota_global_model_requests_per_minute: int = Field(default=200, ge=1, le=1_000_000)
+    quota_user_daily_model_tokens: int = Field(default=200_000, ge=1, le=1_000_000_000)
+    quota_global_daily_model_tokens: int = Field(default=2_000_000, ge=1, le=10_000_000_000)
+    quota_user_agent_concurrency: int = Field(default=2, ge=1, le=1_000)
+    quota_global_agent_concurrency: int = Field(default=20, ge=1, le=10_000)
+    quota_model_tokens_reserved_per_request: int = Field(default=8_192, ge=1, le=1_000_000)
+    quota_agent_lease_seconds: int = Field(default=900, ge=30, le=7_200)
+    quota_upload_user_requests_per_minute: int = Field(default=10, ge=1, le=10_000)
+    quota_upload_user_daily_bytes: int = Field(
+        default=500 * 1024 * 1024, ge=1, le=100 * 1024 * 1024 * 1024
+    )
+    quota_upload_user_concurrency: int = Field(default=3, ge=1, le=1_000)
+    quota_upload_global_concurrency: int = Field(default=20, ge=1, le=10_000)
+    quota_upload_lease_seconds: int = Field(default=1_200, ge=60, le=10_800)
+    retrieval_cache_ttl_seconds: int = Field(default=120, ge=10, le=3_600)
+    retrieval_cache_ttl_jitter_seconds: int = Field(default=30, ge=0, le=600)
+    retrieval_cache_singleflight_seconds: int = Field(default=10, ge=1, le=60)
     rag_retrieval_limit: int = Field(default=6, ge=1, le=20)
     rag_hybrid_candidate_multiplier: int = Field(default=4, ge=1, le=10)
     rag_rrf_k: int = Field(default=60, ge=1, le=1_000)
@@ -163,6 +182,13 @@ class Settings(BaseSettings):
         ]
     )
     log_level: str = "INFO"
+    metrics_enabled: bool = True
+    otel_tracing_enabled: bool = False
+    otel_service_name: str = Field(default="aurum-agent-api", min_length=1, max_length=128)
+    otel_exporter_otlp_traces_endpoint: str = (
+        "http://127.0.0.1:4318/v1/traces"
+    )
+    otel_export_timeout_seconds: int = Field(default=5, ge=1, le=30)
 
     @property
     def is_production(self) -> bool:
@@ -216,6 +242,7 @@ class Settings(BaseSettings):
         "reranker_base_url",
         "object_storage_endpoint",
         "object_storage_external_endpoint",
+        "otel_exporter_otlp_traces_endpoint",
     )
     @classmethod
     def validate_http_endpoint(cls, value: str | None) -> str | None:
@@ -247,6 +274,14 @@ class Settings(BaseSettings):
             raise ValueError("SameSite=None refresh cookie requires Secure=true")
         if self.login_global_request_limit < self.login_ip_request_limit:
             raise ValueError("global login request limit must be at least the per-IP limit")
+        if self.quota_chat_global_requests_per_minute < self.quota_chat_user_requests_per_minute:
+            raise ValueError("global chat quota must be at least the per-user quota")
+        if self.quota_global_daily_model_tokens < self.quota_user_daily_model_tokens:
+            raise ValueError("global model token quota must be at least the per-user quota")
+        if self.quota_global_agent_concurrency < self.quota_user_agent_concurrency:
+            raise ValueError("global agent concurrency must be at least the per-user limit")
+        if self.quota_upload_global_concurrency < self.quota_upload_user_concurrency:
+            raise ValueError("global upload concurrency must be at least the per-user limit")
         if self.embedding_dimensions != DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS:
             raise ValueError(
                 "AURUM_EMBEDDING_DIMENSIONS must match the fixed "
@@ -266,6 +301,11 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AURUM_OBJECT_STORAGE_SECURE must match AURUM_OBJECT_STORAGE_ENDPOINT scheme"
             )
+
+        if self.otel_tracing_enabled:
+            trace_endpoint = urlsplit(self.otel_exporter_otlp_traces_endpoint)
+            if trace_endpoint.path.rstrip("/") != "/v1/traces":
+                raise ValueError("OTLP HTTP trace endpoint must end with /v1/traces")
 
         if self.bootstrap_admin:
             if self.admin_initial_password is None:

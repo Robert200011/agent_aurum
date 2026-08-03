@@ -1,0 +1,16 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {"id": 1, "type": "timeseries", "title": "Model calls", "targets": [{"expr": "sum by (mode, outcome) (rate(aurum_model_requests_total[5m]))", "legendFormat": "{{mode}} {{outcome}}", "refId": "A"}], "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}},
+    {"id": 2, "type": "timeseries", "title": "Model tokens", "targets": [{"expr": "sum by (kind) (rate(aurum_model_tokens_total[5m]))", "legendFormat": "{{kind}}", "refId": "A"}], "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}},
+    {"id": 3, "type": "timeseries", "title": "Retrieval P95", "targets": [{"expr": "histogram_quantile(0.95, sum by (le, mode) (rate(aurum_retrieval_duration_seconds_bucket[5m])))", "legendFormat": "{{mode}}", "refId": "A"}], "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}},
+    {"id": 4, "type": "timeseries", "title": "Finance tools", "targets": [{"expr": "sum by (tool, outcome) (rate(aurum_tool_requests_total[5m]))", "legendFormat": "{{tool}} {{outcome}}", "refId": "A"}], "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}}
+  ],
+  "schemaVersion": 41,
+  "tags": ["aurum", "agent", "rag", "p6.1"],
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "Aurum - Agent RAG Model",
+  "uid": "aurum-agent-rag-model",
+  "version": 1
+}

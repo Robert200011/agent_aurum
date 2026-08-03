@@ -20,9 +20,12 @@ from app.db.repositories.identity import (
 )
 from app.db.session import get_db_session
 from app.errors import AuthenticationError, AuthorizationError
+from app.observability.context import set_context, user_identifier_hash
 from app.providers.identity import SecurityStore
 from app.providers.model_provider import ChatModelProvider, RerankerProvider
 from app.providers.object_storage import ObjectStorageProvider
+from app.providers.quota_store import RedisQuotaStore
+from app.providers.retrieval_cache import RedisRetrievalCache
 from app.providers.worker_health import WorkerHealthStore
 from app.rag.embeddings.dashscope import DashScopeEmbeddingProvider
 from app.security.auth import AccessTokenClaims, decode_access_token
@@ -74,6 +77,14 @@ def get_chat_run_coordinator(request: Request) -> ChatRunCoordinator:
     return cast(ChatRunCoordinator, request.app.state.chat_run_coordinator)
 
 
+def get_quota_store(request: Request) -> RedisQuotaStore:
+    return cast(RedisQuotaStore, request.app.state.quota_store)
+
+
+def get_retrieval_cache(request: Request) -> RedisRetrievalCache:
+    return cast(RedisRetrievalCache, request.app.state.retrieval_cache)
+
+
 SecurityStoreDependency = Annotated[SecurityStore, Depends(get_security_store)]
 ObjectStorageDependency = Annotated[ObjectStorageProvider, Depends(get_object_storage)]
 WorkerHealthStoreDependency = Annotated[WorkerHealthStore, Depends(get_worker_health_store)]
@@ -93,6 +104,8 @@ ChatRunCoordinatorDependency = Annotated[
     ChatRunCoordinator,
     Depends(get_chat_run_coordinator),
 ]
+QuotaStoreDependency = Annotated[RedisQuotaStore, Depends(get_quota_store)]
+RetrievalCacheDependency = Annotated[RedisRetrievalCache, Depends(get_retrieval_cache)]
 
 
 def get_auth_service(
@@ -130,6 +143,12 @@ async def get_access_context(
         or user.token_version != claims.token_version
     ):
         raise AuthenticationError("access token is no longer valid")
+    set_context(
+        user_hash=user_identifier_hash(
+            user.id,
+            settings.jwt_secret_key.get_secret_value().encode("utf-8"),
+        )
+    )
     return AccessContext(user=user, claims=claims)
 
 
@@ -187,6 +206,7 @@ def get_project_retrieval_service(
     context: AccessContextDependency,
     settings: SettingsDependency,
     reranker_provider: RerankerProviderDependency,
+    retrieval_cache: RetrievalCacheDependency,
 ) -> RagRetrievalService:
     """Build the normal-user retriever; project scope is enforced by the service."""
 
@@ -197,6 +217,7 @@ def get_project_retrieval_service(
         reranker_provider=reranker_provider,
         hybrid_candidate_multiplier=settings.rag_hybrid_candidate_multiplier,
         rrf_k=settings.rag_rrf_k,
+        cache=retrieval_cache,
     )
 
 

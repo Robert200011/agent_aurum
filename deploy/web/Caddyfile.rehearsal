@@ -1,0 +1,17 @@
+{
+    admin off
+    auto_https off
+}
+
+:8080 {
+    handle /healthz {
+        respond "ready" 200
+    }
+
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}
+

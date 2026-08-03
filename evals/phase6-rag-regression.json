@@ -1,0 +1,154 @@
+{
+  "version": "p6.3-rag-v1",
+  "description": "PR gate fixtures produced by deterministic Fake retrieval and answer providers.",
+  "thresholds": {
+    "minimum_retrieval_recall_at_k": 0.9,
+    "minimum_citation_validity": 1.0,
+    "minimum_citation_coverage": 1.0,
+    "minimum_groundedness": 1.0,
+    "minimum_refusal_accuracy": 1.0,
+    "minimum_finance_numeric_accuracy": 1.0,
+    "maximum_cross_user_leak_count": 0
+  },
+  "cases": [
+    {
+      "id": "rag-answerable-budget",
+      "category": "answerable",
+      "k": 3,
+      "expected_relevant_chunk_ids": ["budget-current"],
+      "retrieved_chunk_ids": ["budget-current", "budget-secondary"],
+      "answer_citation_chunk_ids": ["budget-current"],
+      "claims": [
+        {
+          "id": "claim-budget-fixed",
+          "supporting_chunk_ids": ["budget-current"],
+          "cited_chunk_ids": ["budget-current"]
+        }
+      ],
+      "expected_refusal": false,
+      "observed_refusal": false,
+      "expected_finance_numbers": [],
+      "observed_finance_numbers": [],
+      "released_foreign_user_markers": []
+    },
+    {
+      "id": "rag-no-answer",
+      "category": "no_answer",
+      "k": 3,
+      "expected_relevant_chunk_ids": [],
+      "retrieved_chunk_ids": [],
+      "answer_citation_chunk_ids": [],
+      "claims": [],
+      "expected_refusal": true,
+      "observed_refusal": true,
+      "expected_finance_numbers": [],
+      "observed_finance_numbers": [],
+      "released_foreign_user_markers": []
+    },
+    {
+      "id": "rag-conflicting-documents",
+      "category": "conflicting_documents",
+      "k": 4,
+      "expected_relevant_chunk_ids": ["conflict-a", "conflict-b"],
+      "retrieved_chunk_ids": ["conflict-a", "conflict-b", "background"],
+      "answer_citation_chunk_ids": ["conflict-a", "conflict-b"],
+      "claims": [
+        {
+          "id": "claim-conflict-a",
+          "supporting_chunk_ids": ["conflict-a"],
+          "cited_chunk_ids": ["conflict-a"]
+        },
+        {
+          "id": "claim-conflict-b",
+          "supporting_chunk_ids": ["conflict-b"],
+          "cited_chunk_ids": ["conflict-b"]
+        }
+      ],
+      "expected_refusal": false,
+      "observed_refusal": false,
+      "expected_finance_numbers": [],
+      "observed_finance_numbers": [],
+      "released_foreign_user_markers": []
+    },
+    {
+      "id": "rag-current-published-version-only",
+      "category": "multiple_versions",
+      "k": 3,
+      "expected_relevant_chunk_ids": ["policy-v2"],
+      "retrieved_chunk_ids": ["policy-v2"],
+      "answer_citation_chunk_ids": ["policy-v2"],
+      "claims": [
+        {
+          "id": "claim-current-version",
+          "supporting_chunk_ids": ["policy-v2"],
+          "cited_chunk_ids": ["policy-v2"]
+        }
+      ],
+      "expected_refusal": false,
+      "observed_refusal": false,
+      "expected_finance_numbers": [],
+      "observed_finance_numbers": [],
+      "released_foreign_user_markers": []
+    },
+    {
+      "id": "rag-cross-knowledge-base",
+      "category": "cross_knowledge_base",
+      "k": 4,
+      "expected_relevant_chunk_ids": ["kb-risk-rule"],
+      "retrieved_chunk_ids": ["kb-budget-rule", "kb-risk-rule"],
+      "answer_citation_chunk_ids": ["kb-risk-rule"],
+      "claims": [
+        {
+          "id": "claim-risk-rule",
+          "supporting_chunk_ids": ["kb-risk-rule"],
+          "cited_chunk_ids": ["kb-risk-rule"]
+        }
+      ],
+      "expected_refusal": false,
+      "observed_refusal": false,
+      "expected_finance_numbers": [],
+      "observed_finance_numbers": [],
+      "released_foreign_user_markers": []
+    },
+    {
+      "id": "rag-mixed-finance-grounding",
+      "category": "mixed_finance",
+      "k": 4,
+      "expected_relevant_chunk_ids": ["kb-budget-adjustment"],
+      "retrieved_chunk_ids": ["kb-budget-adjustment"],
+      "answer_citation_chunk_ids": ["kb-budget-adjustment"],
+      "claims": [
+        {
+          "id": "claim-adjustment-principle",
+          "supporting_chunk_ids": ["kb-budget-adjustment"],
+          "cited_chunk_ids": ["kb-budget-adjustment"]
+        }
+      ],
+      "expected_refusal": false,
+      "observed_refusal": false,
+      "expected_finance_numbers": ["12000", "6300"],
+      "observed_finance_numbers": ["12000", "6300"],
+      "released_foreign_user_markers": []
+    },
+    {
+      "id": "rag-citation-page-location",
+      "category": "citation_location",
+      "k": 3,
+      "expected_relevant_chunk_ids": ["guide-page-5"],
+      "retrieved_chunk_ids": ["guide-page-5"],
+      "answer_citation_chunk_ids": ["guide-page-5"],
+      "claims": [
+        {
+          "id": "claim-page-location",
+          "supporting_chunk_ids": ["guide-page-5"],
+          "cited_chunk_ids": ["guide-page-5"]
+        }
+      ],
+      "expected_refusal": false,
+      "observed_refusal": false,
+      "expected_finance_numbers": [],
+      "observed_finance_numbers": [],
+      "released_foreign_user_markers": []
+    }
+  ]
+}

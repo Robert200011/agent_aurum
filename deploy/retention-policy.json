@@ -1,0 +1,63 @@
+{
+  "version": "p6.4-retention-v1",
+  "timezone": "UTC",
+  "targets": [
+    {
+      "name": "expired_refresh_tokens",
+      "system": "postgresql",
+      "retention_days": 30,
+      "mode": "delete",
+      "table": "identity.refresh_tokens",
+      "timestamp_column": "expires_at"
+    },
+    {
+      "name": "retrieval_logs",
+      "system": "postgresql",
+      "retention_days": 90,
+      "mode": "delete",
+      "table": "rag.retrieval_logs",
+      "timestamp_column": "created_at"
+    },
+    {
+      "name": "audit_logs",
+      "system": "postgresql",
+      "retention_days": 730,
+      "mode": "archive_then_delete",
+      "table": "audit.audit_logs",
+      "timestamp_column": "created_at"
+    },
+    {
+      "name": "chat_history",
+      "system": "postgresql",
+      "retention_days": 365,
+      "mode": "archive_or_subject_request",
+      "table": "chat.conversations",
+      "timestamp_column": "updated_at"
+    },
+    {
+      "name": "traces",
+      "system": "trace_backend",
+      "retention_days": 14,
+      "mode": "backend_lifecycle"
+    },
+    {
+      "name": "metrics",
+      "system": "prometheus",
+      "retention_days": 30,
+      "mode": "backend_lifecycle"
+    },
+    {
+      "name": "container_logs",
+      "system": "runtime",
+      "retention_days": 30,
+      "mode": "runtime_rotation"
+    },
+    {
+      "name": "encrypted_backups",
+      "system": "filesystem_or_object_storage",
+      "retention_days": 30,
+      "mode": "backup_job_lifecycle"
+    }
+  ]
+}
+

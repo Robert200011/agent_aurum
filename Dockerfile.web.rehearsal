@@ -1,0 +1,9 @@
+FROM caddy:2.10.2-alpine
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.source="aurum-agent-web-rehearsal" \
+      org.opencontainers.image.revision=$VCS_REF
+RUN setcap -r /usr/bin/caddy
+COPY deploy/web/Caddyfile.rehearsal /etc/caddy/Caddyfile
+COPY web/dist /srv
+EXPOSE 8080

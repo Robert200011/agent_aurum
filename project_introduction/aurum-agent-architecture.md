@@ -918,6 +918,20 @@ Browser
 - `conversation_id`
 - `agent_run_id`
 
+P6.1 已通过 `app/observability/` 落地上述上下文。日志仅接受白名单字段，用户标识使用
+环境密钥 HMAC 后的短哈希；请求参数、Prompt、模型回答、文档正文和财务明细不进入
+日志或 Span 属性。FastAPI、SQLAlchemy、Redis、Celery 采用自动插桩，模型、检索和
+财务工具采用受控业务 Span，OTLP HTTP 统一发送到 Collector。
+
+P6.2 在高成本入口前增加 Redis Lua 原子检查与占用。聊天同时检查用户/全局请求、每日
+Token 和 Agent 并发，Provider 返回用量后按一次业务运行的全部模型调用累计实际 Token；
+上传同时检查次数、容量和处理租约，Worker 进入终态后释放。租约均有 TTL，Redis 不可用
+时聊天和上传拒绝新任务。
+
+检索缓存仅保存已发布 Chunk 标识、分数和重排状态，Key 纳入用户哈希、项目、知识库与
+当前文档版本、查询哈希、Embedding/Reranker 和检索参数。命中后仍从 PostgreSQL 重建
+Chunk 并重新校验项目绑定、文档启用和当前发布版本。
+
 主要观测内容：
 
 - API 请求量和错误率；
@@ -931,6 +945,10 @@ Browser
 - 队列积压；
 - 数据库慢查询；
 - Redis 和磁盘状态。
+
+Prometheus 由内部网络抓取 `/metrics`；标签只使用路由模板、状态、Provider、模型、
+调用模式和工具名等低基数值。`compose.observability.yaml` 提供 Collector、Prometheus
+和 Grafana，Collector 对错误 Trace 全保留、成功 Trace 按 5% 尾部采样。
 
 ## 20. 部署映射
 
@@ -1036,6 +1054,35 @@ KnowledgeRepository  → PgVectorKnowledgeRepository
 13. V1 Agent 只读；
 14. 未来写操作必须经过 Human-in-the-loop；
 15. 所有外部模型和存储通过 Provider 接口隔离。
+
+### 23.1 P6.3 回归门禁边界
+
+P6.3 将发布质量拆为两层。PR 层使用版本化数据集和 Fake Provider，直接调用生产使用的
+Prompt 构造、引用白名单、只读工具 Schema、财务 Grounding 和最终输出安全策略；任一
+引用伪造、敏感标识、系统提示回显、写操作声明或跨项目标记都会让门禁失败。候选发布层
+必须另外保存真实 Chat/Embedding/Reranker 型号、Prompt 哈希、数据集哈希及 Provider
+冒烟结论。
+
+负载门禁是外部黑盒 HTTP/SSE 客户端，不保存响应正文，只保留吞吐、P50/P95/P99、首字节、
+状态码、网络错误和隔离标记计数。运行前后抓取 Prometheus，比较 SSE 连接、文档队列和
+数据库已借出连接，防止仅看延迟而遗漏资源泄漏。正式容量承诺仍需在业务目标明确后制定。
+
+### 23.2 P6.4 恢复边界
+
+P6.4 把 PostgreSQL 和带版本控制的 MinIO 视为权威数据，把 Redis 视为可重建状态。备份
+归档在落盘前使用 AES-256-GCM 整体认证加密，外部 sidecar 仅包含密文哈希、时间、大小和
+密钥标识；数据库密码、对象存储密钥、JWT/checkpoint/备份密钥都不进入清单或日志。
+
+恢复始终使用新的数据库和 bucket，先校验密文与归档成员，再执行 `pg_restore` 和对象版本
+重放。恢复后比较 Alembic、表计数、RLS、财务汇总、引用关系、聊天关系、checkpoint 解密
+与对象哈希。Redis 不从备份恢复，以避免把过期租约、配额和缓存重新带入候选实例。
+
+### 23.3 P6.5 发布边界
+
+首版生产拓扑使用 Caddy Gateway 和蓝/绿两套 API/Web 实例；数据服务与观测服务不直接暴露
+公网。发布状态以原子替换的 Caddy upstream 和机器可读 Manifest 为准，切流后统一观测槽位、
+错误率、P95、模型失败、队列和连接池。任一观测失败即切回上一槽，数据库只允许前滚修复，
+不会在自动回滚中执行破坏性迁移降级。
 
 ## 24. 后续详细设计
 

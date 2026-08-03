@@ -7,7 +7,8 @@ Aurum Agent 是面向个人财务、存款收支和投资知识问答的智能�
 以及受控编排的只读个人财务 Agent。PDF、DOCX、Markdown、TXT、CSV、XLSX 均已接入
 异步解析、确定性分块、Embedding、pgvector 和原子发布；聊天链路支持 SSE、加密
 Checkpoint、财务证据、知识引用、风险提示和历史恢复。阶段五最终图版本为
-`finance-agent-p5.6-v1`，下一步进入阶段六企业级加固。
+`finance-agent-p5.6-v1`，当前加固图版本为 `finance-agent-p6.3-v1`。阶段六 P6.1～P6.5
+工程开发与本地发布/回滚演练已经完成，正式公网发布保留候选环境操作门禁。
 
 后端采用根目录 `app/` 包布局，不再使用 `src/aurum_agent/`。现有代码按 API、Agent、
 RAG、Finance、Provider、Database、Service、Worker、Observability 和 Security
@@ -24,10 +25,28 @@ RAG、Finance、Provider、Database、Service、Worker、Observability 和 Secur
 | 阶段三：知识库管理 | 已完成 | 2026-07-29 |
 | 阶段四：基础 RAG 问答 | 已完成 | 2026-07-31 |
 | 阶段五：个人财务 Agent | 已完成 | 2026-08-02 |
+| 阶段六 P6.1：日志脱敏与可观测性 | 已完成 | 2026-08-02 |
+| 阶段六 P6.2：配额与最小安全缓存 | 已完成 | 2026-08-02 |
+| 阶段六 P6.3：RAG、安全与性能回归门禁 | 已完成 | 2026-08-02 |
+| 阶段六 P6.4：备份、恢复与数据保留 | 已完成 | 2026-08-02 |
+| 阶段六 P6.5：生产部署、灰度发布与回滚 | 已完成 | 2026-08-02 |
 
 完整范围、验收结果和后续阶段见
 [总体技术方案](./aurum-agent-initial-design.md#0-项目里程碑与当前状态)。阶段三已固定使用
 DashScope `text-embedding-v4`（1024 维）、MinIO、Celery 和显式项目—知识库绑定。
+阶段六的开发批次、边界与验收标准见
+[阶段六企业级加固开发方案](./aurum-agent-phase-6-plan.md)。
+阶段六首批实现结果见
+[P6.1 日志脱敏与可观测性验收报告](./aurum-agent-phase-6-p6.1-acceptance.md)。
+P6.2 的配额、并发租约和已发布检索缓存结果见
+[P6.2 用户/模型配额与最小安全缓存验收报告](./aurum-agent-phase-6-p6.2-acceptance.md)。
+P6.3 的版本化 RAG/Injection 数据集、统一门禁和两档负载基线见
+[P6.3 RAG、安全与性能回归门禁验收报告](./aurum-agent-phase-6-p6.3-acceptance.md)。
+P6.4 的加密备份、隔离恢复和保留策略见
+[P6.4 备份、恢复与数据保留验收报告](./aurum-agent-phase-6-p6.4-acceptance.md)。
+P6.5 的单机生产资产、蓝绿发布与故障回滚结果见
+[P6.5 生产部署、灰度发布与回滚验收报告](./aurum-agent-phase-6-p6.5-acceptance.md)，阶段汇总见
+[阶段六验收汇总](./aurum-agent-phase-6-acceptance.md)。
 
 ## 阶段一已包含
 

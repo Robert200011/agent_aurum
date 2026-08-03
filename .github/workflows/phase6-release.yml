@@ -1,0 +1,107 @@
+name: phase6-release-gate
+
+on:
+  pull_request:
+  push:
+    branches: [master, "release/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg16-trixie
+        env:
+          POSTGRES_DB: aurum
+          POSTGRES_USER: aurum
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aurum -d aurum"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      AURUM_ENVIRONMENT: test
+      AURUM_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
+      AURUM_MIGRATION_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
+      AURUM_REDIS_URL: redis://127.0.0.1:6379/0
+      AURUM_JWT_SECRET_KEY: ci-only-jwt-secret-at-least-32-bytes-long
+      AURUM_LANGGRAPH_AES_KEY: 0123456789abcdef0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]" pip-audit
+      - run: ruff check app migrations tests scripts
+      - run: mypy app
+      - run: alembic upgrade head
+      - run: alembic check
+      - run: pytest
+      - run: python scripts/run_phase6_evaluation.py --output phase6-gate.json
+      - run: pip-audit
+      - run: pip freeze > python-dependencies.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-evidence
+          path: |
+            phase6-gate.json
+            python-dependencies.txt
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - run: npm audit --audit-level=high
+      - run: npm ls --all --json > npm-dependencies.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-evidence
+          path: |
+            web/dist
+            web/npm-dependencies.json
+
+  images:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build immutable candidate images
+        run: |
+          docker build --build-arg VCS_REF="$GITHUB_SHA" -t "aurum-agent-api:$GITHUB_SHA" .
+          docker build -f Dockerfile.web --build-arg VCS_REF="$GITHUB_SHA" -t "aurum-agent-web:$GITHUB_SHA" .
+      - name: Generate image SBOMs
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.22.0 "aurum-agent-api:$GITHUB_SHA" -o cyclonedx-json > api-sbom.cdx.json
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.22.0 "aurum-agent-web:$GITHUB_SHA" -o cyclonedx-json > web-sbom.cdx.json
+      - name: Scan candidate images
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.59.1 image --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-api:$GITHUB_SHA"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.59.1 image --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-web:$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-sboms
+          path: "*-sbom.cdx.json"
+

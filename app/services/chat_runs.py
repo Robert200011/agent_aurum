@@ -15,7 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.tools.finance import FinanceToolExecutor
 from app.config import Settings
 from app.errors import ApplicationError
+from app.governance.usage import collect_model_tokens
 from app.providers.model_provider import ChatModelProvider, RerankerProvider
+from app.providers.quota_store import ChatQuotaLease, RedisQuotaStore
+from app.providers.retrieval_cache import RedisRetrievalCache
 from app.rag.embeddings.dashscope import DashScopeEmbeddingProvider
 from app.services.answering import RagAnswerService
 from app.services.chat import (
@@ -53,6 +56,7 @@ class _RunFeed:
     task: asyncio.Task[None] | None = None
     terminal: bool = False
     error: ChatRunError | None = None
+    quota_lease: ChatQuotaLease | None = None
 
 
 class ChatRunCoordinator:
@@ -66,21 +70,32 @@ class ChatRunCoordinator:
         chat_provider: ChatModelProvider,
         reranker_provider: RerankerProvider | None,
         checkpointer: BaseCheckpointSaver[str],
+        quota_store: RedisQuotaStore,
+        retrieval_cache: RedisRetrievalCache,
     ) -> None:
         self._settings = settings
         self._session_factory = session_factory
         self._chat_provider = chat_provider
         self._reranker_provider = reranker_provider
         self._checkpointer = checkpointer
+        self._quota_store = quota_store
+        self._retrieval_cache = retrieval_cache
         self._feeds: dict[UUID, _RunFeed] = {}
 
-    def start(self, *, user_id: UUID, run: StreamingRun) -> None:
+    def start(
+        self,
+        *,
+        user_id: UUID,
+        run: StreamingRun,
+        quota_lease: ChatQuotaLease,
+    ) -> None:
         """注册并启动唯一后台任务；调用前运行记录已经提交到数据库。"""
 
         if run.run_id in self._feeds:
             return
         feed = _RunFeed(
             conversation_id=run.conversation_id,
+            quota_lease=quota_lease,
             events=[
                 BufferedChatEvent(
                     sequence=1,
@@ -170,45 +185,51 @@ class ChatRunCoordinator:
         run: StreamingRun,
         feed: _RunFeed,
     ) -> None:
+        actual_tokens = 0
         try:
-            async with self._session_factory() as session:
-                retrieval = RagRetrievalService(
-                    session=session,
-                    actor_user_id=user_id,
-                    embedding_provider=DashScopeEmbeddingProvider(self._settings),
-                    reranker_provider=self._reranker_provider,
-                    hybrid_candidate_multiplier=(
-                        self._settings.rag_hybrid_candidate_multiplier
-                    ),
-                    rrf_k=self._settings.rag_rrf_k,
-                )
-                answering = RagAnswerService(
-                    retrieval_service=retrieval,
-                    chat_provider=self._chat_provider,
-                    checkpointer=self._checkpointer,
-                    retrieval_limit=self._settings.rag_retrieval_limit,
-                    context_max_characters=self._settings.rag_context_max_characters,
-                    context_source_max_characters=(
-                        self._settings.rag_context_source_max_characters
-                    ),
-                    finance_timezone=self._settings.finance_timezone,
-                    finance_tools=FinanceToolExecutor(
-                        FinanceService(session=session, user_id=user_id),
-                        market_stale_after_hours=(
-                            self._settings.finance_market_stale_after_hours
-                        ),
-                        exchange_rate_stale_after_hours=(
-                            self._settings.finance_exchange_rate_stale_after_hours
-                        ),
-                    ),
-                )
-                service = ChatService(
-                    session=session,
-                    user_id=user_id,
-                    answer_service=answering,
-                )
-                async for event in service.execute_streaming_run(run):
-                    await self._append(feed, event)
+            with collect_model_tokens() as token_counter:
+                try:
+                    async with self._session_factory() as session:
+                        retrieval = RagRetrievalService(
+                            session=session,
+                            actor_user_id=user_id,
+                            embedding_provider=DashScopeEmbeddingProvider(self._settings),
+                            reranker_provider=self._reranker_provider,
+                            hybrid_candidate_multiplier=(
+                                self._settings.rag_hybrid_candidate_multiplier
+                            ),
+                            rrf_k=self._settings.rag_rrf_k,
+                            cache=self._retrieval_cache,
+                        )
+                        answering = RagAnswerService(
+                            retrieval_service=retrieval,
+                            chat_provider=self._chat_provider,
+                            checkpointer=self._checkpointer,
+                            retrieval_limit=self._settings.rag_retrieval_limit,
+                            context_max_characters=self._settings.rag_context_max_characters,
+                            context_source_max_characters=(
+                                self._settings.rag_context_source_max_characters
+                            ),
+                            finance_timezone=self._settings.finance_timezone,
+                            finance_tools=FinanceToolExecutor(
+                                FinanceService(session=session, user_id=user_id),
+                                market_stale_after_hours=(
+                                    self._settings.finance_market_stale_after_hours
+                                ),
+                                exchange_rate_stale_after_hours=(
+                                    self._settings.finance_exchange_rate_stale_after_hours
+                                ),
+                            ),
+                        )
+                        service = ChatService(
+                            session=session,
+                            user_id=user_id,
+                            answer_service=answering,
+                        )
+                        async for event in service.execute_streaming_run(run):
+                            await self._append(feed, event)
+                finally:
+                    actual_tokens = token_counter.total_tokens
         except asyncio.CancelledError:
             raise
         except ApplicationError as exc:
@@ -220,6 +241,8 @@ class ChatRunCoordinator:
                 message="an internal error occurred",
             )
         finally:
+            if feed.quota_lease is not None:
+                await feed.quota_lease.settle(actual_tokens)
             async with feed.condition:
                 feed.terminal = True
                 feed.condition.notify_all()

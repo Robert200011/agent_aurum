@@ -1,0 +1,21 @@
+{
+  "schema_version": "p6.5-release-v1",
+  "release_id": "release-YYYYMMDD-HHMMSS",
+  "created_at": "2026-08-02T00:00:00+00:00",
+  "mode": "production",
+  "operator": "approved-operator",
+  "candidate_slot": "green",
+  "git_revision": "0000000000000000000000000000000000000000",
+  "worktree_dirty": false,
+  "images": {
+    "api": "registry.example.com/aurum-agent-api:0000000000000000000000000000000000000000",
+    "web": "registry.example.com/aurum-agent-web:0000000000000000000000000000000000000000"
+  },
+  "migration_revision": "20260802_0012",
+  "graph_version": "finance-agent-p6.3-v1",
+  "prompt_sha256": "generated-by-release-tool",
+  "dataset_sha256": {},
+  "configuration_sha256": "generated-by-release-tool",
+  "backup_evidence": "/srv/aurum/backups/primary/backup.sha256.json"
+}
+
