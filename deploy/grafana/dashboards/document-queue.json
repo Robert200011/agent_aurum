@@ -1,0 +1,15 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {"id": 1, "type": "stat", "title": "Worker ready", "targets": [{"expr": "aurum_worker_ready", "refId": "A"}], "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0}},
+    {"id": 2, "type": "timeseries", "title": "Queue depth", "targets": [{"expr": "aurum_ingestion_queue_depth", "refId": "A"}], "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}},
+    {"id": 3, "type": "timeseries", "title": "Worker tasks", "targets": [{"expr": "sum by (task, outcome) (rate(aurum_worker_tasks_total[5m]))", "legendFormat": "{{task}} {{outcome}}", "refId": "A"}], "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}}
+  ],
+  "schemaVersion": 41,
+  "tags": ["aurum", "documents", "p6.1"],
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "Aurum - Document Queue",
+  "uid": "aurum-document-queue",
+  "version": 1
+}

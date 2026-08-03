@@ -355,6 +355,40 @@ class RagRepository:
             for chunk, document, document_version in rows
         }
 
+    async def get_project_retrieval_version_state(
+        self,
+        *,
+        project_id: UUID,
+        knowledge_base_ids: list[UUID],
+    ) -> list[tuple[UUID, UUID | None, str, bool, datetime | None]]:
+        """返回会影响已发布检索集合的轻量状态，用于生成缓存版本指纹。"""
+
+        if not knowledge_base_ids:
+            return []
+        statement = (
+            select(
+                Document.id,
+                Document.current_published_version_id,
+                Document.status,
+                Document.is_enabled,
+                Document.deleted_at,
+            )
+            .join(
+                ProjectKnowledgeBase,
+                ProjectKnowledgeBase.knowledge_base_id == Document.knowledge_base_id,
+            )
+            .where(
+                ProjectKnowledgeBase.project_id == project_id,
+                Document.knowledge_base_id.in_(knowledge_base_ids),
+            )
+            .order_by(Document.id)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [
+            (row[0], row[1], row[2], row[3], row[4])
+            for row in rows
+        ]
+
     async def get_outbox_event(
         self, *, ingestion_job_id: UUID, event_type: str
     ) -> OutboxEvent | None:

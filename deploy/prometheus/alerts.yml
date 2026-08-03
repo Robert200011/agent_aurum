@@ -1,0 +1,58 @@
+groups:
+  - name: aurum-p6.1
+    rules:
+      - alert: AurumApiHigh5xxRate
+        expr: |
+          sum(rate(aurum_api_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(aurum_api_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aurum API 5xx rate is above 5%
+
+      - alert: AurumModelProviderFailures
+        expr: sum(rate(aurum_model_requests_total{outcome="error"}[5m])) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aurum model provider calls are failing
+
+      - alert: AurumIngestionWorkerOffline
+        expr: aurum_worker_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum ingestion worker heartbeat is offline
+
+      - alert: AurumIngestionQueueBacklog
+        expr: aurum_ingestion_queue_depth > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aurum ingestion queue has a sustained backlog
+
+      - alert: AurumDatabasePoolSaturation
+        expr: |
+          aurum_database_pool_connections{state="checked_out"}
+          / clamp_min(aurum_database_pool_connections{state="size"}, 1) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aurum database connection pool is saturated
+
+      # P6.4 will publish this timestamp; the rule is versioned now so backup
+      # alerting becomes active as soon as the backup job starts reporting it.
+      - alert: AurumBackupOverdue
+        expr: |
+          absent(aurum_backup_last_success_timestamp_seconds)
+          or time() - aurum_backup_last_success_timestamp_seconds > 90000
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: Aurum has no successful backup in the last 25 hours

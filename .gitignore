@@ -28,6 +28,7 @@ env/
 
 # Generated test reports
 .test-results/
+/deploy/runtime/
 
 # Runtime files
 *.log
@@ -54,5 +55,5 @@ playwright-report/
 *.bak
 *.swp
 *.swo
-/tests/
 /.claude/settings.local.json
+/tests/

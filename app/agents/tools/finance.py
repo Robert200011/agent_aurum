@@ -22,6 +22,8 @@ from pydantic import (
 
 from app.errors import ApplicationError, NotFoundError
 from app.finance.types import TransactionType
+from app.observability.metrics import TOOL_DURATION, TOOL_REQUESTS
+from app.observability.tracing import start_span
 from app.services.finance import FinanceService
 
 logger = logging.getLogger(__name__)
@@ -860,6 +862,21 @@ class FinanceToolExecutor:
         return tuple(results)
 
     async def execute(self, request: FinanceToolRequest) -> FinanceToolResult:
+        observed_started = perf_counter()
+        with start_span("finance.tool", tool=request.name.value):
+            result = await self._execute_safely(request)
+        outcome = (
+            "success" if result.status == FinanceToolStatus.SUCCEEDED else "error"
+        )
+        TOOL_REQUESTS.labels(tool=request.name.value, outcome=outcome).inc()
+        TOOL_DURATION.labels(tool=request.name.value).observe(
+            perf_counter() - observed_started
+        )
+        return result
+
+    async def _execute_safely(self, request: FinanceToolRequest) -> FinanceToolResult:
+        """把工具异常转换为稳定结果；观测层只读取工具名和最终状态。"""
+
         started = perf_counter()
         observed_at = self._clock()
         try:

@@ -1,0 +1,38 @@
+{
+	admin 0.0.0.0:2019
+	grace_period 30s
+}
+
+{$AURUM_PUBLIC_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	@private path /docs* /redoc* /openapi.json /metrics /ops/*
+	handle @private {
+		respond 404
+	}
+
+	import /etc/caddy/active-upstream.caddy
+}
+
+{$AURUM_OBJECT_STORAGE_PUBLIC_DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	reverse_proxy https://minio:9000 {
+		transport http {
+			tls_trust_pool file /etc/caddy/minio-ca.crt
+			tls_server_name minio
+		}
+	}
+}

@@ -13,7 +13,11 @@ from fastapi import APIRouter, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.api.dependencies import ChatRunCoordinatorDependency, ChatServiceDependency
+from app.api.dependencies import (
+    ChatRunCoordinatorDependency,
+    ChatServiceDependency,
+    QuotaStoreDependency,
+)
 from app.api.schemas.chat import (
     AgentRunResponse,
     AvailableProjectListResponse,
@@ -36,6 +40,10 @@ from app.api.schemas.chat import (
 )
 from app.db.models.chat import AgentRun, Message, MessageCitation, MessageEvidence
 from app.errors import ApplicationError, ConflictError
+from app.governance.usage import collect_model_tokens
+from app.observability.context import set_context
+from app.observability.metrics import SSE_EVENTS
+from app.observability.tracing import current_trace_id
 from app.services.chat import (
     ChatStreamCompleted,
     ChatStreamDelta,
@@ -167,12 +175,19 @@ async def answer_conversation(
     payload: QuestionCreate,
     request: Request,
     service: ChatServiceDependency,
+    quota_store: QuotaStoreDependency,
 ) -> StructuredAnswerResponse:
-    persisted = await service.answer(
-        conversation_id=conversation_id,
-        question=payload.question,
-        trace_id=_request_id(request),
-    )
+    set_context(conversation_id=conversation_id)
+    quota_lease = await quota_store.reserve_chat(service.user_id)
+    with collect_model_tokens() as counter:
+        try:
+            persisted = await service.answer(
+                conversation_id=conversation_id,
+                question=payload.question,
+                trace_id=_request_id(request),
+            )
+        finally:
+            await quota_lease.settle(counter.total_tokens)
     return _structured_answer_response(persisted)
 
 
@@ -183,15 +198,23 @@ async def stream_answer_conversation(
     request: Request,
     service: ChatServiceDependency,
     coordinator: ChatRunCoordinatorDependency,
+    quota_store: QuotaStoreDependency,
 ) -> StreamingResponse:
     """启动独立生成任务，并通过 POST SSE 订阅其可重放事件。"""
 
-    run = await service.start_streaming_run(
-        conversation_id=conversation_id,
-        question=payload.question,
-        trace_id=_request_id(request),
-    )
-    coordinator.start(user_id=service.user_id, run=run)
+    set_context(conversation_id=conversation_id)
+    quota_lease = await quota_store.reserve_chat(service.user_id)
+    try:
+        run = await service.start_streaming_run(
+            conversation_id=conversation_id,
+            question=payload.question,
+            trace_id=_request_id(request),
+        )
+    except BaseException:
+        await quota_lease.settle(0)
+        raise
+    set_context(agent_run_id=run.run_id)
+    coordinator.start(user_id=service.user_id, run=run, quota_lease=quota_lease)
     return StreamingResponse(
         _coordinated_event_stream(
             conversation_id=conversation_id,
@@ -216,13 +239,21 @@ async def regenerate_answer(
     request: Request,
     service: ChatServiceDependency,
     coordinator: ChatRunCoordinatorDependency,
+    quota_store: QuotaStoreDependency,
 ) -> StreamingResponse:
-    run = await service.regenerate_streaming_run(
-        conversation_id=conversation_id,
-        message_id=message_id,
-        trace_id=_request_id(request),
-    )
-    coordinator.start(user_id=service.user_id, run=run)
+    set_context(conversation_id=conversation_id)
+    quota_lease = await quota_store.reserve_chat(service.user_id)
+    try:
+        run = await service.regenerate_streaming_run(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            trace_id=_request_id(request),
+        )
+    except BaseException:
+        await quota_lease.settle(0)
+        raise
+    set_context(agent_run_id=run.run_id)
+    coordinator.start(user_id=service.user_id, run=run, quota_lease=quota_lease)
     return StreamingResponse(
         _coordinated_event_stream(
             conversation_id=conversation_id,
@@ -430,6 +461,7 @@ def _sse(*, event: str, event_id: int, payload: BaseModel) -> str:
         ensure_ascii=False,
         separators=(",", ":"),
     )
+    SSE_EVENTS.labels(event=event).inc()
     return f"id: {event_id}\nevent: {event}\ndata: {data}\n\n"
 
 
@@ -493,5 +525,8 @@ def _run_detail_text(run: AgentRun, key: str) -> str | None:
 
 
 def _request_id(request: Request) -> str | None:
+    trace_id = current_trace_id()
+    if trace_id is not None:
+        return trace_id
     request_id = getattr(request.state, "request_id", None)
     return request_id if isinstance(request_id, str) else None

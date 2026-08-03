@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Callable, Mapping, Sequence
+from time import perf_counter
 from typing import Any, Literal, cast
 
 from dashscope import TextEmbedding  # type: ignore[import-untyped, unused-ignore]
 
 from app.config import Settings
+from app.observability.metrics import record_model_call
+from app.observability.tracing import start_span
 from app.providers.model_provider import EmbeddingProvider
 from app.rag.constants import DASHSCOPE_EMBEDDING_PROVIDER
 
@@ -80,25 +83,44 @@ class DashScopeEmbeddingProvider:
             batch = list(texts[start : start + self._batch_size])
             if any(not text.strip() for text in batch):
                 raise EmbeddingProviderFailure("embedding_input_empty", retryable=False)
-            try:
-                response = await asyncio.to_thread(
-                    self._call,
-                    model=self._model_name,
-                    input=batch,
-                    api_key=self._api_key,
-                    text_type=text_type,
-                    dimension=self._dimensions,
-                    output_type="dense",
-                    timeout=self._timeout_seconds,
-                )
-            except EmbeddingProviderFailure:
-                raise
-            except Exception as exc:
-                raise EmbeddingProviderFailure(
-                    "embedding_provider_unavailable",
-                    retryable=True,
-                ) from exc
-            vectors.extend(self._validated_vectors(response, expected_count=len(batch)))
+            started = perf_counter()
+            outcome = "error"
+            with start_span(
+                "model.embedding",
+                provider=self.provider_name,
+                model=self.model_name,
+                text_type=text_type,
+            ):
+                try:
+                    response = await asyncio.to_thread(
+                        self._call,
+                        model=self._model_name,
+                        input=batch,
+                        api_key=self._api_key,
+                        text_type=text_type,
+                        dimension=self._dimensions,
+                        output_type="dense",
+                        timeout=self._timeout_seconds,
+                    )
+                    vectors.extend(
+                        self._validated_vectors(response, expected_count=len(batch))
+                    )
+                    outcome = "success"
+                except EmbeddingProviderFailure:
+                    raise
+                except Exception as exc:
+                    raise EmbeddingProviderFailure(
+                        "embedding_provider_unavailable",
+                        retryable=True,
+                    ) from exc
+                finally:
+                    record_model_call(
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        mode=f"embedding_{text_type}",
+                        outcome=outcome,
+                        duration_seconds=perf_counter() - started,
+                    )
         return vectors
 
     def _validated_vectors(self, response: object, *, expected_count: int) -> list[list[float]]:

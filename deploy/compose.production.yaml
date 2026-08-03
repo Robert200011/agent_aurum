@@ -1,0 +1,292 @@
+name: aurum-agent-production
+
+x-runtime-environment: &runtime-environment
+  AURUM_ENVIRONMENT: ${AURUM_DEPLOY_ENVIRONMENT:-production}
+  AURUM_DEBUG: "false"
+  AURUM_DATABASE_URL: postgresql+asyncpg://aurum_app:${AURUM_APP_DB_PASSWORD:?required}@postgres:5432/aurum
+  AURUM_MIGRATION_DATABASE_URL: postgresql+asyncpg://aurum:${POSTGRES_PASSWORD:?required}@postgres:5432/aurum
+  AURUM_APP_DATABASE_ROLE: aurum_app
+  AURUM_REDIS_URL: redis://redis:6379/0
+  AURUM_JWT_SECRET_KEY: ${AURUM_JWT_SECRET_KEY:?required}
+  AURUM_LANGGRAPH_AES_KEY: ${AURUM_LANGGRAPH_AES_KEY:?required}
+  AURUM_DASHSCOPE_API_KEY: ${AURUM_DASHSCOPE_API_KEY:-}
+  AURUM_CHAT_MODEL: ${AURUM_CHAT_MODEL:-qwen-plus}
+  AURUM_EMBEDDING_MODEL: ${AURUM_EMBEDDING_MODEL:-text-embedding-v4}
+  AURUM_RERANKER_MODEL: ${AURUM_RERANKER_MODEL:-qwen3-rerank}
+  AURUM_OBJECT_STORAGE_ENDPOINT: ${AURUM_OBJECT_STORAGE_INTERNAL_ENDPOINT:-http://minio:9000}
+  AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT: ${AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT:?required}
+  AURUM_OBJECT_STORAGE_SECURE: ${AURUM_OBJECT_STORAGE_SECURE:-false}
+  AURUM_OBJECT_STORAGE_BUCKET: ${AURUM_OBJECT_STORAGE_BUCKET:-aurum-knowledge}
+  AURUM_OBJECT_STORAGE_ACCESS_KEY: ${AURUM_OBJECT_STORAGE_ACCESS_KEY:?required}
+  AURUM_OBJECT_STORAGE_SECRET_KEY: ${AURUM_OBJECT_STORAGE_SECRET_KEY:?required}
+  AWS_CA_BUNDLE: /run/aurum/minio-ca.crt
+  AURUM_REFRESH_TOKEN_COOKIE_SECURE: ${AURUM_REFRESH_TOKEN_COOKIE_SECURE:-true}
+  AURUM_CORS_ORIGINS: '["${AURUM_PUBLIC_ORIGIN:?required}"]'
+  AURUM_BOOTSTRAP_ADMIN: "false"
+  AURUM_METRICS_ENABLED: "true"
+  AURUM_OTEL_TRACING_ENABLED: "true"
+  AURUM_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+
+x-api-service: &api-service
+  networks: [application, data]
+  volumes:
+    - ${AURUM_MINIO_CA_FILE:?required}:/run/aurum/minio-ca.crt:ro
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    minio-init: {condition: service_completed_successfully}
+    otel-collector: {condition: service_started}
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/api/v1/health/ready')"]
+    interval: 10s
+    timeout: 5s
+    retries: 18
+  restart: unless-stopped
+
+services:
+  gateway:
+    image: caddy:2.10.2-alpine
+    environment:
+      AURUM_PUBLIC_DOMAIN: ${AURUM_PUBLIC_DOMAIN:?required}
+      AURUM_OBJECT_STORAGE_PUBLIC_DOMAIN: ${AURUM_OBJECT_STORAGE_PUBLIC_DOMAIN:?required}
+      AURUM_GATEWAY_HEALTH_HOST: ${AURUM_GATEWAY_HEALTH_HOST:?required}
+    ports:
+      - "${AURUM_GATEWAY_BIND:-0.0.0.0}:${AURUM_GATEWAY_HTTP_PORT:-80}:80"
+      - "${AURUM_GATEWAY_BIND:-0.0.0.0}:${AURUM_GATEWAY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./gateway/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${AURUM_RELEASE_STATE_DIR:?required}/active-upstream.caddy:/etc/caddy/active-upstream.caddy:ro
+      - ${AURUM_MINIO_CA_FILE:?required}:/etc/caddy/minio-ca.crt:ro
+      - gateway-data:/data
+      - gateway-config:/config
+    networks: [edge, application, data]
+    depends_on:
+      api-blue: {condition: service_healthy}
+      api-green: {condition: service_healthy}
+      web-blue: {condition: service_healthy}
+      web-green: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --header=Host:$${AURUM_GATEWAY_HEALTH_HOST} -qO- http://127.0.0.1/api/v1/health/live >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api-blue:
+    <<: *api-service
+    image: ${AURUM_BLUE_API_IMAGE:?required}
+    environment:
+      <<: *runtime-environment
+      AURUM_OTEL_SERVICE_NAME: aurum-agent-api-blue
+    command: ["aurum-agent", "serve", "--host", "0.0.0.0", "--port", "8010"]
+
+  api-green:
+    <<: *api-service
+    image: ${AURUM_GREEN_API_IMAGE:?required}
+    environment:
+      <<: *runtime-environment
+      AURUM_OTEL_SERVICE_NAME: aurum-agent-api-green
+    command: ["aurum-agent", "serve", "--host", "0.0.0.0", "--port", "8010"]
+
+  web-blue:
+    image: ${AURUM_BLUE_WEB_IMAGE:?required}
+    networks: [application]
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx, /var/run]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  web-green:
+    image: ${AURUM_GREEN_WEB_IMAGE:?required}
+    networks: [application]
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx, /var/run]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  migrate:
+    image: ${AURUM_MIGRATION_IMAGE:?required}
+    profiles: [release]
+    environment: *runtime-environment
+    volumes:
+      - ${AURUM_MINIO_CA_FILE:?required}:/run/aurum/minio-ca.crt:ro
+    command: ["/bin/sh", "-ec", "alembic upgrade head && aurum-agent grant-app-role"]
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  worker:
+    image: ${AURUM_ACTIVE_API_IMAGE:?required}
+    environment:
+      <<: *runtime-environment
+      AURUM_OTEL_SERVICE_NAME: aurum-agent-worker
+    volumes:
+      - ${AURUM_MINIO_CA_FILE:?required}:/run/aurum/minio-ca.crt:ro
+    command: ["celery", "--app", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=aurum-ingestion", "--hostname=aurum-ingestion@%h"]
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  beat:
+    image: ${AURUM_ACTIVE_API_IMAGE:?required}
+    environment:
+      <<: *runtime-environment
+      AURUM_OTEL_SERVICE_NAME: aurum-agent-beat
+    volumes:
+      - ${AURUM_MINIO_CA_FILE:?required}:/run/aurum/minio-ca.crt:ro
+    command: ["celery", "--app", "app.workers.celery_app:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    networks: [data]
+    tmpfs: [/tmp]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg16-trixie
+    environment:
+      POSTGRES_DB: aurum
+      POSTGRES_USER: aurum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      AURUM_APP_DB_PASSWORD: ${AURUM_APP_DB_PASSWORD:?required}
+    ports:
+      - "127.0.0.1:${AURUM_POSTGRES_MAINTENANCE_PORT:-15433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../scripts/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aurum -d aurum"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: [redis-data:/data]
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--certs-dir", "/certs"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
+    ports:
+      - "127.0.0.1:${AURUM_MINIO_MAINTENANCE_PORT:-19002}:9000"
+    volumes:
+      - minio-data:/data
+      - ${AURUM_MINIO_CERTS_DIR:?required}:/certs:ro
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--cacert", "/certs/public.crt", "https://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
+      AURUM_OBJECT_STORAGE_BUCKET: ${AURUM_OBJECT_STORAGE_BUCKET:-aurum-knowledge}
+      AURUM_OBJECT_STORAGE_ACCESS_KEY: ${AURUM_OBJECT_STORAGE_ACCESS_KEY:?required}
+      AURUM_OBJECT_STORAGE_SECRET_KEY: ${AURUM_OBJECT_STORAGE_SECRET_KEY:?required}
+      SSL_CERT_FILE: /etc/ssl/certs/aurum-minio-ca.crt
+    volumes:
+      - ${AURUM_MINIO_CA_FILE:?required}:/etc/ssl/certs/aurum-minio-ca.crt:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set aurum https://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "aurum/$${AURUM_OBJECT_STORAGE_BUCKET}"
+        mc version enable "aurum/$${AURUM_OBJECT_STORAGE_BUCKET}"
+        mc anonymous set none "aurum/$${AURUM_OBJECT_STORAGE_BUCKET}"
+        mc admin user add aurum "$${AURUM_OBJECT_STORAGE_ACCESS_KEY}" "$${AURUM_OBJECT_STORAGE_SECRET_KEY}"
+        printf '%s' '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::'"$${AURUM_OBJECT_STORAGE_BUCKET}"'"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::'"$${AURUM_OBJECT_STORAGE_BUCKET}"'/*"]}]}' >/tmp/policy.json
+        mc admin policy create aurum aurum-object-storage /tmp/policy.json || mc admin policy update aurum aurum-object-storage /tmp/policy.json
+        mc admin policy attach aurum aurum-object-storage --user "$${AURUM_OBJECT_STORAGE_ACCESS_KEY}"
+    networks: [data]
+    depends_on:
+      minio: {condition: service_healthy}
+    restart: "no"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.157.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks: [data]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=30d"]
+    volumes:
+      - ./prometheus/prometheus.production.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:${AURUM_PROMETHEUS_MAINTENANCE_PORT:-19090}:9090"
+    networks: [application, data]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?required}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks: [application]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+networks:
+  edge:
+  application:
+    internal: true
+  data:
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  gateway-data:
+  gateway-config:
+  prometheus-data:
+  grafana-data:

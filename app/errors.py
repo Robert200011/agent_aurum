@@ -48,6 +48,24 @@ class RateLimitError(ApplicationError):
         self.retry_after_seconds = max(1, retry_after_seconds)
 
 
+class QuotaExceededError(RateLimitError):
+    """可稳定区分具体配额维度的 429 错误。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        retry_after_seconds: int,
+    ) -> None:
+        super().__init__(message, retry_after_seconds=retry_after_seconds)
+        self.code = code
+
+
 class ServiceUnavailableError(ApplicationError):
     status_code = 503
     code = "service_unavailable"
+
+
+class QuotaStoreUnavailableError(ServiceUnavailableError):
+    code = "quota_store_unavailable"

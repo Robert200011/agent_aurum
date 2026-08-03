@@ -1,0 +1,65 @@
+{
+  "version": "p6.3-load-local-v1",
+  "name": "local-smoke",
+  "base_url": "http://127.0.0.1:8010",
+  "baseline_file": "baselines/local-smoke-v1.json",
+  "metrics_path": "/metrics",
+  "request_timeout_seconds": 15,
+  "thresholds": {
+    "maximum_server_error_rate": 0.01,
+    "maximum_network_errors": 0,
+    "maximum_cross_user_leak_count": 0,
+    "maximum_p95_regression_ratio": 1.2
+  },
+  "observed_metric_prefixes": [
+    "aurum_api_requests_total",
+    "aurum_model_requests_total",
+    "aurum_sse_connections",
+    "aurum_ingestion_queue_depth",
+    "aurum_database_pool_connections"
+  ],
+  "maximum_resource_growth": {
+    "aurum_sse_connections": 0,
+    "aurum_ingestion_queue_depth": 0,
+    "aurum_database_pool_connections{state=\"checked_out\"}": 1
+  },
+  "scenarios": [
+    {
+      "id": "health-live",
+      "kind": "ordinary_api",
+      "method": "GET",
+      "path": "/api/v1/health/live",
+      "requests": 40,
+      "concurrency": 4,
+      "expected_statuses": [200]
+    },
+    {
+      "id": "health-ready",
+      "kind": "ordinary_api",
+      "method": "GET",
+      "path": "/api/v1/health/ready",
+      "requests": 20,
+      "concurrency": 2,
+      "expected_statuses": [200]
+    },
+    {
+      "id": "fake-sse",
+      "kind": "fake_provider_sse",
+      "required": false,
+      "method": "POST",
+      "path": "/api/v1/conversations/${AURUM_LOAD_CONVERSATION_ID}/messages/stream",
+      "headers": {
+        "Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"
+      },
+      "json": {
+        "question": "请使用已发布知识回答测试问题，并提供引用。"
+      },
+      "requests": 4,
+      "concurrency": 1,
+      "expected_statuses": [200],
+      "forbidden_response_markers": [
+        "${AURUM_LOAD_OTHER_USER_MARKER}"
+      ]
+    }
+  ]
+}

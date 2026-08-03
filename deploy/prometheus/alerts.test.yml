@@ -1,0 +1,21 @@
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  - interval: 15s
+    input_series:
+      - series: aurum_worker_ready
+        values: "0x12 1x8"
+    alert_rule_test:
+      - eval_time: 2m15s
+        alertname: AurumIngestionWorkerOffline
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Aurum ingestion worker heartbeat is offline
+      - eval_time: 3m30s
+        alertname: AurumIngestionWorkerOffline
+        exp_alerts: []

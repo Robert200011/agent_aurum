@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from app.config import get_settings
 from app.db.models.rag import OutboxEvent
 from app.db.session import get_session_factory
+from app.providers.quota_store import RedisQuotaStore
 from app.providers.s3_object_storage import S3ObjectStorageProvider
 from app.providers.worker_health import record_worker_heartbeat
 from app.rag.constants import (
@@ -170,7 +171,13 @@ async def _run_ingestion_job(job_id: UUID) -> str:
         embedding_provider=DashScopeEmbeddingProvider(settings),
         settings=settings,
     )
-    return await pipeline.run(job_id)
+    quota_store = RedisQuotaStore.from_settings(settings)
+    try:
+        result = await pipeline.run(job_id)
+        await quota_store.release_upload_job(job_id)
+        return result
+    finally:
+        await quota_store.close()
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from time import perf_counter
 from typing import Any, cast
 
 from openai import (
@@ -17,6 +18,8 @@ from openai import (
 )
 
 from app.config import Settings
+from app.observability.metrics import record_model_call
+from app.observability.tracing import start_span
 from app.providers.model_provider import RerankerProvider, RerankerProviderError
 from app.rag.constants import DASHSCOPE_EMBEDDING_PROVIDER
 
@@ -71,22 +74,42 @@ class DashScopeRerankerProvider:
             raise RerankerProviderFailure("reranker_input_invalid", retryable=False)
 
         call = self._require_call()
-        try:
-            response = await call(
-                "/reranks",
-                body={
-                    "model": self._model_name,
-                    "query": normalized_query,
-                    "documents": normalized_documents,
-                    "top_n": len(normalized_documents),
-                },
-                cast_to=object,
-            )
-        except RerankerProviderFailure:
-            raise
-        except Exception as exc:
-            raise _provider_failure(exc) from exc
-        return _validated_scores(response, expected_count=len(normalized_documents))
+        started = perf_counter()
+        outcome = "error"
+        with start_span(
+            "model.rerank",
+            provider=self.provider_name,
+            model=self.model_name,
+        ):
+            try:
+                response = await call(
+                    "/reranks",
+                    body={
+                        "model": self._model_name,
+                        "query": normalized_query,
+                        "documents": normalized_documents,
+                        "top_n": len(normalized_documents),
+                    },
+                    cast_to=object,
+                )
+                scores = _validated_scores(
+                    response,
+                    expected_count=len(normalized_documents),
+                )
+                outcome = "success"
+                return scores
+            except RerankerProviderFailure:
+                raise
+            except Exception as exc:
+                raise _provider_failure(exc) from exc
+            finally:
+                record_model_call(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    mode="rerank",
+                    outcome=outcome,
+                    duration_seconds=perf_counter() - started,
+                )
 
     async def close(self) -> None:
         """释放底层异步 HTTP 连接池。"""

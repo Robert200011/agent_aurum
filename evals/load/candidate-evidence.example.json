@@ -1,0 +1,10 @@
+{
+  "environment": "single-node-staging",
+  "chat_provider": "dashscope",
+  "chat_model": "replace-with-versioned-model-name",
+  "embedding_provider": "dashscope",
+  "embedding_model": "replace-with-versioned-embedding-name",
+  "reranker_provider": "dashscope",
+  "reranker_model": "replace-with-versioned-reranker-name",
+  "provider_smoke_passed": false
+}

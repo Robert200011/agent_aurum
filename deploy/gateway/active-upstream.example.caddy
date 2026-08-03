@@ -1,0 +1,12 @@
+@api path /api/*
+handle @api {
+	header X-Aurum-Release-Slot blue
+	reverse_proxy api-blue:8010 {
+		flush_interval -1
+	}
+}
+
+handle {
+	header X-Aurum-Release-Slot blue
+	reverse_proxy web-blue:8080
+}

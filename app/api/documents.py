@@ -11,6 +11,7 @@ from fastapi import APIRouter, File, Form, Header, Query, Response, UploadFile, 
 from app.api.dependencies import (
     AdminContextDependency,
     ObjectStorageDependency,
+    QuotaStoreDependency,
     RagAdminServiceDependency,
     SettingsDependency,
 )
@@ -63,6 +64,7 @@ async def create_document(
     storage: ObjectStorageDependency,
     settings: SettingsDependency,
     _admin: AdminContextDependency,
+    quota_store: QuotaStoreDependency,
     file: UploadFile = File(...),
     metadata: str | None = Form(default=None),
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
@@ -73,12 +75,23 @@ async def create_document(
         metadata=_metadata(metadata),
         settings=settings,
     )
-    document, version, job = await service.create_document_upload(
-        knowledge_base_id=knowledge_base_id,
-        upload=upload,
-        idempotency_key=idempotency_key,
-        storage=storage,
+    quota_lease = await quota_store.reserve_upload(
+        _admin.user.id, size_bytes=len(upload.content)
     )
+    try:
+        document, version, job = await service.create_document_upload(
+            knowledge_base_id=knowledge_base_id,
+            upload=upload,
+            idempotency_key=idempotency_key,
+            storage=storage,
+        )
+    except BaseException:
+        await quota_lease.release()
+        raise
+    if job.status in {"completed", "failed"}:
+        await quota_lease.release()
+    else:
+        await quota_lease.attach(job.id)
     return DocumentUploadResponse(
         document=DocumentResponse.model_validate(document),
         version=DocumentVersionResponse.model_validate(version),
@@ -97,6 +110,7 @@ async def create_document_version(
     storage: ObjectStorageDependency,
     settings: SettingsDependency,
     _admin: AdminContextDependency,
+    quota_store: QuotaStoreDependency,
     file: UploadFile = File(...),
     metadata: str | None = Form(default=None),
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
@@ -107,12 +121,23 @@ async def create_document_version(
         metadata=_metadata(metadata),
         settings=settings,
     )
-    document, version, job = await service.create_document_version_upload(
-        document_id=document_id,
-        upload=upload,
-        idempotency_key=idempotency_key,
-        storage=storage,
+    quota_lease = await quota_store.reserve_upload(
+        _admin.user.id, size_bytes=len(upload.content)
     )
+    try:
+        document, version, job = await service.create_document_version_upload(
+            document_id=document_id,
+            upload=upload,
+            idempotency_key=idempotency_key,
+            storage=storage,
+        )
+    except BaseException:
+        await quota_lease.release()
+        raise
+    if job.status in {"completed", "failed"}:
+        await quota_lease.release()
+    else:
+        await quota_lease.attach(job.id)
     return DocumentUploadResponse(
         document=DocumentResponse.model_validate(document),
         version=DocumentVersionResponse.model_validate(version),
@@ -227,8 +252,15 @@ async def retry_ingestion_job(
     job_id: UUID,
     service: RagAdminServiceDependency,
     _admin: AdminContextDependency,
+    quota_store: QuotaStoreDependency,
 ) -> IngestionRetryResponse:
-    job, event = await service.retry_ingestion_job(job_id)
+    quota_lease = await quota_store.reserve_upload(_admin.user.id, size_bytes=0)
+    try:
+        job, event = await service.retry_ingestion_job(job_id)
+    except BaseException:
+        await quota_lease.release()
+        raise
+    await quota_lease.attach(job.id)
     return IngestionRetryResponse(
         ingestion_job=IngestionJobResponse.model_validate(job),
         dispatch_event=OutboxEventResponse.model_validate(event),

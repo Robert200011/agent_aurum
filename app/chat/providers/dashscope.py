@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from time import perf_counter
 from typing import Any, cast
 
 from openai import (
@@ -19,6 +20,9 @@ from openai import (
 from app.chat.constants import DASHSCOPE_CHAT_PROVIDER
 from app.chat.types import ChatPromptRole
 from app.config import Settings
+from app.governance.usage import add_model_tokens
+from app.observability.metrics import record_model_call
+from app.observability.tracing import start_span
 from app.providers.model_provider import (
     ChatCompletionResult,
     ChatMessage,
@@ -27,6 +31,7 @@ from app.providers.model_provider import (
     ChatStreamChunk,
     ChatTokenUsage,
 )
+from app.providers.quota_store import RedisQuotaStore
 
 ChatCreateCall = Callable[..., Awaitable[object]]
 
@@ -43,6 +48,7 @@ class DashScopeChatModelProvider:
         settings: Settings,
         *,
         create: ChatCreateCall | None = None,
+        quota_store: RedisQuotaStore | None = None,
     ) -> None:
         api_key = (
             settings.dashscope_api_key.get_secret_value()
@@ -55,6 +61,7 @@ class DashScopeChatModelProvider:
         self._max_tokens = settings.chat_model_max_tokens
         self._client: AsyncOpenAI | None = None
         self._create = create
+        self._quota_store = quota_store
         if create is None and self._api_key is not None:
             self._client = AsyncOpenAI(
                 api_key=self._api_key,
@@ -74,52 +81,107 @@ class DashScopeChatModelProvider:
 
     async def complete(self, messages: Sequence[ChatMessage]) -> ChatCompletionResult:
         payload = _validated_messages(messages)
+        if self._quota_store is not None:
+            await self._quota_store.reserve_model_call()
         create = self._require_create()
-        try:
-            response = await create(
-                model=self._model_name,
-                messages=payload,
-                temperature=self._temperature,
-                max_tokens=self._max_tokens,
-                n=1,
-                stream=False,
-            )
-        except ChatModelProviderFailure:
-            raise
-        except Exception as exc:
-            raise _provider_failure(exc) from exc
-        return self._parse_completion(response)
+        started = perf_counter()
+        outcome = "error"
+        result: ChatCompletionResult | None = None
+        with start_span(
+            "model.chat.complete",
+            provider=self.provider_name,
+            model=self.model_name,
+        ):
+            try:
+                response = await create(
+                    model=self._model_name,
+                    messages=payload,
+                    temperature=self._temperature,
+                    max_tokens=self._max_tokens,
+                    n=1,
+                    stream=False,
+                )
+                result = self._parse_completion(response)
+                if result.usage is not None:
+                    add_model_tokens(result.usage.total_tokens)
+                outcome = "success"
+                return result
+            except ChatModelProviderFailure:
+                raise
+            except Exception as exc:
+                raise _provider_failure(exc) from exc
+            finally:
+                usage = result.usage if result is not None else None
+                record_model_call(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    mode="complete",
+                    outcome=outcome,
+                    duration_seconds=perf_counter() - started,
+                    prompt_tokens=usage.prompt_tokens if usage is not None else 0,
+                    completion_tokens=(
+                        usage.completion_tokens if usage is not None else 0
+                    ),
+                )
 
     async def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[ChatStreamChunk]:
         payload = _validated_messages(messages)
+        if self._quota_store is not None:
+            await self._quota_store.reserve_model_call()
         create = self._require_create()
-        try:
-            response = await create(
-                model=self._model_name,
-                messages=payload,
-                temperature=self._temperature,
-                max_tokens=self._max_tokens,
-                n=1,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
-            stream = _as_async_iterator(response)
-            received_text = False
+        started = perf_counter()
+        outcome = "cancelled"
+        usage: ChatTokenUsage | None = None
+        with start_span(
+            "model.chat.stream",
+            provider=self.provider_name,
+            model=self.model_name,
+        ):
             try:
-                async for raw_chunk in stream:
-                    chunk = self._parse_stream_chunk(raw_chunk)
-                    if chunk is None:
-                        continue
-                    received_text = received_text or bool(chunk.delta)
-                    yield chunk
+                response = await create(
+                    model=self._model_name,
+                    messages=payload,
+                    temperature=self._temperature,
+                    max_tokens=self._max_tokens,
+                    n=1,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+                stream = _as_async_iterator(response)
+                received_text = False
+                try:
+                    async for raw_chunk in stream:
+                        chunk = self._parse_stream_chunk(raw_chunk)
+                        if chunk is None:
+                            continue
+                        received_text = received_text or bool(chunk.delta)
+                        usage = chunk.usage or usage
+                        yield chunk
+                finally:
+                    await _close_stream(response)
+                if not received_text:
+                    raise ChatModelProviderFailure("chat_response_invalid", retryable=True)
+                outcome = "success"
+            except ChatModelProviderFailure:
+                outcome = "error"
+                raise
+            except Exception as exc:
+                outcome = "error"
+                raise _provider_failure(exc) from exc
             finally:
-                await _close_stream(response)
-            if not received_text:
-                raise ChatModelProviderFailure("chat_response_invalid", retryable=True)
-        except ChatModelProviderFailure:
-            raise
-        except Exception as exc:
-            raise _provider_failure(exc) from exc
+                if usage is not None:
+                    add_model_tokens(usage.total_tokens)
+                record_model_call(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    mode="stream",
+                    outcome=outcome,
+                    duration_seconds=perf_counter() - started,
+                    prompt_tokens=usage.prompt_tokens if usage is not None else 0,
+                    completion_tokens=(
+                        usage.completion_tokens if usage is not None else 0
+                    ),
+                )
 
     async def close(self) -> None:
         """释放底层异步 HTTP 连接池。"""
