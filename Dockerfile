@@ -20,7 +20,7 @@ COPY app ./app
 COPY alembic.ini ./
 COPY migrations ./migrations
 
-RUN pip install --upgrade pip && pip install .
+RUN pip install --upgrade pip "setuptools>=78.1.1" && pip install .
 
 USER aurum
 EXPOSE 8010
