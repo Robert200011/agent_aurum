@@ -147,7 +147,7 @@ class DocumentVersion(UUIDPrimaryKeyMixin, Base):
             ondelete="CASCADE",
         ),
         CheckConstraint(
-            "embedding_dimensions > 0", name="document_version_embedding_dimensions_positive"
+            "embedding_dimensions > 0", name="embedding_dimensions_positive"
         ),
         Index("ix_document_versions_document_status", "document_id", "status"),
         {"schema": RAG_SCHEMA},
@@ -311,11 +311,11 @@ class DocumentUploadRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         CheckConstraint(
             "target_type IN ('knowledge_base', 'document')",
-            name="document_upload_request_target_type_valid",
+            name="target_type_valid",
         ),
         CheckConstraint(
             "status IN ('reserved', 'stored', 'activated', 'failed')",
-            name="document_upload_request_status_valid",
+            name="status_valid",
         ),
         Index("ix_document_upload_requests_status_updated", "status", "updated_at"),
         {"schema": RAG_SCHEMA},
