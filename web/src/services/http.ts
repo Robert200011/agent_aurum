@@ -108,7 +108,8 @@ http.interceptors.response.use(
     const cannotRefresh =
       request?.url?.includes('/auth/login') ||
       request?.url?.includes('/auth/register') ||
-      request?.url?.includes('/auth/refresh')
+      request?.url?.includes('/auth/refresh') ||
+      request?.url?.includes('/auth/logout')
     if (error.response?.status !== 401 || !request || request._retry || cannotRefresh) {
       return Promise.reject(error)
     }

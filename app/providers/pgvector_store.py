@@ -5,17 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import delete, exists, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.rag import (
-    AgentProject,
-    Document,
-    DocumentChunk,
-    DocumentVersion,
-    KnowledgeBase,
-    ProjectKnowledgeBase,
-)
+from app.db.models.rag import Document, DocumentChunk, DocumentVersion, KnowledgeBase
 from app.providers.vector_store import VectorChunk, VectorSearchResult
 from app.rag.constants import (
     DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS,
@@ -73,23 +66,13 @@ class PgVectorStoreProvider:
         knowledge_base_ids: Sequence[UUID],
         vector: Sequence[float],
         limit: int,
-        project_id: UUID | None = None,
+        owner_user_id: UUID,
     ) -> list[VectorSearchResult]:
         if not knowledge_base_ids or limit <= 0:
             return []
         if len(vector) != DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS:
             raise ValueError("query vector dimensions are invalid")
         distance = DocumentChunk.embedding.cosine_distance(list(vector)).label("distance")
-        active_project_scope = exists().where(
-            ProjectKnowledgeBase.knowledge_base_id == DocumentChunk.knowledge_base_id,
-            ProjectKnowledgeBase.project_id == AgentProject.id,
-            AgentProject.status == "active",
-            AgentProject.deleted_at.is_(None),
-        )
-        if project_id is not None:
-            active_project_scope = active_project_scope.where(
-                ProjectKnowledgeBase.project_id == project_id,
-            )
         statement = (
             select(DocumentChunk, distance)
             .join(
@@ -107,13 +90,14 @@ class PgVectorStoreProvider:
             .where(
                 DocumentChunk.knowledge_base_id.in_(knowledge_base_ids),
                 DocumentChunk.embedding.is_not(None),
-                KnowledgeBase.status == "published",
+                KnowledgeBase.owner_user_id == owner_user_id,
+                KnowledgeBase.status == "active",
+                KnowledgeBase.search_enabled.is_(True),
                 KnowledgeBase.deleted_at.is_(None),
                 DocumentVersion.status == DOCUMENT_VERSION_STATUS_PUBLISHED,
                 Document.current_published_version_id == DocumentVersion.id,
                 Document.is_enabled.is_(True),
                 Document.deleted_at.is_(None),
-                active_project_scope,
             )
             .order_by(distance, DocumentChunk.id)
             .limit(limit)

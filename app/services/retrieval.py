@@ -74,10 +74,10 @@ class RetrievalResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ProjectRetrievalResult:
-    """Top-K Dense results merged across one project's published knowledge bases."""
+class KnowledgeRetrievalResult:
+    """Top-K results merged across one user's searchable knowledge bases."""
 
-    project_id: UUID
+    owner_user_id: UUID
     knowledge_base_ids: tuple[UUID, ...]
     query: str
     embedding_model: str
@@ -86,7 +86,7 @@ class ProjectRetrievalResult:
 
 
 class RagRetrievalService:
-    """Run scoped Dense retrieval for admin diagnostics and user RAG flows."""
+    """Run dense retrieval within the authenticated user's personal knowledge."""
 
     def __init__(
         self,
@@ -116,6 +116,10 @@ class RagRetrievalService:
         self._rrf_k = rrf_k
         self._cache = cache
 
+    @property
+    def actor_user_id(self) -> UUID:
+        return self._actor_user_id
+
     @observe_retrieval("knowledge_base")
     async def retrieve(
         self,
@@ -129,15 +133,13 @@ class RagRetrievalService:
 
         await set_tenant_context(self._session, self._actor_user_id)
         started = perf_counter()
-        knowledge_base = await self._repository.get_knowledge_base(knowledge_base_id)
+        knowledge_base = await self._repository.get_knowledge_base(
+            knowledge_base_id, owner_user_id=self._actor_user_id
+        )
         if knowledge_base is None:
             raise NotFoundError("knowledge base was not found")
-        if knowledge_base.status != "published":
-            raise BusinessRuleError("only published knowledge bases can be searched")
-        if not await self._repository.has_active_binding(
-            knowledge_base_id=knowledge_base.id
-        ):
-            raise BusinessRuleError("knowledge base has no active project scope")
+        if knowledge_base.status != "active" or not knowledge_base.search_enabled:
+            raise BusinessRuleError("knowledge base is not enabled for search")
         if not self._supports_embedding_configuration(knowledge_base):
             raise ServiceUnavailableError(
                 "knowledge base query embedding configuration is unavailable"
@@ -148,9 +150,10 @@ class RagRetrievalService:
             knowledge_base_ids=[knowledge_base.id],
             vector=query_vector,
             limit=limit,
+            owner_user_id=self._actor_user_id,
         )
         persisted = await self._repository.get_retrieval_chunks(
-            [hit.chunk_id for hit in hits]
+            [hit.chunk_id for hit in hits], owner_user_id=self._actor_user_id
         )
         items = self._reconstruct_items(
             hits=hits,
@@ -184,44 +187,43 @@ class RagRetrievalService:
             items=items,
         )
 
-    @observe_retrieval("project")
-    async def retrieve_project(
+    @observe_retrieval("personal_knowledge")
+    async def retrieve_user_knowledge(
         self,
         *,
-        project_id: UUID,
         query: str,
         limit: int,
         min_score: float | None,
-    ) -> ProjectRetrievalResult:
-        """Search one exact active project without exposing raw chunks as a public API."""
+    ) -> KnowledgeRetrievalResult:
+        """Search only the authenticated user's active personal knowledge bases."""
 
         query = _validated_query(query, limit=limit, min_score=min_score)
         await set_tenant_context(self._session, self._actor_user_id)
         started = perf_counter()
-        project = await self._repository.get_project(project_id)
-        if project is None:
-            raise NotFoundError("project was not found")
-        if project.status != "active":
-            raise BusinessRuleError("only active projects can be searched")
-
-        knowledge_bases = await self._repository.list_published_knowledge_bases_for_project(
-            project_id=project.id
+        knowledge_bases = await self._repository.list_searchable_knowledge_bases(
+            owner_user_id=self._actor_user_id
         )
         if not knowledge_bases:
-            raise BusinessRuleError("project has no published knowledge bases")
+            return KnowledgeRetrievalResult(
+                owner_user_id=self._actor_user_id,
+                knowledge_base_ids=(),
+                query=query,
+                embedding_model=self._embedding_provider.model_name,
+                latency_ms=max(0, round((perf_counter() - started) * 1000)),
+                items=[],
+            )
         if any(
             not self._supports_embedding_configuration(knowledge_base)
             for knowledge_base in knowledge_bases
         ):
             raise ServiceUnavailableError(
-                "project query embedding configuration is unavailable"
+                "personal knowledge query embedding configuration is unavailable"
             )
 
         knowledge_base_ids = tuple(knowledge_base.id for knowledge_base in knowledge_bases)
         candidate_limit = limit * self._hybrid_candidate_multiplier
         cache_digest = (
-            await self._project_cache_digest(
-                project_id=project.id,
+            await self._user_cache_digest(
                 knowledge_bases=knowledge_bases,
                 query=query,
                 limit=limit,
@@ -233,7 +235,7 @@ class RagRetrievalService:
         cache_entry = await self._cache.get(cache_digest) if self._cache is not None else None
         cached_items = await self._validated_cached_items(
             entry=cache_entry,
-            project_id=project.id,
+            owner_user_id=self._actor_user_id,
         )
         cache_hit = cached_items is not None
         dense_hits: Sequence[VectorSearchResult] = ()
@@ -255,7 +257,7 @@ class RagRetrievalService:
                 waited = await self._cache.wait_for_fill(cache_digest)
                 cached_items = await self._validated_cached_items(
                     entry=waited,
-                    project_id=project.id,
+                    owner_user_id=self._actor_user_id,
                 )
                 if cached_items is not None:
                     cache_hit = True
@@ -272,13 +274,13 @@ class RagRetrievalService:
                         knowledge_base_ids=knowledge_base_ids,
                         vector=query_vector,
                         limit=candidate_limit,
-                        project_id=project.id,
+                        owner_user_id=self._actor_user_id,
                     )
                     sparse_hits = await self._sparse_store.search(
                         knowledge_base_ids=knowledge_base_ids,
                         query=query,
                         limit=candidate_limit,
-                        project_id=project.id,
+                        owner_user_id=self._actor_user_id,
                     )
                     fused_hits = reciprocal_rank_fuse(
                         dense_hits=dense_hits,
@@ -288,7 +290,7 @@ class RagRetrievalService:
                     )
                     persisted = await self._repository.get_retrieval_chunks(
                         [hit.chunk_id for hit in fused_hits],
-                        project_id=project.id,
+                        owner_user_id=self._actor_user_id,
                     )
                     candidates = self._reconstruct_items(
                         hits=fused_hits,
@@ -350,8 +352,7 @@ class RagRetrievalService:
                             if reranker_applied
                             else "hybrid"
                         ),
-                        "scope": "project",
-                        "project_id": str(project.id),
+                        "scope": "personal_knowledge",
                         "embedding_model": knowledge_base.embedding_model,
                         "requested_limit": limit,
                         "candidate_limit": candidate_limit,
@@ -384,8 +385,8 @@ class RagRetrievalService:
                 )
             )
         await self._session.commit()
-        return ProjectRetrievalResult(
-            project_id=project.id,
+        return KnowledgeRetrievalResult(
+            owner_user_id=self._actor_user_id,
             knowledge_base_ids=knowledge_base_ids,
             query=query,
             embedding_model=self._embedding_provider.model_name,
@@ -393,27 +394,25 @@ class RagRetrievalService:
             items=items,
         )
 
-    async def _project_cache_digest(
+    async def _user_cache_digest(
         self,
         *,
-        project_id: UUID,
         knowledge_bases: Sequence[KnowledgeBase],
         query: str,
         limit: int,
         min_score: float | None,
     ) -> str:
-        document_state = await self._repository.get_project_retrieval_version_state(
-            project_id=project_id,
+        document_state = await self._repository.get_user_retrieval_version_state(
+            owner_user_id=self._actor_user_id,
             knowledge_base_ids=[item.id for item in knowledge_bases],
         )
         scope = {
             "schema": 1,
             "actor": hashlib.sha256(self._actor_user_id.bytes).hexdigest(),
-            "project": str(project_id),
             "knowledge_bases": [
                 (
                     str(item.id),
-                    item.published_at.isoformat() if item.published_at is not None else None,
+                    item.updated_at.isoformat(),
                     item.pipeline_version,
                     item.embedding_provider,
                     item.embedding_model,
@@ -448,13 +447,13 @@ class RagRetrievalService:
         self,
         *,
         entry: RetrievalCacheEntry | None,
-        project_id: UUID,
+        owner_user_id: UUID,
     ) -> list[RetrievedChunk] | None:
         if entry is None:
             return None
         persisted = await self._repository.get_retrieval_chunks(
             [item.chunk_id for item in entry.items],
-            project_id=project_id,
+            owner_user_id=owner_user_id,
         )
         if len(persisted) != len(entry.items):
             return None

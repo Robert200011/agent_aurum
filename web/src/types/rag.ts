@@ -1,7 +1,6 @@
 import type { PageResponse } from '@/types/api'
 
-export type ProjectStatus = 'active' | 'disabled'
-export type KnowledgeBaseStatus = 'draft' | 'published' | 'disabled'
+export type KnowledgeBaseStatus = 'active' | 'disabled'
 export type DocumentStatus = 'uploaded' | 'published' | 'disabled' | 'deleted'
 export type DocumentVersionStatus =
   | 'uploading'
@@ -14,30 +13,6 @@ export type IngestionJobStatus =
   'awaiting_pipeline' | 'processing' | 'completed' | 'failed'
 export type OutboxEventStatus = 'pending' | 'published' | 'failed'
 
-export interface Project {
-  id: string
-  name: string
-  description: string | null
-  status: ProjectStatus
-  created_at: string
-  updated_at: string
-}
-
-export interface ProjectList extends PageResponse {
-  items: Project[]
-}
-
-export interface ProjectInput {
-  name: string
-  description?: string | null
-}
-
-export interface ProjectUpdate {
-  name?: string
-  description?: string | null
-  status?: ProjectStatus
-}
-
 export interface KnowledgeBase {
   id: string
   name: string
@@ -48,7 +23,7 @@ export interface KnowledgeBase {
   embedding_distance_metric: string
   pipeline_version: string
   status: KnowledgeBaseStatus
-  published_at: string | null
+  search_enabled: boolean
   created_at: string
   updated_at: string
 }
@@ -58,7 +33,6 @@ export interface KnowledgeBaseList extends PageResponse {
 }
 
 export interface KnowledgeBaseInput {
-  project_id: string
   name: string
   description?: string | null
 }
@@ -66,12 +40,8 @@ export interface KnowledgeBaseInput {
 export interface KnowledgeBaseUpdate {
   name?: string
   description?: string | null
-}
-
-export interface ProjectKnowledgeBaseBinding {
-  project_id: string
-  knowledge_base_id: string
-  created_at: string
+  status?: KnowledgeBaseStatus
+  search_enabled?: boolean
 }
 
 export interface Document {

@@ -22,7 +22,6 @@ x-runtime-environment: &runtime-environment
   AWS_CA_BUNDLE: /run/aurum/minio-ca.crt
   AURUM_REFRESH_TOKEN_COOKIE_SECURE: ${AURUM_REFRESH_TOKEN_COOKIE_SECURE:-true}
   AURUM_CORS_ORIGINS: '["${AURUM_PUBLIC_ORIGIN:?required}"]'
-  AURUM_BOOTSTRAP_ADMIN: "false"
   AURUM_METRICS_ENABLED: "true"
   AURUM_OTEL_TRACING_ENABLED: "true"
   AURUM_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces

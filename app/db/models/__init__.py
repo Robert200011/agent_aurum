@@ -19,7 +19,6 @@ from app.db.models.finance import (
 )
 from app.db.models.identity import AuditLog, RefreshToken, User
 from app.db.models.rag import (
-    AgentProject,
     Document,
     DocumentChunk,
     DocumentUploadRequest,
@@ -27,12 +26,10 @@ from app.db.models.rag import (
     IngestionJob,
     KnowledgeBase,
     OutboxEvent,
-    ProjectKnowledgeBase,
     RetrievalLog,
 )
 
 __all__ = [
-    "AgentProject",
     "AgentRun",
     "AgentToolCall",
     "AuditLog",
@@ -54,7 +51,6 @@ __all__ = [
     "MessageCitation",
     "MessageEvidence",
     "OutboxEvent",
-    "ProjectKnowledgeBase",
     "RefreshToken",
     "RetrievalLog",
     "User",

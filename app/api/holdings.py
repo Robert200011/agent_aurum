@@ -7,9 +7,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
 
-# 财务访问始终从认证信息中确定租户，
-# 发布市场数据还需要管理员依赖。
-from app.api.dependencies import AdminContextDependency, FinanceServiceDependency
+# 财务访问始终从认证信息中确定租户。
+from app.api.dependencies import FinanceServiceDependency
 from app.api.schemas.finance import (
     ExchangeRateSnapshotCreate,
     ExchangeRateSnapshotResponse,
@@ -45,10 +44,9 @@ portfolio_router = APIRouter(prefix="/finance/portfolio", tags=["finance-portfol
 )
 async def create_exchange_rate_snapshot(
     payload: ExchangeRateSnapshotCreate,
-    _admin: AdminContextDependency,
     service: FinanceServiceDependency,
 ) -> ExchangeRateSnapshotResponse:
-    """仅允许管理员发布带来源和观测时间的直接汇率。"""
+    """由认证用户追加一条共享、可追溯的直接汇率观测。"""
 
     snapshot = await service.create_exchange_rate_snapshot(**payload.model_dump())
     return ExchangeRateSnapshotResponse.model_validate(snapshot)
@@ -206,12 +204,9 @@ async def list_investment_transactions(
 )
 async def create_market_snapshot(
     payload: MarketSnapshotCreate,
-    _admin: AdminContextDependency,
     service: FinanceServiceDependency,
 ) -> MarketSnapshotResponse:
-    """仅允许已完成初始化的管理员发布价格。"""
-
-    # `_admin` 不参与业务数据传递，依赖解析过程负责授权。
+    """由认证用户追加一条共享、可追溯的市场价格观测。"""
     snapshot = await service.create_market_snapshot(**payload.model_dump())
     return MarketSnapshotResponse.model_validate(snapshot)
 

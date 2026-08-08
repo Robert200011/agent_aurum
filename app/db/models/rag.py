@@ -9,6 +9,7 @@ from uuid import UUID
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -38,19 +40,6 @@ from app.rag.constants import (
 )
 
 
-class AgentProject(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    __tablename__ = "agent_projects"
-    __table_args__ = (Index("ix_agent_projects_status", "status"), {"schema": RAG_SCHEMA})
-
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[UUID] = mapped_column(
-        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="RESTRICT"), nullable=False
-    )
-    status: Mapped[str] = mapped_column(String(24), default="active", nullable=False)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
 class KnowledgeBase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "knowledge_bases"
     __table_args__ = (
@@ -62,10 +51,17 @@ class KnowledgeBase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="knowledge_base_distance_metric_valid",
         ),
         Index("ix_knowledge_bases_status", "status"),
+        Index("ix_knowledge_bases_owner_status", "owner_user_id", "status"),
+        Index(
+            "uq_knowledge_bases_owner_name_lower",
+            "owner_user_id",
+            text("lower(name)"),
+            unique=True,
+        ),
         {"schema": RAG_SCHEMA},
     )
 
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     embedding_provider: Mapped[str] = mapped_column(
         String(64), default=DASHSCOPE_EMBEDDING_PROVIDER, nullable=False
@@ -80,31 +76,12 @@ class KnowledgeBase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(24), default="cosine", nullable=False
     )
     pipeline_version: Mapped[str] = mapped_column(String(64), default="v1", nullable=False)
-    created_by: Mapped[UUID] = mapped_column(
-        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="RESTRICT"), nullable=False
+    owner_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False
     )
-    status: Mapped[str] = mapped_column(String(24), default="draft", nullable=False)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(24), default="active", nullable=False)
+    search_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class ProjectKnowledgeBase(Base):
-    """Explicit project binding; the first binding establishes private ownership."""
-
-    __tablename__ = "project_knowledge_bases"
-    __table_args__ = ({"schema": RAG_SCHEMA},)
-
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey(f"{RAG_SCHEMA}.agent_projects.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    knowledge_base_id: Mapped[UUID] = mapped_column(
-        ForeignKey(f"{RAG_SCHEMA}.knowledge_bases.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
 
 
 class Document(UUIDPrimaryKeyMixin, TimestampMixin, Base):

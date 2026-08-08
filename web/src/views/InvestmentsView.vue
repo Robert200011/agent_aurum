@@ -14,7 +14,6 @@ import { computed, onMounted, reactive, ref } from 'vue'
 
 import { financeApi } from '@/services/finance'
 import { apiErrorMessage } from '@/services/http'
-import { useAuthStore } from '@/stores/auth'
 import type {
   Account,
   AssetType,
@@ -33,7 +32,6 @@ import {
   toNumber,
 } from '@/utils/format'
 
-const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
 const activeTab = ref('portfolio')
@@ -286,7 +284,7 @@ onMounted(loadData)
         <p>以加权平均成本维护持仓，通过不可变买卖记录同步投资账户现金与已实现收益。</p>
       </div>
       <a-space>
-        <a-button v-if="auth.isAdmin" size="large" @click="openSnapshot()">
+        <a-button size="large" @click="openSnapshot()">
           <LineChartOutlined />发布行情
         </a-button>
         <a-button type="primary" size="large" @click="openCreateHolding">
@@ -406,7 +404,7 @@ onMounted(loadData)
                     <template #overlay>
                       <a-menu>
                         <a-menu-item @click="openEditHolding(record)"><EditOutlined />修正</a-menu-item>
-                        <a-menu-item v-if="auth.isAdmin" @click="openSnapshot(record)">
+                        <a-menu-item @click="openSnapshot(record)">
                           <BarChartOutlined />发布价格
                         </a-menu-item>
                         <a-menu-item danger @click="deleteHolding(record)">
@@ -633,7 +631,7 @@ onMounted(loadData)
         <a-form-item label="数据来源" required>
           <a-input v-model:value="snapshotForm.data_source" placeholder="例如：manual、provider-name" />
         </a-form-item>
-        <a-alert type="warning" show-icon message="行情为全局参考数据，仅管理员可以发布，发布后不可修改。" />
+        <a-alert type="info" show-icon message="行情快照作为只追加参考数据保存，发布后不可修改。" />
       </a-form>
     </a-modal>
   </div>

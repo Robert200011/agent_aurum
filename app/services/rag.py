@@ -1,4 +1,4 @@
-"""Administrator use cases for projects, knowledge bases, and explicit sharing."""
+"""User-owned personal knowledge-base and document use cases."""
 
 from __future__ import annotations
 
@@ -13,14 +13,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.rag import (
-    AgentProject,
     Document,
     DocumentUploadRequest,
     DocumentVersion,
     IngestionJob,
     KnowledgeBase,
     OutboxEvent,
-    ProjectKnowledgeBase,
 )
 from app.db.repositories.identity import AuditRepository
 from app.db.repositories.rag import RagRepository
@@ -57,8 +55,8 @@ class PageResult[T]:
     page_size: int
 
 
-class RagAdminService:
-    """Keep administrative RAG changes atomic and auditable."""
+class PersonalKnowledgeService:
+    """Keep personal knowledge changes owner-scoped, atomic, and auditable."""
 
     def __init__(
         self,
@@ -100,12 +98,6 @@ class RagAdminService:
             detail=detail,
         )
 
-    async def _project(self, project_id: UUID, *, for_update: bool = False) -> AgentProject:
-        project = await self._repository.get_project(project_id, for_update=for_update)
-        if project is None:
-            raise NotFoundError("agent project was not found")
-        return project
-
     async def _knowledge_base(
         self,
         knowledge_base_id: UUID,
@@ -114,103 +106,43 @@ class RagAdminService:
     ) -> KnowledgeBase:
         knowledge_base = await self._repository.get_knowledge_base(
             knowledge_base_id,
+            owner_user_id=self._actor_user_id,
             for_update=for_update,
         )
         if knowledge_base is None:
             raise NotFoundError("knowledge base was not found")
         return knowledge_base
 
-    async def create_project(self, *, name: str, description: str | None) -> AgentProject:
-        project = await self._repository.add(
-            AgentProject(name=name, description=description, created_by=self._actor_user_id)
-        )
-        self._audit_event("rag.project.created", "agent_project", project.id, detail={"name": name})
-        await self._commit("an agent project with this name already exists")
-        return project
-
-    async def list_projects(self, *, page: int, page_size: int) -> PageResult[AgentProject]:
-        items, total = await self._repository.list_projects(page=page, page_size=page_size)
-        return PageResult(items=items, total=total, page=page, page_size=page_size)
-
-    async def get_project(self, project_id: UUID) -> AgentProject:
-        return await self._project(project_id)
-
-    async def update_project(
-        self,
-        project_id: UUID,
-        *,
-        name: str | None,
-        description: str | None,
-        status: str | None,
-        fields_set: set[str],
-    ) -> AgentProject:
-        project = await self._project(project_id, for_update=True)
-        if (
-            "status" in fields_set
-            and status == "disabled"
-            and project.status == "active"
-        ):
-            await self._ensure_project_can_be_deactivated(project.id)
-        if "name" in fields_set:
-            project.name = name or project.name
-        if "description" in fields_set:
-            project.description = description
-        if "status" in fields_set:
-            project.status = status or project.status
-        await self._session.flush()
-        self._audit_event("rag.project.updated", "agent_project", project.id)
-        await self._commit("an agent project with this name already exists")
-        return project
-
-    async def delete_project(self, project_id: UUID) -> None:
-        project = await self._project(project_id, for_update=True)
-        await self._ensure_project_can_be_deactivated(project.id)
-        project.status = "disabled"
-        project.deleted_at = datetime.now(UTC)
-        await self._session.flush()
-        self._audit_event("rag.project.deleted", "agent_project", project.id)
-        await self._commit("unable to delete agent project")
-
-    async def _ensure_project_can_be_deactivated(self, project_id: UUID) -> None:
-        knowledge_bases = await self._repository.list_bound_knowledge_bases_for_update(
-            project_id=project_id
-        )
-        for knowledge_base in knowledge_bases:
-            if not await self._repository.has_active_binding(
-                knowledge_base_id=knowledge_base.id,
-                exclude_project_id=project_id,
-            ):
-                raise BusinessRuleError(
-                    "project is the only active scope for one or more knowledge bases"
-                )
-
     async def create_knowledge_base(
         self,
         *,
-        project_id: UUID,
         name: str,
         description: str | None,
     ) -> KnowledgeBase:
-        project = await self._project(project_id, for_update=True)
-        if project.status != "active":
-            raise BusinessRuleError("knowledge bases require an active agent project")
         knowledge_base = await self._repository.add(
-            KnowledgeBase(name=name, description=description, created_by=self._actor_user_id)
-        )
-        await self._repository.add(
-            ProjectKnowledgeBase(project_id=project.id, knowledge_base_id=knowledge_base.id)
+            KnowledgeBase(
+                name=name,
+                description=description,
+                owner_user_id=self._actor_user_id,
+                status="active",
+                search_enabled=True,
+            )
         )
         self._audit_event(
             "rag.knowledge_base.created",
             "knowledge_base",
             knowledge_base.id,
-            detail={"name": name, "project_id": str(project.id)},
+            detail={"name": name},
         )
         await self._commit("a knowledge base with this name already exists")
         return knowledge_base
 
     async def list_knowledge_bases(self, *, page: int, page_size: int) -> PageResult[KnowledgeBase]:
-        items, total = await self._repository.list_knowledge_bases(page=page, page_size=page_size)
+        items, total = await self._repository.list_knowledge_bases(
+            owner_user_id=self._actor_user_id,
+            page=page,
+            page_size=page_size,
+        )
         return PageResult(items=items, total=total, page=page, page_size=page_size)
 
     async def get_knowledge_base(self, knowledge_base_id: UUID) -> KnowledgeBase:
@@ -222,6 +154,8 @@ class RagAdminService:
         *,
         name: str | None,
         description: str | None,
+        status: str | None,
+        search_enabled: bool | None,
         fields_set: set[str],
     ) -> KnowledgeBase:
         knowledge_base = await self._knowledge_base(knowledge_base_id)
@@ -229,24 +163,13 @@ class RagAdminService:
             knowledge_base.name = name or knowledge_base.name
         if "description" in fields_set:
             knowledge_base.description = description
+        if "status" in fields_set and status is not None:
+            knowledge_base.status = status
+        if "search_enabled" in fields_set and search_enabled is not None:
+            knowledge_base.search_enabled = search_enabled
         await self._session.flush()
         self._audit_event("rag.knowledge_base.updated", "knowledge_base", knowledge_base.id)
         await self._commit("a knowledge base with this name already exists")
-        return knowledge_base
-
-    async def publish_knowledge_base(self, knowledge_base_id: UUID) -> KnowledgeBase:
-        knowledge_base = await self._knowledge_base(knowledge_base_id, for_update=True)
-        if knowledge_base.status == "disabled":
-            raise BusinessRuleError("disabled knowledge bases cannot be published")
-        if not await self._repository.has_active_binding(
-            knowledge_base_id=knowledge_base.id
-        ):
-            raise BusinessRuleError("knowledge base must belong to at least one active project")
-        knowledge_base.status = "published"
-        knowledge_base.published_at = datetime.now(UTC)
-        await self._session.flush()
-        self._audit_event("rag.knowledge_base.published", "knowledge_base", knowledge_base.id)
-        await self._commit("unable to publish knowledge base")
         return knowledge_base
 
     async def disable_knowledge_base(self, knowledge_base_id: UUID) -> KnowledgeBase:
@@ -265,72 +188,17 @@ class RagAdminService:
         self._audit_event("rag.knowledge_base.deleted", "knowledge_base", knowledge_base.id)
         await self._commit("unable to delete knowledge base")
 
-    async def bind_knowledge_base(
-        self,
-        *,
-        knowledge_base_id: UUID,
-        project_id: UUID,
-    ) -> ProjectKnowledgeBase:
-        project = await self._project(project_id, for_update=True)
-        knowledge_base = await self._knowledge_base(knowledge_base_id, for_update=True)
-        if knowledge_base.status == "disabled" or project.status != "active":
-            raise BusinessRuleError("only active projects and knowledge bases can be bound")
-        existing_binding = await self._repository.get_binding(
-            project_id=project.id,
-            knowledge_base_id=knowledge_base.id,
-        )
-        if existing_binding is not None:
-            raise ConflictError("knowledge base is already bound to this project")
-        binding = await self._repository.add(
-            ProjectKnowledgeBase(project_id=project.id, knowledge_base_id=knowledge_base.id)
-        )
-        self._audit_event(
-            "rag.knowledge_base.bound",
-            "knowledge_base",
-            knowledge_base.id,
-            detail={"project_id": str(project.id)},
-        )
-        await self._commit("knowledge base is already bound to this project")
-        return binding
-
-    async def list_knowledge_base_bindings(
-        self,
-        knowledge_base_id: UUID,
-    ) -> list[ProjectKnowledgeBase]:
-        await self._knowledge_base(knowledge_base_id)
-        return await self._repository.list_bindings(knowledge_base_id=knowledge_base_id)
-
-    async def unbind_knowledge_base(self, *, knowledge_base_id: UUID, project_id: UUID) -> None:
-        knowledge_base = await self._knowledge_base(knowledge_base_id, for_update=True)
-        binding = await self._repository.get_binding(
-            project_id=project_id,
-            knowledge_base_id=knowledge_base.id,
-        )
-        if binding is None:
-            raise NotFoundError("knowledge base binding was not found")
-        if not await self._repository.has_active_binding(
-            knowledge_base_id=knowledge_base.id,
-            exclude_project_id=project_id,
-        ):
-            raise BusinessRuleError("knowledge base must remain bound to one active project")
-        await self._repository.delete(binding)
-        self._audit_event(
-            "rag.knowledge_base.unbound",
-            "knowledge_base",
-            knowledge_base.id,
-            detail={"project_id": str(project_id)},
-        )
-        await self._commit("unable to unbind knowledge base")
-
     async def _document(self, document_id: UUID) -> Document:
-        document = await self._repository.get_document(document_id)
+        document = await self._repository.get_document(
+            document_id, owner_user_id=self._actor_user_id
+        )
         if document is None:
             raise NotFoundError("document was not found")
         return document
 
     async def _active_knowledge_base(self, knowledge_base_id: UUID) -> KnowledgeBase:
         knowledge_base = await self._knowledge_base(knowledge_base_id)
-        if knowledge_base.status == "disabled":
+        if knowledge_base.status != "active":
             raise BusinessRuleError("disabled knowledge bases cannot receive documents")
         return knowledge_base
 
@@ -355,7 +223,9 @@ class RagAdminService:
 
         document_id = uuid4()
         version_id = uuid4()
-        object_key = self._object_key(knowledge_base.id, document_id, version_id)
+        object_key = self._object_key(
+            self._actor_user_id, knowledge_base.id, document_id, version_id
+        )
         document = Document(
             id=document_id,
             knowledge_base_id=knowledge_base.id,
@@ -432,7 +302,9 @@ class RagAdminService:
                 storage=storage,
             )
 
-        document = await self._repository.get_document(document_id, for_update=True)
+        document = await self._repository.get_document(
+            document_id, owner_user_id=self._actor_user_id, for_update=True
+        )
         if document is None or document.is_enabled is False:
             raise NotFoundError("document was not found")
         replay = await self._repository.get_upload_request(idempotency_key)
@@ -456,7 +328,9 @@ class RagAdminService:
             document=document,
             version_id=version_id,
             version_number=version_number,
-            object_key=self._object_key(knowledge_base.id, document.id, version_id),
+            object_key=self._object_key(
+                self._actor_user_id, knowledge_base.id, document.id, version_id
+            ),
             upload=upload,
             knowledge_base=knowledge_base,
         )
@@ -567,7 +441,8 @@ class RagAdminService:
         upload: ValidatedDocumentUpload,
     ) -> None:
         if (
-            request.target_type != expected_target_type
+            request.created_by != self._actor_user_id
+            or request.target_type != expected_target_type
             or request.target_id != expected_target_id
             or request.filename != upload.filename
             or request.mime_type != upload.mime_type
@@ -606,9 +481,14 @@ class RagAdminService:
         )
 
     @staticmethod
-    def _object_key(knowledge_base_id: UUID, document_id: UUID, version_id: UUID) -> str:
+    def _object_key(
+        owner_user_id: UUID,
+        knowledge_base_id: UUID,
+        document_id: UUID,
+        version_id: UUID,
+    ) -> str:
         return (
-            f"knowledge-bases/{knowledge_base_id}/documents/{document_id}/"
+            f"users/{owner_user_id}/knowledge-bases/{knowledge_base_id}/documents/{document_id}/"
             f"versions/{version_id}/source"
         )
 
@@ -774,14 +654,18 @@ class RagAdminService:
         return await self._repository.list_document_versions(document_id=document_id)
 
     async def get_document_version(self, document_version_id: UUID) -> DocumentVersion:
-        version = await self._repository.get_document_version(document_version_id)
+        version = await self._repository.get_document_version(
+            document_version_id, owner_user_id=self._actor_user_id
+        )
         if version is None:
             raise NotFoundError("document version was not found")
         await self._document(version.document_id)
         return version
 
     async def get_ingestion_job(self, job_id: UUID) -> IngestionJob:
-        job = await self._repository.get_ingestion_job(job_id)
+        job = await self._repository.get_ingestion_job(
+            job_id, owner_user_id=self._actor_user_id
+        )
         if job is None:
             raise NotFoundError("ingestion job was not found")
         await self._document(job.document_id)
@@ -795,12 +679,17 @@ class RagAdminService:
         self,
         job_id: UUID,
     ) -> tuple[IngestionJob, OutboxEvent]:
-        job = await self._repository.get_ingestion_job(job_id, for_update=True)
+        job = await self._repository.get_ingestion_job(
+            job_id, owner_user_id=self._actor_user_id, for_update=True
+        )
         if job is None:
             raise NotFoundError("ingestion job was not found")
-        document = await self._repository.get_document(job.document_id, for_update=True)
+        document = await self._repository.get_document(
+            job.document_id, owner_user_id=self._actor_user_id, for_update=True
+        )
         version = await self._repository.get_document_version(
             job.document_version_id,
+            owner_user_id=self._actor_user_id,
             for_update=True,
         )
         if document is None or version is None:

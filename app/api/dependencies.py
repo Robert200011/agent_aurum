@@ -1,4 +1,4 @@
-"""用于会话、服务、身份和 RBAC 的 FastAPI 依赖图。"""
+"""用于会话、个人服务和身份认证的 FastAPI 依赖图。"""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools.finance import FinanceToolExecutor
 from app.config import Settings, get_settings
-from app.db.models.identity import User, UserRole, UserStatus
+from app.db.models.identity import User, UserStatus
 from app.db.repositories.identity import (
     AuditRepository,
     RefreshTokenRepository,
     UserRepository,
 )
-from app.db.session import get_db_session
-from app.errors import AuthenticationError, AuthorizationError
+from app.db.session import get_db_session, set_tenant_context
+from app.errors import AuthenticationError
 from app.observability.context import set_context, user_identifier_hash
 from app.providers.identity import SecurityStore
 from app.providers.model_provider import ChatModelProvider, RerankerProvider
@@ -34,7 +34,7 @@ from app.services.auth import AuthService
 from app.services.chat import ChatService
 from app.services.chat_runs import ChatRunCoordinator
 from app.services.finance import FinanceService
-from app.services.rag import RagAdminService
+from app.services.rag import PersonalKnowledgeService
 from app.services.retrieval import RagRetrievalService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -165,12 +165,13 @@ def get_finance_service(
 FinanceServiceDependency = Annotated[FinanceService, Depends(get_finance_service)]
 
 
-def get_rag_admin_service(
+async def get_personal_knowledge_service(
     session: SessionDependency,
-    context: AdminContextDependency,
+    context: AccessContextDependency,
     settings: SettingsDependency,
-) -> RagAdminService:
-    return RagAdminService(
+) -> PersonalKnowledgeService:
+    await set_tenant_context(session, context.user.id)
+    return PersonalKnowledgeService(
         session=session,
         actor_user_id=context.user.id,
         ingestion_max_retries=settings.ingestion_max_retries,
@@ -178,12 +179,15 @@ def get_rag_admin_service(
     )
 
 
-RagAdminServiceDependency = Annotated[RagAdminService, Depends(get_rag_admin_service)]
+PersonalKnowledgeServiceDependency = Annotated[
+    PersonalKnowledgeService,
+    Depends(get_personal_knowledge_service),
+]
 
 
 def get_rag_retrieval_service(
     session: SessionDependency,
-    context: AdminContextDependency,
+    context: AccessContextDependency,
     settings: SettingsDependency,
 ) -> RagRetrievalService:
     return RagRetrievalService(
@@ -201,14 +205,14 @@ RagRetrievalServiceDependency = Annotated[
 ]
 
 
-def get_project_retrieval_service(
+def get_personal_retrieval_service(
     session: SessionDependency,
     context: AccessContextDependency,
     settings: SettingsDependency,
     reranker_provider: RerankerProviderDependency,
     retrieval_cache: RetrievalCacheDependency,
 ) -> RagRetrievalService:
-    """Build the normal-user retriever; project scope is enforced by the service."""
+    """Build a retriever whose maximum scope is the authenticated user."""
 
     return RagRetrievalService(
         session=session,
@@ -221,20 +225,20 @@ def get_project_retrieval_service(
     )
 
 
-ProjectRetrievalServiceDependency = Annotated[
+PersonalRetrievalServiceDependency = Annotated[
     RagRetrievalService,
-    Depends(get_project_retrieval_service),
+    Depends(get_personal_retrieval_service),
 ]
 
 
 def get_rag_answer_service(
-    retrieval_service: ProjectRetrievalServiceDependency,
+    retrieval_service: PersonalRetrievalServiceDependency,
     chat_provider: ChatModelProviderDependency,
     finance_service: FinanceServiceDependency,
     checkpointer: CheckpointSaverDependency,
     settings: SettingsDependency,
 ) -> RagAnswerService:
-    """Build the authenticated user's minimal project RAG workflow."""
+    """Build the authenticated user's routed answer workflow."""
 
     return RagAnswerService(
         retrieval_service=retrieval_service,
@@ -273,14 +277,3 @@ def get_chat_service(
 
 
 ChatServiceDependency = Annotated[ChatService, Depends(get_chat_service)]
-
-
-def require_admin(context: AccessContextDependency) -> AccessContext:
-    if context.user.role != UserRole.ADMIN:
-        raise AuthorizationError("administrator role required")
-    if context.user.must_change_password:
-        raise AuthorizationError("administrator must change the initial password")
-    return context
-
-
-AdminContextDependency = Annotated[AccessContext, Depends(require_admin)]

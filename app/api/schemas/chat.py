@@ -19,26 +19,9 @@ class PageResponse(BaseModel):
     total: int
 
 
-class AvailableProjectResponse(BaseModel):
-    """普通用户创建问答会话时可选择的最小项目信息。"""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    name: str
-    description: str | None
-
-
-class AvailableProjectListResponse(BaseModel):
-    """当前可用于基础 RAG 问答的项目列表。"""
-
-    items: list[AvailableProjectResponse]
-
-
 class ConversationCreate(BaseModel):
-    """创建绑定到一个 Agent 项目的新会话。"""
+    """创建不预先绑定知识范围的新会话。"""
 
-    project_id: UUID
     title: str | None = Field(default=None, max_length=256)
 
     @field_validator("title")
@@ -82,7 +65,6 @@ class ConversationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    project_id: UUID | None
     title: str
     status: ConversationStatus
     created_at: datetime

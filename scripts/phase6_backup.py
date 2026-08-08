@@ -54,7 +54,6 @@ COUNT_TABLES = (
     "finance.investment_transactions",
     "finance.market_price_snapshots",
     "finance.exchange_rate_snapshots",
-    "rag.agent_projects",
     "rag.knowledge_bases",
     "rag.documents",
     "rag.document_versions",
@@ -190,7 +189,8 @@ def _database_snapshot(url: str) -> dict[str, Any]:
               ON knowledge_base.id = document.knowledge_base_id
             WHERE document.deleted_at IS NULL
               AND document.is_enabled
-              AND knowledge_base.status = 'published'
+              AND knowledge_base.status = 'active'
+              AND knowledge_base.search_enabled
             ORDER BY version.source_object_key
             """
         )

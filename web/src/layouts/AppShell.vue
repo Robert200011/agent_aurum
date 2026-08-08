@@ -4,7 +4,6 @@ import {
   BarChartOutlined,
   DashboardOutlined,
   DatabaseOutlined,
-  FolderOpenOutlined,
   LockOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
@@ -26,10 +25,10 @@ const auth = useAuthStore()
 const collapsed = ref(false)
 const mobileOpen = ref(false)
 const isMobile = ref(false)
+const loggingOut = ref(false)
 
 const selectedKeys = computed(() => {
   const segments = route.path.split('/').filter(Boolean)
-  if (segments[0] === 'admin' && segments[1]) return [`admin/${segments[1]}`]
   return [segments[0] || 'dashboard']
 })
 
@@ -48,10 +47,19 @@ function navigate(key: string): void {
 async function handleUserMenu(event: { key: string }): Promise<void> {
   if (event.key === 'password') {
     await router.push('/change-password')
+    return
   }
-  if (event.key === 'logout') {
-    await auth.logout()
-    await router.replace('/login')
+
+  if (event.key === 'logout' && !loggingOut.value) {
+    loggingOut.value = true
+    const logoutRequest = auth.logout()
+    try {
+      // logout() 会同步清除本地身份，因此路由可以立即进入登录页。
+      await router.replace('/login')
+    } finally {
+      await logoutRequest
+      loggingOut.value = false
+    }
   }
 }
 
@@ -109,14 +117,10 @@ onBeforeUnmount(() => {
           <BarChartOutlined />
           <span>投资组合</span>
         </a-menu-item>
-        <a-menu-divider v-if="auth.isAdmin" />
-        <a-menu-item v-if="auth.isAdmin" key="admin/projects">
-          <FolderOpenOutlined />
-          <span>Agent 项目</span>
-        </a-menu-item>
-        <a-menu-item v-if="auth.isAdmin" key="admin/knowledge-bases">
+        <a-menu-divider />
+        <a-menu-item key="knowledge-bases">
           <DatabaseOutlined />
-          <span>知识库工作台</span>
+          <span>个人知识库</span>
         </a-menu-item>
       </a-menu>
       <div v-if="!collapsed" class="sider-note">
@@ -149,12 +153,9 @@ onBeforeUnmount(() => {
         <a-menu-item key="investments">
           <BarChartOutlined />投资组合
         </a-menu-item>
-        <a-menu-divider v-if="auth.isAdmin" />
-        <a-menu-item v-if="auth.isAdmin" key="admin/projects">
-          <FolderOpenOutlined />Agent 项目
-        </a-menu-item>
-        <a-menu-item v-if="auth.isAdmin" key="admin/knowledge-bases">
-          <DatabaseOutlined />知识库工作台
+        <a-menu-divider />
+        <a-menu-item key="knowledge-bases">
+          <DatabaseOutlined />个人知识库
         </a-menu-item>
       </a-menu>
     </a-drawer>
@@ -184,14 +185,14 @@ onBeforeUnmount(() => {
             </a-avatar>
             <span class="user-copy">
               <strong>{{ auth.user?.username }}</strong>
-              <small>{{ auth.isAdmin ? '管理员' : '个人用户' }}</small>
+              <small>个人用户</small>
             </span>
           </button>
           <template #overlay>
             <a-menu @click="handleUserMenu">
               <a-menu-item key="password"><LockOutlined />修改密码</a-menu-item>
               <a-menu-divider />
-              <a-menu-item key="logout" danger>
+              <a-menu-item key="logout" :disabled="loggingOut" danger>
                 <LogoutOutlined />退出登录
               </a-menu-item>
             </a-menu>

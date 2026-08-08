@@ -8,7 +8,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -31,11 +30,6 @@ from app.db.base import (
 )
 
 
-class UserRole(StrEnum):
-    ADMIN = "admin"
-    USER = "user"
-
-
 class UserStatus(StrEnum):
     ACTIVE = "active"
     DISABLED = "disabled"
@@ -48,17 +42,6 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
-    role: Mapped[UserRole] = mapped_column(
-        SAEnum(
-            UserRole,
-            name="user_role",
-            native_enum=False,
-            length=32,
-            values_callable=lambda enum: [item.value for item in enum],
-        ),
-        default=UserRole.USER,
-        nullable=False,
-    )
     status: Mapped[UserStatus] = mapped_column(
         SAEnum(
             UserStatus,
@@ -71,7 +54,6 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (

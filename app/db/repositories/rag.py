@@ -1,4 +1,4 @@
-"""SQLAlchemy persistence operations for administrator-managed RAG resources."""
+"""SQLAlchemy persistence operations for user-owned knowledge resources."""
 
 from __future__ import annotations
 
@@ -6,11 +6,10 @@ from datetime import datetime
 from typing import TypeVar, cast
 from uuid import UUID
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.rag import (
-    AgentProject,
     Document,
     DocumentChunk,
     DocumentUploadRequest,
@@ -18,7 +17,6 @@ from app.db.models.rag import (
     IngestionJob,
     KnowledgeBase,
     OutboxEvent,
-    ProjectKnowledgeBase,
 )
 
 T = TypeVar("T")
@@ -33,70 +31,17 @@ class RagRepository:
         await self._session.flush()
         return instance
 
-    async def get_project(
-        self,
-        project_id: UUID,
-        *,
-        include_deleted: bool = False,
-        for_update: bool = False,
-    ) -> AgentProject | None:
-        filters = [AgentProject.id == project_id]
-        if not include_deleted:
-            filters.append(AgentProject.deleted_at.is_(None))
-        statement = select(AgentProject).where(*filters)
-        if for_update:
-            statement = statement.with_for_update()
-        return cast(AgentProject | None, await self._session.scalar(statement))
-
-    async def list_projects(self, *, page: int, page_size: int) -> tuple[list[AgentProject], int]:
-        filters = [AgentProject.deleted_at.is_(None)]
-        count_statement = select(func.count()).select_from(AgentProject).where(*filters)
-        total = int(await self._session.scalar(count_statement) or 0)
-        statement = (
-            select(AgentProject)
-            .where(*filters)
-            .order_by(AgentProject.created_at.desc(), AgentProject.id)
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        )
-        return list((await self._session.scalars(statement)).all()), total
-
-    async def list_available_chat_projects(self) -> list[AgentProject]:
-        """返回至少包含一个可执行 Dense 检索 Chunk 的正常项目。"""
-
-        published_knowledge_base = exists().where(
-            ProjectKnowledgeBase.project_id == AgentProject.id,
-            ProjectKnowledgeBase.knowledge_base_id == KnowledgeBase.id,
-            KnowledgeBase.status == "published",
-            KnowledgeBase.deleted_at.is_(None),
-            Document.knowledge_base_id == KnowledgeBase.id,
-            Document.status == "published",
-            Document.is_enabled.is_(True),
-            Document.deleted_at.is_(None),
-            Document.current_published_version_id == DocumentVersion.id,
-            DocumentVersion.status == "published",
-            DocumentChunk.document_version_id == DocumentVersion.id,
-            DocumentChunk.embedding.is_not(None),
-        )
-        statement = (
-            select(AgentProject)
-            .where(
-                AgentProject.status == "active",
-                AgentProject.deleted_at.is_(None),
-                published_knowledge_base,
-            )
-            .order_by(AgentProject.name, AgentProject.id)
-        )
-        return list((await self._session.scalars(statement)).all())
-
     async def get_knowledge_base(
         self,
         knowledge_base_id: UUID,
         *,
+        owner_user_id: UUID | None = None,
         include_deleted: bool = False,
         for_update: bool = False,
     ) -> KnowledgeBase | None:
         filters = [KnowledgeBase.id == knowledge_base_id]
+        if owner_user_id is not None:
+            filters.append(KnowledgeBase.owner_user_id == owner_user_id)
         if not include_deleted:
             filters.append(KnowledgeBase.deleted_at.is_(None))
         statement = select(KnowledgeBase).where(*filters)
@@ -107,10 +52,14 @@ class RagRepository:
     async def list_knowledge_bases(
         self,
         *,
+        owner_user_id: UUID,
         page: int,
         page_size: int,
     ) -> tuple[list[KnowledgeBase], int]:
-        filters = [KnowledgeBase.deleted_at.is_(None)]
+        filters = [
+            KnowledgeBase.owner_user_id == owner_user_id,
+            KnowledgeBase.deleted_at.is_(None),
+        ]
         count_statement = select(func.count()).select_from(KnowledgeBase).where(*filters)
         total = int(await self._session.scalar(count_statement) or 0)
         statement = (
@@ -122,89 +71,15 @@ class RagRepository:
         )
         return list((await self._session.scalars(statement)).all()), total
 
-    async def get_binding(
-        self,
-        *,
-        project_id: UUID,
-        knowledge_base_id: UUID,
-    ) -> ProjectKnowledgeBase | None:
-        statement = select(ProjectKnowledgeBase).where(
-            ProjectKnowledgeBase.project_id == project_id,
-            ProjectKnowledgeBase.knowledge_base_id == knowledge_base_id,
-        )
-        return cast(ProjectKnowledgeBase | None, await self._session.scalar(statement))
-
-    async def list_bindings(self, *, knowledge_base_id: UUID) -> list[ProjectKnowledgeBase]:
-        statement = (
-            select(ProjectKnowledgeBase)
-            .where(ProjectKnowledgeBase.knowledge_base_id == knowledge_base_id)
-            .order_by(ProjectKnowledgeBase.created_at, ProjectKnowledgeBase.project_id)
-        )
-        return list((await self._session.scalars(statement)).all())
-
-    async def has_active_binding(
-        self,
-        *,
-        knowledge_base_id: UUID,
-        exclude_project_id: UUID | None = None,
-    ) -> bool:
-        filters = [
-            ProjectKnowledgeBase.knowledge_base_id == knowledge_base_id,
-            AgentProject.status == "active",
-            AgentProject.deleted_at.is_(None),
-        ]
-        if exclude_project_id is not None:
-            filters.append(ProjectKnowledgeBase.project_id != exclude_project_id)
-        statement = select(
-            exists().where(
-                ProjectKnowledgeBase.project_id == AgentProject.id,
-                *filters,
-            )
-        )
-        return bool(await self._session.scalar(statement))
-
-    async def list_bound_knowledge_bases_for_update(
-        self,
-        *,
-        project_id: UUID,
+    async def list_searchable_knowledge_bases(
+        self, *, owner_user_id: UUID
     ) -> list[KnowledgeBase]:
         statement = (
             select(KnowledgeBase)
-            .join(
-                ProjectKnowledgeBase,
-                ProjectKnowledgeBase.knowledge_base_id == KnowledgeBase.id,
-            )
             .where(
-                ProjectKnowledgeBase.project_id == project_id,
-                KnowledgeBase.deleted_at.is_(None),
-            )
-            .order_by(KnowledgeBase.id)
-            .with_for_update()
-        )
-        return list((await self._session.scalars(statement)).all())
-
-    async def list_published_knowledge_bases_for_project(
-        self,
-        *,
-        project_id: UUID,
-    ) -> list[KnowledgeBase]:
-        """Return only searchable knowledge bases in one exact active project."""
-
-        statement = (
-            select(KnowledgeBase)
-            .join(
-                ProjectKnowledgeBase,
-                ProjectKnowledgeBase.knowledge_base_id == KnowledgeBase.id,
-            )
-            .join(
-                AgentProject,
-                AgentProject.id == ProjectKnowledgeBase.project_id,
-            )
-            .where(
-                ProjectKnowledgeBase.project_id == project_id,
-                AgentProject.status == "active",
-                AgentProject.deleted_at.is_(None),
-                KnowledgeBase.status == "published",
+                KnowledgeBase.owner_user_id == owner_user_id,
+                KnowledgeBase.status == "active",
+                KnowledgeBase.search_enabled.is_(True),
                 KnowledgeBase.deleted_at.is_(None),
             )
             .order_by(KnowledgeBase.id)
@@ -219,13 +94,20 @@ class RagRepository:
         self,
         document_id: UUID,
         *,
+        owner_user_id: UUID | None = None,
         include_deleted: bool = False,
         for_update: bool = False,
     ) -> Document | None:
         filters = [Document.id == document_id]
         if not include_deleted:
             filters.append(Document.deleted_at.is_(None))
-        statement = select(Document).where(*filters)
+        statement = select(Document)
+        if owner_user_id is not None:
+            statement = statement.join(
+                KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id
+            )
+            filters.append(KnowledgeBase.owner_user_id == owner_user_id)
+        statement = statement.where(*filters)
         if for_update:
             statement = statement.with_for_update()
         return cast(Document | None, await self._session.scalar(statement))
@@ -249,9 +131,18 @@ class RagRepository:
         self,
         document_version_id: UUID,
         *,
+        owner_user_id: UUID | None = None,
         for_update: bool = False,
     ) -> DocumentVersion | None:
-        statement = select(DocumentVersion).where(DocumentVersion.id == document_version_id)
+        statement = select(DocumentVersion)
+        filters = [DocumentVersion.id == document_version_id]
+        if owner_user_id is not None:
+            statement = statement.join(
+                KnowledgeBase,
+                KnowledgeBase.id == DocumentVersion.knowledge_base_id,
+            )
+            filters.append(KnowledgeBase.owner_user_id == owner_user_id)
+        statement = statement.where(*filters)
         if for_update:
             statement = statement.with_for_update()
         return cast(DocumentVersion | None, await self._session.scalar(statement))
@@ -294,9 +185,18 @@ class RagRepository:
         self,
         job_id: UUID,
         *,
+        owner_user_id: UUID | None = None,
         for_update: bool = False,
     ) -> IngestionJob | None:
-        statement = select(IngestionJob).where(IngestionJob.id == job_id)
+        statement = select(IngestionJob)
+        filters = [IngestionJob.id == job_id]
+        if owner_user_id is not None:
+            statement = (
+                statement.join(Document, Document.id == IngestionJob.document_id)
+                .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
+            )
+            filters.append(KnowledgeBase.owner_user_id == owner_user_id)
+        statement = statement.where(*filters)
         if for_update:
             statement = statement.with_for_update().execution_options(populate_existing=True)
         return cast(IngestionJob | None, await self._session.scalar(statement))
@@ -313,7 +213,7 @@ class RagRepository:
         self,
         chunk_ids: list[UUID],
         *,
-        project_id: UUID | None = None,
+        owner_user_id: UUID,
     ) -> dict[UUID, tuple[DocumentChunk, Document, DocumentVersion]]:
         if not chunk_ids:
             return {}
@@ -330,7 +230,9 @@ class RagRepository:
             )
             .where(
                 DocumentChunk.id.in_(chunk_ids),
-                KnowledgeBase.status == "published",
+                KnowledgeBase.owner_user_id == owner_user_id,
+                KnowledgeBase.status == "active",
+                KnowledgeBase.search_enabled.is_(True),
                 KnowledgeBase.deleted_at.is_(None),
                 DocumentVersion.status == "published",
                 Document.current_published_version_id == DocumentVersion.id,
@@ -338,27 +240,16 @@ class RagRepository:
                 Document.deleted_at.is_(None),
             )
         )
-        if project_id is not None:
-            statement = statement.where(
-                exists().where(
-                    ProjectKnowledgeBase.knowledge_base_id
-                    == DocumentChunk.knowledge_base_id,
-                    ProjectKnowledgeBase.project_id == project_id,
-                    AgentProject.id == ProjectKnowledgeBase.project_id,
-                    AgentProject.status == "active",
-                    AgentProject.deleted_at.is_(None),
-                )
-            )
         rows = (await self._session.execute(statement)).all()
         return {
             chunk.id: (chunk, document, document_version)
             for chunk, document, document_version in rows
         }
 
-    async def get_project_retrieval_version_state(
+    async def get_user_retrieval_version_state(
         self,
         *,
-        project_id: UUID,
+        owner_user_id: UUID,
         knowledge_base_ids: list[UUID],
     ) -> list[tuple[UUID, UUID | None, str, bool, datetime | None]]:
         """返回会影响已发布检索集合的轻量状态，用于生成缓存版本指纹。"""
@@ -373,12 +264,9 @@ class RagRepository:
                 Document.is_enabled,
                 Document.deleted_at,
             )
-            .join(
-                ProjectKnowledgeBase,
-                ProjectKnowledgeBase.knowledge_base_id == Document.knowledge_base_id,
-            )
+            .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
             .where(
-                ProjectKnowledgeBase.project_id == project_id,
+                KnowledgeBase.owner_user_id == owner_user_id,
                 Document.knowledge_base_id.in_(knowledge_base_ids),
             )
             .order_by(Document.id)

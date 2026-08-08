@@ -1,4 +1,4 @@
-"""Administrator knowledge-document management endpoints."""
+"""Personal knowledge-document management endpoints."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, Header, Query, Response, UploadFile, status
 
 from app.api.dependencies import (
-    AdminContextDependency,
+    AccessContextDependency,
     ObjectStorageDependency,
+    PersonalKnowledgeServiceDependency,
     QuotaStoreDependency,
-    RagAdminServiceDependency,
     SettingsDependency,
 )
 from app.api.schemas.rag import (
@@ -30,7 +30,7 @@ from app.api.schemas.rag import (
 from app.errors import BusinessRuleError
 from app.rag.upload_validation import validate_document_upload
 
-router = APIRouter(prefix="/admin", tags=["admin-documents"])
+router = APIRouter(tags=["personal-knowledge-documents"])
 
 
 def _metadata(value: str | None) -> dict[str, str]:
@@ -60,10 +60,10 @@ async def _read_upload(file: UploadFile, max_size: int) -> bytes:
 )
 async def create_document(
     knowledge_base_id: UUID,
-    service: RagAdminServiceDependency,
+    service: PersonalKnowledgeServiceDependency,
     storage: ObjectStorageDependency,
     settings: SettingsDependency,
-    _admin: AdminContextDependency,
+    context: AccessContextDependency,
     quota_store: QuotaStoreDependency,
     file: UploadFile = File(...),
     metadata: str | None = Form(default=None),
@@ -76,7 +76,7 @@ async def create_document(
         settings=settings,
     )
     quota_lease = await quota_store.reserve_upload(
-        _admin.user.id, size_bytes=len(upload.content)
+        context.user.id, size_bytes=len(upload.content)
     )
     try:
         document, version, job = await service.create_document_upload(
@@ -106,10 +106,10 @@ async def create_document(
 )
 async def create_document_version(
     document_id: UUID,
-    service: RagAdminServiceDependency,
+    service: PersonalKnowledgeServiceDependency,
     storage: ObjectStorageDependency,
     settings: SettingsDependency,
-    _admin: AdminContextDependency,
+    context: AccessContextDependency,
     quota_store: QuotaStoreDependency,
     file: UploadFile = File(...),
     metadata: str | None = Form(default=None),
@@ -122,7 +122,7 @@ async def create_document_version(
         settings=settings,
     )
     quota_lease = await quota_store.reserve_upload(
-        _admin.user.id, size_bytes=len(upload.content)
+        context.user.id, size_bytes=len(upload.content)
     )
     try:
         document, version, job = await service.create_document_version_upload(
@@ -148,8 +148,7 @@ async def create_document_version(
 @router.get("/knowledge-bases/{knowledge_base_id}/documents", response_model=DocumentListResponse)
 async def list_documents(
     knowledge_base_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
 ) -> DocumentListResponse:
@@ -167,8 +166,7 @@ async def list_documents(
 @router.get("/documents/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
 ) -> DocumentResponse:
     return DocumentResponse.model_validate(await service.get_document(document_id))
 
@@ -176,8 +174,7 @@ async def get_document(
 @router.get("/documents/{document_id}/versions", response_model=DocumentVersionListResponse)
 async def list_document_versions(
     document_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
 ) -> DocumentVersionListResponse:
     versions = await service.list_document_versions(document_id)
     return DocumentVersionListResponse(
@@ -188,8 +185,7 @@ async def list_document_versions(
 @router.get("/document-versions/{document_version_id}", response_model=DocumentVersionResponse)
 async def get_document_version(
     document_version_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
 ) -> DocumentVersionResponse:
     return DocumentVersionResponse.model_validate(
         await service.get_document_version(document_version_id)
@@ -202,10 +198,9 @@ async def get_document_version(
 )
 async def create_document_version_download_url(
     document_version_id: UUID,
-    service: RagAdminServiceDependency,
+    service: PersonalKnowledgeServiceDependency,
     storage: ObjectStorageDependency,
     settings: SettingsDependency,
-    _admin: AdminContextDependency,
 ) -> DocumentDownloadUrlResponse:
     version = await service.get_document_version(document_version_id)
     await storage.head(version.source_object_key)
@@ -222,8 +217,7 @@ async def create_document_version_download_url(
 @router.get("/ingestion-jobs/{job_id}", response_model=IngestionJobResponse)
 async def get_ingestion_job(
     job_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
 ) -> IngestionJobResponse:
     return IngestionJobResponse.model_validate(await service.get_ingestion_job(job_id))
 
@@ -234,8 +228,7 @@ async def get_ingestion_job(
 )
 async def list_ingestion_jobs(
     document_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
 ) -> IngestionJobListResponse:
     jobs = await service.list_ingestion_jobs(document_id)
     return IngestionJobListResponse(
@@ -250,11 +243,11 @@ async def list_ingestion_jobs(
 )
 async def retry_ingestion_job(
     job_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
+    context: AccessContextDependency,
     quota_store: QuotaStoreDependency,
 ) -> IngestionRetryResponse:
-    quota_lease = await quota_store.reserve_upload(_admin.user.id, size_bytes=0)
+    quota_lease = await quota_store.reserve_upload(context.user.id, size_bytes=0)
     try:
         job, event = await service.retry_ingestion_job(job_id)
     except BaseException:
@@ -273,8 +266,7 @@ async def retry_ingestion_job(
 )
 async def retry_ingestion_dispatch(
     job_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
 ) -> OutboxEventResponse:
     return OutboxEventResponse.model_validate(await service.retry_ingestion_dispatch(job_id))
 
@@ -282,8 +274,7 @@ async def retry_ingestion_dispatch(
 @router.post("/documents/{document_id}/disable", response_model=DocumentResponse)
 async def disable_document(
     document_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
 ) -> DocumentResponse:
     return DocumentResponse.model_validate(await service.disable_document(document_id))
 
@@ -291,8 +282,7 @@ async def disable_document(
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: UUID,
-    service: RagAdminServiceDependency,
-    _admin: AdminContextDependency,
+    service: PersonalKnowledgeServiceDependency,
 ) -> Response:
     await service.delete_document(document_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

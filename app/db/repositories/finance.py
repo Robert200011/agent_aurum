@@ -706,7 +706,7 @@ class FinanceRepository:
     async def delete_market_snapshot(self, snapshot_id: UUID) -> None:
         """在受控维护流程中按标识符删除快照。"""
 
-        # 公开路由不提供删除功能，此方法为未来管理员流程预留。
+        # 公开路由不提供删除功能；快照采用只追加、可审计的保存方式。
         await self._session.execute(
             delete(MarketPriceSnapshot).where(MarketPriceSnapshot.id == snapshot_id)
         )

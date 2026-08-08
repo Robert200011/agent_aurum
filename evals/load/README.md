@@ -23,14 +23,14 @@ Fake SSE 场景需要显式提供以下隔离夹具；缺少时会在报告中�
 
 ## single-node-release
 
-候选发布档的所有场景都是必选。先创建隔离测试用户、管理员、已发布知识库、会话、一份小型
+候选发布档的所有场景都是必选。先创建隔离测试用户、启用的个人知识库、会话、一份小型
 Markdown 文档和一个可查询的入库任务，再通过进程环境注入：
 
 - `AURUM_LOAD_BASE_URL`
-- `AURUM_LOAD_ACCESS_TOKEN`、`AURUM_LOAD_ADMIN_TOKEN`
+- `AURUM_LOAD_ACCESS_TOKEN`
 - `AURUM_LOAD_CONVERSATION_ID`、`AURUM_LOAD_KNOWLEDGE_BASE_ID`
 - `AURUM_LOAD_DOCUMENT_PATH`、`AURUM_LOAD_INGESTION_JOB_ID`、`AURUM_LOAD_RUN_ID`
-- `AURUM_LOAD_OTHER_USER_MARKER`、`AURUM_LOAD_OTHER_PROJECT_MARKER`
+- `AURUM_LOAD_OTHER_USER_MARKER`
 
 文档上传使用 `AURUM_LOAD_RUN_ID` 构造幂等键；重复执行时必须换新 Run ID。入库恢复轮询可
 使用预先制造并恢复的任务 ID，报告还会记录运行后的队列深度。候选环境必须另行保存 API、

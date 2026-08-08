@@ -22,19 +22,8 @@ export type ChatGenerationStage =
   | 'generating'
   | 'finalizing'
 
-export interface ChatProject {
-  id: string
-  name: string
-  description: string | null
-}
-
-export interface ChatProjectList {
-  items: ChatProject[]
-}
-
 export interface Conversation {
   id: string
-  project_id: string | null
   title: string
   status: ConversationStatus
   created_at: string

@@ -170,11 +170,6 @@ class Settings(BaseSettings):
     login_global_request_limit: int = Field(default=300, ge=10, le=100000)
     login_request_window_seconds: int = Field(default=60, ge=10, le=3600)
 
-    admin_username: str = "admin"
-    admin_email: str = "admin@aurum.example.com"
-    admin_initial_password: SecretStr | None = None
-    bootstrap_admin: bool = False
-
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",
@@ -306,23 +301,6 @@ class Settings(BaseSettings):
             trace_endpoint = urlsplit(self.otel_exporter_otlp_traces_endpoint)
             if trace_endpoint.path.rstrip("/") != "/v1/traces":
                 raise ValueError("OTLP HTTP trace endpoint must end with /v1/traces")
-
-        if self.bootstrap_admin:
-            if self.admin_initial_password is None:
-                raise ValueError(
-                    "AURUM_ADMIN_INITIAL_PASSWORD is required when "
-                    "AURUM_BOOTSTRAP_ADMIN=true"
-                )
-            password = self.admin_initial_password.get_secret_value()
-            if not self.password_min_length <= len(password) <= 128:
-                raise ValueError(
-                    "initial administrator password length must be between "
-                    f"{self.password_min_length} and 128 characters"
-                )
-            if not any(character.isascii() and character.isalpha() for character in password):
-                raise ValueError("initial administrator password must contain an ASCII letter")
-            if not any(character.isdigit() for character in password):
-                raise ValueError("initial administrator password must contain a digit")
 
         if self.langgraph_aes_key is not None:
             checkpoint_key = self.langgraph_aes_key.get_secret_value().encode()
