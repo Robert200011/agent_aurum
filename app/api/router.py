@@ -10,7 +10,6 @@ from app.api import (
     documents,
     holdings,
     knowledge_bases,
-    projects,
     reports,
     system,
     transactions,
@@ -21,7 +20,6 @@ router = APIRouter()
 router.include_router(system.router)
 router.include_router(auth.router)
 router.include_router(users.router)
-router.include_router(chat.project_router)
 router.include_router(chat.router)
 router.include_router(accounts.router)
 router.include_router(transactions.router)
@@ -32,6 +30,5 @@ router.include_router(holdings.market_router)
 router.include_router(holdings.exchange_router)
 router.include_router(holdings.portfolio_router)
 router.include_router(reports.router)
-router.include_router(projects.router)
 router.include_router(knowledge_bases.router)
 router.include_router(documents.router)

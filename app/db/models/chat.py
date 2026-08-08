@@ -47,9 +47,6 @@ class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False
     )
-    project_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey(f"{RAG_SCHEMA}.agent_projects.id", ondelete="SET NULL")
-    )
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="active", nullable=False)
 

@@ -11,6 +11,7 @@ from typing import Literal
 ComparisonKind = Literal["year_over_year", "previous_period", "previous_month"]
 
 _EXPLICIT_DATE_PATTERN = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
+_EXPLICIT_MONTH_PATTERN = re.compile(r"(?<!\d)(\d{4})年\s*(\d{1,2})月(?!\d)")
 _RECENT_DAYS_PATTERN = re.compile(r"最近\s*(\d{1,4})\s*天")
 
 
@@ -53,6 +54,17 @@ def parse_date_range(question: str, *, today: date) -> DateRange | None:
         if end_date < start_date:
             raise DateRangeParseError("date range order is invalid")
         return DateRange(start_date, end_date, "explicit")
+
+    explicit_month = _EXPLICIT_MONTH_PATTERN.search(question)
+    if explicit_month is not None:
+        year = int(explicit_month.group(1))
+        month = int(explicit_month.group(2))
+        try:
+            start_date = date(year, month, 1)
+        except ValueError as exc:
+            raise DateRangeParseError("explicit month is invalid") from exc
+        end_date = start_date.replace(day=calendar.monthrange(year, month)[1])
+        return DateRange(start_date, end_date, "explicit_month")
 
     recent = _RECENT_DAYS_PATTERN.search(question)
     if recent is not None:

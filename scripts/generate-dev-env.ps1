@@ -49,7 +49,6 @@ function Set-EnvironmentValue {
 $postgresPassword = New-RandomToken -ByteCount 24
 $appDatabasePassword = New-RandomToken -ByteCount 24
 $jwtSecret = New-RandomToken -ByteCount 48
-$adminPassword = "Aurum-1-$(New-RandomToken -ByteCount 18)"
 $minioRootUser = "aurum-root"
 $minioRootPassword = New-RandomToken -ByteCount 32
 $objectStorageAccessKey = "aurum-app"
@@ -58,11 +57,10 @@ $objectStorageSecretKey = New-RandomToken -ByteCount 32
 $sourcePath = if ($RotateAuthSecrets) { $targetPath } else { $templatePath }
 $content = Get-Content -LiteralPath $sourcePath -Raw -Encoding utf8
 $content = Set-EnvironmentValue $content "AURUM_JWT_SECRET_KEY" $jwtSecret
-$content = Set-EnvironmentValue $content "AURUM_ADMIN_INITIAL_PASSWORD" $adminPassword
 
 if ($RotateAuthSecrets) {
     Set-Content -LiteralPath $targetPath -Value $content -Encoding utf8
-    Write-Output "Rotated JWT and initial administrator secrets in .env."
+    Write-Output "Rotated the JWT signing secret in .env."
     Write-Output "Existing access and refresh tokens are now invalid."
     exit 0
 }
@@ -81,4 +79,3 @@ $content = Set-EnvironmentValue $content "AURUM_MIGRATION_DATABASE_URL" (
 )
 Set-Content -LiteralPath $targetPath -Value $content -Encoding utf8
 Write-Output "Generated .env with secrets stored only on this machine."
-Write-Output "The initial administrator password is in AURUM_ADMIN_INITIAL_PASSWORD."

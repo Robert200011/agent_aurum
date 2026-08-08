@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
 
-from app.db.models.identity import UserRole, UserStatus
+from app.db.models.identity import UserStatus
 
 
 class RegisterRequest(BaseModel):
@@ -37,9 +37,7 @@ class UserResponse(BaseModel):
     id: UUID
     username: str
     email: EmailStr
-    role: UserRole
     status: UserStatus
-    must_change_password: bool
     password_changed_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -50,7 +48,6 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"  # noqa: S105
     expires_in: int
     refresh_expires_in: int
-    must_change_password: bool
 
 
 class MessageResponse(BaseModel):

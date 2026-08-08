@@ -6,7 +6,6 @@ export interface StoredTokens {
   accessToken: string
   accessExpiresAt: number
   refreshExpiresAt: number
-  mustChangePassword: boolean
 }
 
 function load(): StoredTokens | null {
@@ -18,8 +17,7 @@ function load(): StoredTokens | null {
     if (
       typeof candidate.accessToken !== 'string' ||
       typeof candidate.accessExpiresAt !== 'number' ||
-      typeof candidate.refreshExpiresAt !== 'number' ||
-      typeof candidate.mustChangePassword !== 'boolean'
+      typeof candidate.refreshExpiresAt !== 'number'
     ) {
       localStorage.removeItem(TOKEN_KEY)
       return null
@@ -30,7 +28,6 @@ function load(): StoredTokens | null {
       accessToken: candidate.accessToken,
       accessExpiresAt: candidate.accessExpiresAt,
       refreshExpiresAt: candidate.refreshExpiresAt,
-      mustChangePassword: candidate.mustChangePassword,
     }
     localStorage.setItem(TOKEN_KEY, JSON.stringify(sanitized))
     return sanitized
@@ -52,7 +49,6 @@ export const tokenStorage = {
       accessToken: pair.access_token,
       accessExpiresAt: now + pair.expires_in * 1000,
       refreshExpiresAt: now + pair.refresh_expires_in * 1000,
-      mustChangePassword: pair.must_change_password,
     }
     localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens))
     return tokens
@@ -60,10 +56,5 @@ export const tokenStorage = {
   clear(): void {
     tokens = null
     localStorage.removeItem(TOKEN_KEY)
-  },
-  setMustChangePassword(value: boolean): void {
-    if (!tokens) return
-    tokens = { ...tokens, mustChangePassword: value }
-    localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens))
   },
 }

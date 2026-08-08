@@ -25,7 +25,6 @@ import { apiErrorMessage } from '@/services/http'
 import type {
   ChatGenerationStage,
   ChatMessage,
-  ChatProject,
   Conversation,
   ConversationDetail,
   MessageCitation,
@@ -39,7 +38,6 @@ const loading = ref(true)
 const detailLoading = ref(false)
 const saving = ref(false)
 const sending = ref(false)
-const projects = ref<ChatProject[]>([])
 const conversations = ref<Conversation[]>([])
 const activeConversation = ref<ConversationDetail | null>(null)
 const conversationSearch = ref('')
@@ -61,7 +59,6 @@ let streamAbortController: AbortController | null = null
 let scrollFrame: number | null = null
 
 const createOpen = ref(false)
-const createProjectId = ref<string>()
 const createTitle = ref('')
 const renameOpen = ref(false)
 const renameTitle = ref('')
@@ -69,11 +66,6 @@ const renameTitle = ref('')
 const citationOpen = ref(false)
 const selectedCitation = ref<MessageCitation | null>(null)
 
-const activeProject = computed(() =>
-  projects.value.find(
-    (project) => project.id === activeConversation.value?.project_id,
-  ),
-)
 const canAsk = computed(
   () =>
     activeConversation.value?.status === 'active' &&
@@ -86,15 +78,8 @@ const generationStatusText = computed(() => {
   if (generationStage.value === 'analyzing') return '正在分析财务证据和知识依据'
   if (generationStage.value === 'generating') return '正在生成回答'
   if (generationStage.value === 'finalizing') return '正在校验引用并保存'
-  return '正在检索项目知识'
+  return '正在检索个人知识库'
 })
-
-function projectName(projectId: string | null): string {
-  return (
-    projects.value.find((project) => project.id === projectId)?.name ??
-    '项目不可用'
-  )
-}
 
 function displayAnswer(content: string, riskNotice: string | null): string {
   if (!riskNotice || !content.trimEnd().endsWith(riskNotice)) return content
@@ -104,13 +89,8 @@ function displayAnswer(content: string, riskNotice: string | null): string {
 async function loadWorkspace(): Promise<void> {
   loading.value = true
   try {
-    const [projectList, conversationList] = await Promise.all([
-      chatApi.listProjects(),
-      chatApi.listConversations(conversationSearch.value),
-    ])
-    projects.value = projectList.items
+    const conversationList = await chatApi.listConversations(conversationSearch.value)
     conversations.value = conversationList.items
-    createProjectId.value ??= projects.value[0]?.id
     if (conversations.value[0]) {
       await selectConversation(conversations.value[0].id)
     }
@@ -181,22 +161,14 @@ async function recoverRunningAnswer(conversationId: string): Promise<void> {
 }
 
 function openCreate(): void {
-  createProjectId.value ??= projects.value[0]?.id
   createTitle.value = ''
   createOpen.value = true
 }
 
 async function createConversation(): Promise<void> {
-  if (!createProjectId.value) {
-    message.warning('请选择一个可用项目')
-    return
-  }
   saving.value = true
   try {
-    const created = await chatApi.createConversation(
-      createProjectId.value,
-      createTitle.value,
-    )
+    const created = await chatApi.createConversation(createTitle.value)
     createOpen.value = false
     await refreshConversations()
     await selectConversation(created.id)
@@ -470,27 +442,18 @@ onMounted(loadWorkspace)
   <div class="chat-page">
     <div class="page-heading chat-heading">
       <div>
-        <span class="heading-kicker">PROJECT RAG</span>
+        <span class="heading-kicker">ROUTED ASSISTANT</span>
         <h1>智能问答</h1>
-        <p>回答只使用当前会话绑定项目的已发布知识，并保留可核验引用。</p>
+        <p>每轮问题按需选择直接回答、个人财务工具或个人知识库，并保留可核验引用。</p>
       </div>
       <a-button
         type="primary"
         size="large"
-        :disabled="projects.length === 0"
         @click="openCreate"
       >
         <PlusOutlined />新建会话
       </a-button>
     </div>
-
-    <a-alert
-      v-if="!loading && projects.length === 0"
-      type="warning"
-      show-icon
-      message="暂无可问答项目"
-      description="请联系管理员启用项目，并为其绑定至少一个已发布知识库。"
-    />
 
     <section class="chat-workspace surface-card">
       <aside class="conversation-panel">
@@ -539,7 +502,7 @@ onMounted(loadWorkspace)
               <span class="conversation-icon"><MessageOutlined /></span>
               <span class="conversation-copy">
                 <strong>{{ conversation.title }}</strong>
-                <small>{{ projectName(conversation.project_id) }}</small>
+                <small>动态路由</small>
                 <time>{{ dayjs(conversation.updated_at).fromNow() }}</time>
               </span>
               <InboxOutlined
@@ -556,7 +519,6 @@ onMounted(loadWorkspace)
           >
             <a-button
               type="link"
-              :disabled="projects.length === 0"
               @click="openCreate"
             >
               创建第一个会话
@@ -583,7 +545,7 @@ onMounted(loadWorkspace)
               </div>
               <span>
                 <RobotOutlined />
-                {{ activeProject?.name ?? '项目不可用' }}
+                按需使用个人知识
               </span>
             </div>
             <div class="header-actions">
@@ -629,7 +591,7 @@ onMounted(loadWorkspace)
               class="welcome-state"
             >
               <div class="welcome-icon"><RobotOutlined /></div>
-              <span>已连接 {{ activeProject?.name ?? '当前项目' }}</span>
+              <span>知识库仅在问题需要时启用</span>
               <h2>从项目知识中寻找答案</h2>
               <p>
                 可询问文档中的事实、规则或说明。回答后的引用编号可以点击核验。
@@ -913,10 +875,9 @@ onMounted(loadWorkspace)
         <div v-else class="no-conversation">
           <div><MessageOutlined /></div>
           <h2>选择或创建一个会话</h2>
-          <p>每个会话固定绑定一个项目，避免不同知识范围相互污染。</p>
+          <p>会话不固定绑定知识范围，每轮问题都会重新判断所需数据。</p>
           <a-button
             type="primary"
-            :disabled="projects.length === 0"
             @click="openCreate"
           >
             <PlusOutlined />新建会话
@@ -934,21 +895,6 @@ onMounted(loadWorkspace)
       @ok="createConversation"
     >
       <a-form layout="vertical" class="dialog-form">
-        <a-form-item label="项目" required>
-          <a-select
-            v-model:value="createProjectId"
-            placeholder="选择知识范围"
-            style="width: 100%"
-          >
-            <a-select-option
-              v-for="project in projects"
-              :key="project.id"
-              :value="project.id"
-            >
-              {{ project.name }}
-            </a-select-option>
-          </a-select>
-        </a-form-item>
         <a-form-item label="会话名称（可选）">
           <a-input
             v-model:value="createTitle"
@@ -959,7 +905,7 @@ onMounted(loadWorkspace)
         <a-alert
           type="info"
           show-icon
-          message="项目在会话创建后不可更换"
+          message="知识范围由每轮问题动态判断，不会固定绑定到会话"
         />
       </a-form>
     </a-modal>

@@ -6,7 +6,6 @@ import type {
   ChatStreamError,
   ChatStreamStarted,
   ChatStreamStatus,
-  ChatProjectList,
   Conversation,
   ConversationDetail,
   ConversationList,
@@ -85,11 +84,6 @@ async function consumeChatStream(
 }
 
 export const chatApi = {
-  async listProjects(): Promise<ChatProjectList> {
-    const response = await http.get<ChatProjectList>('/chat/projects')
-    return response.data
-  },
-
   async listConversations(search?: string): Promise<ConversationList> {
     const response = await http.get<ConversationList>('/conversations', {
       params: {
@@ -101,12 +95,8 @@ export const chatApi = {
     return response.data
   },
 
-  async createConversation(
-    projectId: string,
-    title?: string,
-  ): Promise<Conversation> {
+  async createConversation(title?: string): Promise<Conversation> {
     const response = await http.post<Conversation>('/conversations', {
-      project_id: projectId,
       title: title?.trim() || null,
     })
     return response.data

@@ -12,7 +12,6 @@ export type TransactionType = 'income' | 'expense'
 export type BudgetPeriod = 'monthly' | 'quarterly' | 'yearly' | 'custom'
 export type AssetType = 'stock' | 'fund' | 'etf' | 'bond' | 'deposit' | 'crypto' | 'other'
 export type InvestmentTransactionType = 'buy' | 'sell'
-export type UserRole = 'admin' | 'user'
 export type UserStatus = 'active' | 'disabled'
 
 export interface PageResponse {
@@ -25,9 +24,7 @@ export interface User {
   id: string
   username: string
   email: string
-  role: UserRole
   status: UserStatus
-  must_change_password: boolean
   password_changed_at: string | null
   created_at: string
   updated_at: string
@@ -38,7 +35,6 @@ export interface AuthTokenResponse {
   token_type: string
   expires_in: number
   refresh_expires_in: number
-  must_change_password: boolean
 }
 
 export interface Account {

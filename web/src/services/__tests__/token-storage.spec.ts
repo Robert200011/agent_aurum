@@ -13,7 +13,6 @@ describe('令牌存储', () => {
       token_type: 'bearer',
       expires_in: 900,
       refresh_expires_in: 3600,
-      must_change_password: false,
     })
 
     expect(tokenStorage.get()?.accessToken).toBe('access')
@@ -27,7 +26,6 @@ describe('令牌存储', () => {
       token_type: 'bearer',
       expires_in: 900,
       refresh_expires_in: 3600,
-      must_change_password: true,
     })
 
     tokenStorage.clear()
@@ -43,7 +41,6 @@ describe('令牌存储', () => {
         refreshToken: 'legacy-refresh-secret',
         accessExpiresAt: Date.now() + 900_000,
         refreshExpiresAt: Date.now() + 3_600_000,
-        mustChangePassword: false,
       }),
     )
     vi.resetModules()

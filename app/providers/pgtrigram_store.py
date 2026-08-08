@@ -5,17 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.rag import (
-    AgentProject,
-    Document,
-    DocumentChunk,
-    DocumentVersion,
-    KnowledgeBase,
-    ProjectKnowledgeBase,
-)
+from app.db.models.rag import Document, DocumentChunk, DocumentVersion, KnowledgeBase
 from app.providers.sparse_store import SparseSearchResult
 from app.rag.constants import DOCUMENT_VERSION_STATUS_PUBLISHED
 
@@ -32,7 +25,7 @@ class PgTrigramStoreProvider:
         knowledge_base_ids: Sequence[UUID],
         query: str,
         limit: int,
-        project_id: UUID,
+        owner_user_id: UUID,
     ) -> list[SparseSearchResult]:
         normalized_query = query.strip()
         if not knowledge_base_ids or not normalized_query or limit <= 0:
@@ -42,13 +35,6 @@ class PgTrigramStoreProvider:
             normalized_query,
             DocumentChunk.content,
         ).label("similarity")
-        exact_project_scope = exists().where(
-            ProjectKnowledgeBase.knowledge_base_id == DocumentChunk.knowledge_base_id,
-            ProjectKnowledgeBase.project_id == project_id,
-            AgentProject.id == ProjectKnowledgeBase.project_id,
-            AgentProject.status == "active",
-            AgentProject.deleted_at.is_(None),
-        )
         statement = (
             select(DocumentChunk, similarity)
             .join(
@@ -62,13 +48,14 @@ class PgTrigramStoreProvider:
             )
             .where(
                 DocumentChunk.knowledge_base_id.in_(knowledge_base_ids),
-                KnowledgeBase.status == "published",
+                KnowledgeBase.owner_user_id == owner_user_id,
+                KnowledgeBase.status == "active",
+                KnowledgeBase.search_enabled.is_(True),
                 KnowledgeBase.deleted_at.is_(None),
                 DocumentVersion.status == DOCUMENT_VERSION_STATUS_PUBLISHED,
                 Document.current_published_version_id == DocumentVersion.id,
                 Document.is_enabled.is_(True),
                 Document.deleted_at.is_(None),
-                exact_project_scope,
                 # `%>` is the commutator of word similarity and can use gin_trgm_ops.
                 DocumentChunk.content.op("%>")(normalized_query),
             )

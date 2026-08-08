@@ -14,8 +14,10 @@ export const authApi = {
     const response = await http.get<User>('/users/me')
     return response.data
   },
-  async logout(): Promise<void> {
-    await http.post('/auth/logout')
+  async logout(accessToken: string): Promise<void> {
+    await http.post('/auth/logout', undefined, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
   },
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
     await http.post('/auth/change-password', {

@@ -1246,7 +1246,7 @@ class FinanceService:
         data_source: str,
     ) -> MarketPriceSnapshot:
         """发布一条带来源信息的不可变市场观测。
-        管理员 RBAC 由路由而不是该可复用服务强制执行。
+        调用方身份校验由路由而不是该可复用服务强制执行。
         """
 
         await self._prepare()

@@ -1,4 +1,4 @@
-"""项目级 Dense 检索到 LLM 回答生成的最小 LangGraph。"""
+"""按需组合直接回答、个人知识检索和财务工具的 LangGraph。"""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ from app.rag.citations.structured import (
     StructuredCitationResult,
     structure_citations,
 )
-from app.services.retrieval import ProjectRetrievalResult, RagRetrievalService
+from app.services.retrieval import KnowledgeRetrievalResult, RagRetrievalService
 
 RAG_GRAPH_VERSION = "finance-agent-p6.3-v1"
 ANSWER_REPAIR_PROMPT = """上一次回答未通过服务端证据校验，请重新作答一次。
@@ -79,11 +79,17 @@ def build_rag_answer_graph(
 
     def plan_question(state: RagAnswerState) -> RagAnswerUpdate:
         write_stage(state, "understanding")
+        plan = plan_agent_question(
+            state["question"],
+            today=state["current_date"],
+        )
         return {
-            "plan": plan_agent_question(
-                state["question"],
-                today=state["current_date"],
-            )
+            "plan": plan,
+            "retrieval": _empty_retrieval(
+                owner_user_id=retrieval_service.actor_user_id,
+                question=state["question"],
+            ),
+            "finance_results": (),
         }
 
     async def retrieve_knowledge(state: RagAnswerState) -> RagAnswerUpdate:
@@ -91,13 +97,12 @@ def build_rag_answer_graph(
         if not plan.needs_knowledge:
             return {
                 "retrieval": _empty_retrieval(
-                    project_id=state["project_id"],
+                    owner_user_id=retrieval_service.actor_user_id,
                     question=state["question"],
                 )
             }
         write_stage(state, "retrieving")
-        retrieval = await retrieval_service.retrieve_project(
-            project_id=state["project_id"],
+        retrieval = await retrieval_service.retrieve_user_knowledge(
             query=state["question"],
             limit=state["retrieval_limit"],
             min_score=state["min_score"],
@@ -282,8 +287,23 @@ def build_rag_answer_graph(
     builder.add_node("generate_answer", generate_answer)
     builder.add_node("validate_citations", validate_citations)
     builder.add_edge(START, "plan_question")
-    builder.add_edge("plan_question", "retrieve_knowledge")
-    builder.add_edge("retrieve_knowledge", "call_finance_tools")
+    builder.add_conditional_edges(
+        "plan_question",
+        _route_after_plan,
+        {
+            "retrieve_knowledge": "retrieve_knowledge",
+            "call_finance_tools": "call_finance_tools",
+            "generate_answer": "generate_answer",
+        },
+    )
+    builder.add_conditional_edges(
+        "retrieve_knowledge",
+        _route_after_retrieval,
+        {
+            "call_finance_tools": "call_finance_tools",
+            "generate_answer": "generate_answer",
+        },
+    )
     builder.add_edge("call_finance_tools", "generate_answer")
     builder.add_edge("generate_answer", "validate_citations")
     builder.add_edge("validate_citations", END)
@@ -293,9 +313,24 @@ def build_rag_answer_graph(
     )
 
 
-def _empty_retrieval(*, project_id: UUID, question: str) -> ProjectRetrievalResult:
-    return ProjectRetrievalResult(
-        project_id=project_id,
+def _route_after_plan(state: RagAnswerState) -> str:
+    plan = state["plan"]
+    if plan.clarification is not None:
+        return "generate_answer"
+    if plan.needs_knowledge:
+        return "retrieve_knowledge"
+    if plan.finance_calls:
+        return "call_finance_tools"
+    return "generate_answer"
+
+
+def _route_after_retrieval(state: RagAnswerState) -> str:
+    return "call_finance_tools" if state["plan"].finance_calls else "generate_answer"
+
+
+def _empty_retrieval(*, owner_user_id: UUID, question: str) -> KnowledgeRetrievalResult:
+    return KnowledgeRetrievalResult(
+        owner_user_id=owner_user_id,
         knowledge_base_ids=(),
         query=question.strip(),
         embedding_model="",

@@ -38,7 +38,6 @@ def _token_response(pair: IssuedTokenPair) -> TokenResponse:
         access_token=pair.access_token,
         expires_in=pair.access_expires_in,
         refresh_expires_in=pair.refresh_expires_in,
-        must_change_password=pair.must_change_password,
     )
 
 

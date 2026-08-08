@@ -61,7 +61,6 @@ class RagAnswerService:
     async def answer(
         self,
         *,
-        project_id: UUID,
         question: str,
         thread_id: UUID,
     ) -> RagAnswerResult:
@@ -69,7 +68,6 @@ class RagAnswerService:
 
         started = perf_counter()
         graph_input = RagAnswerInput(
-            project_id=project_id,
             question=question,
             retrieval_limit=self._retrieval_limit,
             min_score=None,
@@ -84,7 +82,7 @@ class RagAnswerService:
         latency_ms = max(0, round((perf_counter() - started) * 1000))
         retrieval = output["retrieval"]
         return RagAnswerResult(
-            project_id=project_id,
+            owner_user_id=output["retrieval"].owner_user_id,
             question=retrieval.query,
             answer=output["answer"],
             citations=output["citations"],
@@ -101,7 +99,6 @@ class RagAnswerService:
     async def stream(
         self,
         *,
-        project_id: UUID,
         question: str,
         thread_id: UUID,
     ) -> AsyncIterator[RagAnswerStreamEvent]:
@@ -109,7 +106,6 @@ class RagAnswerService:
 
         started = perf_counter()
         graph_input = RagAnswerInput(
-            project_id=project_id,
             question=question,
             retrieval_limit=self._retrieval_limit,
             min_score=None,
@@ -147,7 +143,7 @@ class RagAnswerService:
         retrieval = output["retrieval"]
         yield RagAnswerCompleted(
             RagAnswerResult(
-                project_id=project_id,
+                owner_user_id=output["retrieval"].owner_user_id,
                 question=retrieval.query,
                 answer=output["answer"],
                 citations=output["citations"],

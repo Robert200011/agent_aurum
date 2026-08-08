@@ -10,7 +10,7 @@ from uuid import UUID
 
 @dataclass(frozen=True, slots=True)
 class SparseSearchResult:
-    """A project-scoped keyword hit and its database similarity score."""
+    """A user-scoped keyword hit and its database similarity score."""
 
     chunk_id: UUID
     document_version_id: UUID
@@ -25,5 +25,5 @@ class SparseStoreProvider(Protocol):
         knowledge_base_ids: Sequence[UUID],
         query: str,
         limit: int,
-        project_id: UUID,
+        owner_user_id: UUID,
     ) -> list[SparseSearchResult]: ...

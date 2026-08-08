@@ -10,12 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.db.models.identity import (
-    RefreshToken,
-    User,
-    UserRole,
-    UserStatus,
-)
+from app.db.models.identity import RefreshToken, User, UserStatus
 from app.db.repositories.identity import (
     AuditRepository,
     RefreshTokenRepository,
@@ -57,7 +52,6 @@ class IssuedTokenPair:
     refresh_token: str
     access_expires_in: int
     refresh_expires_in: int
-    must_change_password: bool
 
 
 class AuthService:
@@ -97,9 +91,7 @@ class AuthService:
             username=username,
             email=email.casefold(),
             password_hash=hash_password(raw_password),
-            role=UserRole.USER,
             status=UserStatus.ACTIVE,
-            must_change_password=False,
         )
         try:
             await self._users.add(user)
@@ -253,7 +245,6 @@ class AuthService:
 
         user.password_hash = hash_password(new_password)
         user.password_changed_at = datetime.now(UTC)
-        user.must_change_password = False
         user.token_version += 1
         await self._refresh_tokens.revoke_all_for_user(user.id)
         await self._security_store.revoke_access_token(claims.jti, claims.expires_at)
@@ -290,7 +281,6 @@ class AuthService:
     ) -> tuple[IssuedTokenPair, RefreshToken]:
         access_token, _claims = create_access_token(
             user_id=user.id,
-            role=user.role.value,
             token_version=user.token_version,
             settings=self._settings,
         )
@@ -311,6 +301,5 @@ class AuthService:
             refresh_token=raw_refresh_token,
             access_expires_in=self._settings.access_token_ttl_minutes * 60,
             refresh_expires_in=self._settings.refresh_token_ttl_days * 86400,
-            must_change_password=user.must_change_password,
         )
         return pair, refresh

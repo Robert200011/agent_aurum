@@ -20,8 +20,6 @@ from app.api.dependencies import (
 )
 from app.api.schemas.chat import (
     AgentRunResponse,
-    AvailableProjectListResponse,
-    AvailableProjectResponse,
     ConversationCreate,
     ConversationDetailResponse,
     ConversationListResponse,
@@ -56,17 +54,6 @@ from app.services.chat_runs import BufferedChatEvent, ChatRunError
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
-project_router = APIRouter(prefix="/chat", tags=["chat"])
-
-
-@project_router.get("/projects", response_model=AvailableProjectListResponse)
-async def list_available_projects(
-    service: ChatServiceDependency,
-) -> AvailableProjectListResponse:
-    projects = await service.list_available_projects()
-    return AvailableProjectListResponse(
-        items=[AvailableProjectResponse.model_validate(project) for project in projects]
-    )
 
 
 @router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
@@ -75,7 +62,6 @@ async def create_conversation(
     service: ChatServiceDependency,
 ) -> ConversationResponse:
     conversation = await service.create_conversation(
-        project_id=payload.project_id,
         title=payload.title,
     )
     return ConversationResponse.model_validate(conversation)

@@ -18,7 +18,7 @@ CHECKPOINT_MSGPACK_ALLOWLIST = [
     ("app.providers.model_provider", "ChatCompletionResult"),
     ("app.providers.model_provider", "ChatTokenUsage"),
     ("app.rag.citations.structured", "TrustedCitation"),
-    ("app.services.retrieval", "ProjectRetrievalResult"),
+    ("app.services.retrieval", "KnowledgeRetrievalResult"),
     ("app.services.retrieval", "RetrievedChunk"),
     ("asyncpg.pgproto.pgproto", "UUID"),
 ]

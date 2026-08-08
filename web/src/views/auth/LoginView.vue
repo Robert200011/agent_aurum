@@ -25,7 +25,7 @@ async function submit(): Promise<void> {
     await auth.login(form.identifier.trim(), form.password)
     message.success(`欢迎回来，${auth.user?.username ?? ''}`)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-    await router.replace(auth.mustChangePassword ? '/change-password' : redirect)
+    await router.replace(redirect)
   } catch (error) {
     message.error(apiErrorMessage(error, '用户名、邮箱或密码不正确'))
   }

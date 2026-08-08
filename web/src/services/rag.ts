@@ -13,11 +13,6 @@ import type {
   KnowledgeBaseList,
   KnowledgeBaseUpdate,
   OutboxEvent,
-  Project,
-  ProjectInput,
-  ProjectKnowledgeBaseBinding,
-  ProjectList,
-  ProjectUpdate,
   RetrievalInput,
   RetrievalResponse,
 } from '@/types/rag'
@@ -32,33 +27,9 @@ function uploadForm(file: File, metadata: Record<string, string>): FormData {
 }
 
 export const ragApi = {
-  async listProjects(): Promise<ProjectList> {
-    const response = await http.get<ProjectList>('/admin/projects', {
-      params: { page: 1, page_size: 200 },
-    })
-    return response.data
-  },
-  async createProject(payload: ProjectInput): Promise<Project> {
-    const response = await http.post<Project>('/admin/projects', payload)
-    return response.data
-  },
-  async updateProject(
-    projectId: string,
-    payload: ProjectUpdate,
-  ): Promise<Project> {
-    const response = await http.patch<Project>(
-      `/admin/projects/${projectId}`,
-      payload,
-    )
-    return response.data
-  },
-  async deleteProject(projectId: string): Promise<void> {
-    await http.delete(`/admin/projects/${projectId}`)
-  },
-
   async listKnowledgeBases(): Promise<KnowledgeBaseList> {
     const response = await http.get<KnowledgeBaseList>(
-      '/admin/knowledge-bases',
+      '/knowledge-bases',
       {
         params: { page: 1, page_size: 200 },
       },
@@ -69,7 +40,7 @@ export const ragApi = {
     payload: KnowledgeBaseInput,
   ): Promise<KnowledgeBase> {
     const response = await http.post<KnowledgeBase>(
-      '/admin/knowledge-bases',
+      '/knowledge-bases',
       payload,
     )
     return response.data
@@ -79,56 +50,32 @@ export const ragApi = {
     payload: KnowledgeBaseUpdate,
   ): Promise<KnowledgeBase> {
     const response = await http.patch<KnowledgeBase>(
-      `/admin/knowledge-bases/${knowledgeBaseId}`,
+      `/knowledge-bases/${knowledgeBaseId}`,
       payload,
     )
     return response.data
   },
-  async publishKnowledgeBase(knowledgeBaseId: string): Promise<KnowledgeBase> {
-    const response = await http.post<KnowledgeBase>(
-      `/admin/knowledge-bases/${knowledgeBaseId}/publish`,
+  async disableKnowledgeBase(knowledgeBaseId: string): Promise<KnowledgeBase> {
+    const response = await http.patch<KnowledgeBase>(
+      `/knowledge-bases/${knowledgeBaseId}`,
+      { status: 'disabled' },
     )
     return response.data
   },
-  async disableKnowledgeBase(knowledgeBaseId: string): Promise<KnowledgeBase> {
-    const response = await http.post<KnowledgeBase>(
-      `/admin/knowledge-bases/${knowledgeBaseId}/disable`,
+  async enableKnowledgeBase(knowledgeBaseId: string): Promise<KnowledgeBase> {
+    const response = await http.patch<KnowledgeBase>(
+      `/knowledge-bases/${knowledgeBaseId}`,
+      { status: 'active' },
     )
     return response.data
   },
   async deleteKnowledgeBase(knowledgeBaseId: string): Promise<void> {
-    await http.delete(`/admin/knowledge-bases/${knowledgeBaseId}`)
-  },
-  async listKnowledgeBaseProjects(
-    knowledgeBaseId: string,
-  ): Promise<ProjectKnowledgeBaseBinding[]> {
-    const response = await http.get<ProjectKnowledgeBaseBinding[]>(
-      `/admin/knowledge-bases/${knowledgeBaseId}/projects`,
-    )
-    return response.data
-  },
-  async bindKnowledgeBase(
-    knowledgeBaseId: string,
-    projectId: string,
-  ): Promise<ProjectKnowledgeBaseBinding> {
-    const response = await http.post<ProjectKnowledgeBaseBinding>(
-      `/admin/knowledge-bases/${knowledgeBaseId}/projects`,
-      { project_id: projectId },
-    )
-    return response.data
-  },
-  async unbindKnowledgeBase(
-    knowledgeBaseId: string,
-    projectId: string,
-  ): Promise<void> {
-    await http.delete(
-      `/admin/knowledge-bases/${knowledgeBaseId}/projects/${projectId}`,
-    )
+    await http.delete(`/knowledge-bases/${knowledgeBaseId}`)
   },
 
   async listDocuments(knowledgeBaseId: string): Promise<DocumentList> {
     const response = await http.get<DocumentList>(
-      `/admin/knowledge-bases/${knowledgeBaseId}/documents`,
+      `/knowledge-bases/${knowledgeBaseId}/documents`,
       { params: { page: 1, page_size: 200 } },
     )
     return response.data
@@ -140,7 +87,7 @@ export const ragApi = {
     idempotencyKey: string,
   ): Promise<DocumentUploadResponse> {
     const response = await http.post<DocumentUploadResponse>(
-      `/admin/knowledge-bases/${knowledgeBaseId}/documents`,
+      `/knowledge-bases/${knowledgeBaseId}/documents`,
       uploadForm(file, metadata),
       { headers: { 'Idempotency-Key': idempotencyKey }, timeout: 90_000 },
     )
@@ -153,7 +100,7 @@ export const ragApi = {
     idempotencyKey: string,
   ): Promise<DocumentUploadResponse> {
     const response = await http.post<DocumentUploadResponse>(
-      `/admin/documents/${documentId}/versions`,
+      `/documents/${documentId}/versions`,
       uploadForm(file, metadata),
       { headers: { 'Idempotency-Key': idempotencyKey }, timeout: 90_000 },
     )
@@ -161,7 +108,7 @@ export const ragApi = {
   },
   async listDocumentVersions(documentId: string): Promise<DocumentVersionList> {
     const response = await http.get<DocumentVersionList>(
-      `/admin/documents/${documentId}/versions`,
+      `/documents/${documentId}/versions`,
     )
     return response.data
   },
@@ -169,41 +116,41 @@ export const ragApi = {
     documentVersionId: string,
   ): Promise<DocumentDownloadUrl> {
     const response = await http.get<DocumentDownloadUrl>(
-      `/admin/document-versions/${documentVersionId}/download-url`,
+      `/document-versions/${documentVersionId}/download-url`,
     )
     return response.data
   },
   async disableDocument(documentId: string): Promise<Document> {
     const response = await http.post<Document>(
-      `/admin/documents/${documentId}/disable`,
+      `/documents/${documentId}/disable`,
     )
     return response.data
   },
   async deleteDocument(documentId: string): Promise<void> {
-    await http.delete(`/admin/documents/${documentId}`)
+    await http.delete(`/documents/${documentId}`)
   },
 
   async listIngestionJobs(documentId: string): Promise<IngestionJobList> {
     const response = await http.get<IngestionJobList>(
-      `/admin/documents/${documentId}/ingestion-jobs`,
+      `/documents/${documentId}/ingestion-jobs`,
     )
     return response.data
   },
   async getIngestionJob(jobId: string): Promise<IngestionJob> {
     const response = await http.get<IngestionJob>(
-      `/admin/ingestion-jobs/${jobId}`,
+      `/ingestion-jobs/${jobId}`,
     )
     return response.data
   },
   async retryIngestionJob(jobId: string): Promise<IngestionRetryResponse> {
     const response = await http.post<IngestionRetryResponse>(
-      `/admin/ingestion-jobs/${jobId}/retry`,
+      `/ingestion-jobs/${jobId}/retry`,
     )
     return response.data
   },
   async retryIngestionDispatch(jobId: string): Promise<OutboxEvent> {
     const response = await http.post<OutboxEvent>(
-      `/admin/ingestion-jobs/${jobId}/retry-dispatch`,
+      `/ingestion-jobs/${jobId}/retry-dispatch`,
     )
     return response.data
   },
@@ -213,7 +160,7 @@ export const ragApi = {
     payload: RetrievalInput,
   ): Promise<RetrievalResponse> {
     const response = await http.post<RetrievalResponse>(
-      `/admin/knowledge-bases/${knowledgeBaseId}/retrieve`,
+      `/knowledge-bases/${knowledgeBaseId}/search-preview`,
       payload,
       { timeout: 45_000 },
     )

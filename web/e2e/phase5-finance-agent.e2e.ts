@@ -93,11 +93,21 @@ test('真实财务 Agent 与混合回答浏览器冒烟', async ({ page }) => {
   await expect(page.getByText('get_finance_summary').last()).toBeVisible()
   await expect(page.getByText('分析建议').last()).toBeVisible()
 
+  await composer.fill('账户当前余额是多少')
+  await page.getByRole('button', { name: '发送问题' }).click()
+  await expect(page.locator('.finance-evidence')).toHaveCount(2, { timeout: 180_000 })
+  await expect(page.getByText('get_account_balances').last()).toBeVisible()
+
+  await composer.fill('本月有哪些交易')
+  await page.getByRole('button', { name: '发送问题' }).click()
+  await expect(page.locator('.finance-evidence')).toHaveCount(3, { timeout: 180_000 })
+  await expect(page.getByText('search_transactions').last()).toBeVisible()
+
   await composer.fill(
     '结合知识库，复述我本月收入、支出和净现金流，并说明旅行支出应使用哪个账户。只复述工具数字并引用原文，不要做新计算。',
   )
   await page.getByRole('button', { name: '发送问题' }).click()
-  await expect(page.locator('.finance-evidence')).toHaveCount(2, { timeout: 180_000 })
+  await expect(page.locator('.finance-evidence')).toHaveCount(4, { timeout: 180_000 })
   await expect(page.getByText('知识库依据').last()).toBeVisible()
   await expect(page.locator('.message-sources button').last()).toBeVisible()
 })

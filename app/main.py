@@ -50,7 +50,6 @@ from app.providers.retrieval_cache import RedisRetrievalCache
 from app.providers.s3_object_storage import S3ObjectStorageProvider
 from app.providers.worker_health import RedisWorkerHealthStore
 from app.rag.rerankers.dashscope import DashScopeRerankerProvider
-from app.services.admin import bootstrap_admin
 from app.services.chat_runs import ChatRunCoordinator
 
 logger = logging.getLogger(__name__)
@@ -135,8 +134,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else None
         )
         instrument_runtime(app_settings, engine=get_engine())
-        if app_settings.bootstrap_admin:
-            await bootstrap_admin(get_session_factory(), app_settings)
         serializer = encrypted_checkpoint_serializer(
             app_settings.langgraph_aes_key_bytes
         )

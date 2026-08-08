@@ -11,7 +11,7 @@ from app.agents.policies.finance_planner import AgentQuestionPlan
 from app.agents.tools.finance import FinanceToolResult
 from app.providers.model_provider import ChatCompletionResult
 from app.rag.citations.structured import TrustedCitation
-from app.services.retrieval import ProjectRetrievalResult, RetrievedChunk
+from app.services.retrieval import KnowledgeRetrievalResult, RetrievedChunk
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,11 +36,11 @@ class ControlledRagContext:
 class RagAnswerResult:
     """一次最小 RAG 图运行的内部结果，供后续会话与引用层消费。"""
 
-    project_id: UUID
+    owner_user_id: UUID
     question: str
     answer: str
     citations: tuple[TrustedCitation, ...]
-    retrieval: ProjectRetrievalResult
+    retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
     completion: ChatCompletionResult | None
     latency_ms: int
@@ -84,7 +84,6 @@ type RagAnswerStreamEvent = RagAnswerStage | RagAnswerDelta | RagAnswerCompleted
 class RagAnswerInput(TypedDict):
     """调用图时必须提供的输入。"""
 
-    project_id: UUID
     question: str
     retrieval_limit: int
     min_score: float | None
@@ -95,7 +94,7 @@ class RagAnswerInput(TypedDict):
 class RagAnswerOutput(TypedDict):
     """图对应用服务暴露的有限输出。"""
 
-    retrieval: ProjectRetrievalResult
+    retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
     completion: ChatCompletionResult | None
     answer: str
@@ -107,7 +106,6 @@ class RagAnswerOutput(TypedDict):
 class RagAnswerState(TypedDict, total=False):
     """问答节点共享的完整状态；节点只返回自己产生的增量字段。"""
 
-    project_id: UUID
     question: str
     retrieval_limit: int
     min_score: float | None
@@ -115,7 +113,7 @@ class RagAnswerState(TypedDict, total=False):
     current_date: date
     plan: AgentQuestionPlan
     finance_results: tuple[FinanceToolResult, ...]
-    retrieval: ProjectRetrievalResult
+    retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
     completion: ChatCompletionResult | None
     answer: str
@@ -125,7 +123,7 @@ class RagAnswerState(TypedDict, total=False):
 class RagAnswerUpdate(TypedDict, total=False):
     """节点状态更新类型。"""
 
-    retrieval: ProjectRetrievalResult
+    retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
     completion: ChatCompletionResult | None
     answer: str

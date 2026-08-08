@@ -1086,15 +1086,13 @@ class FinanceToolExecutor:
                 ),
                 self._clock(),
                 (
-                    (
-                        FinanceToolWarning(
-                            code="transaction_result_truncated",
-                            message="transaction result was truncated",
-                        ),
-                    )
-                    if transaction_page.total > len(transaction_page.items)
-                    else ()
-                ),
+                    FinanceToolWarning(
+                        code="transaction_result_truncated",
+                        message="transaction result was truncated",
+                    ),
+                )
+                if transaction_page.total > len(transaction_page.items)
+                else (),
             )
         if isinstance(request, IncomeExpenseReportRequest):
             report_currencies = set(

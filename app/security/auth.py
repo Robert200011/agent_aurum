@@ -23,7 +23,6 @@ password_hash = PasswordHash.recommended()
 class AccessTokenClaims:
     subject: UUID
     jti: UUID
-    role: str
     token_version: int
     expires_at: datetime
 
@@ -53,7 +52,6 @@ def validate_password_strength(value: str, *, minimum_length: int) -> None:
 def create_access_token(
     *,
     user_id: UUID,
-    role: str,
     token_version: int,
     settings: Settings,
 ) -> tuple[str, AccessTokenClaims]:
@@ -62,14 +60,12 @@ def create_access_token(
     claims = AccessTokenClaims(
         subject=user_id,
         jti=uuid4(),
-        role=role,
         token_version=token_version,
         expires_at=expires_at,
     )
     payload = {
         "sub": str(claims.subject),
         "jti": str(claims.jti),
-        "role": claims.role,
         "ver": claims.token_version,
         "type": "access",
         "iat": now,
@@ -101,7 +97,6 @@ def decode_access_token(token: str, settings: Settings) -> AccessTokenClaims:
         return AccessTokenClaims(
             subject=UUID(payload["sub"]),
             jti=UUID(payload["jti"]),
-            role=str(payload["role"]),
             token_version=int(payload["ver"]),
             expires_at=datetime.fromtimestamp(int(payload["exp"]), tz=UTC),
         )

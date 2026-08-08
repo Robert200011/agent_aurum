@@ -425,7 +425,7 @@ class InvestmentTransactionListResponse(PageResponse):
 
 
 class MarketSnapshotCreate(BaseModel):
-    """由管理员发布、带来源信息的时点市场价格。"""
+    """由已认证用户录入、带来源信息的时点市场价格。"""
 
     symbol: SymbolCode
     asset_type: AssetType
@@ -467,7 +467,7 @@ class MarketSnapshotResponse(BaseModel):
 
 
 class ExchangeRateSnapshotCreate(BaseModel):
-    """由管理员发布的可审计直接汇率观测。"""
+    """由已认证用户录入的可审计直接汇率观测。"""
 
     base_currency: CurrencyCode
     quote_currency: CurrencyCode

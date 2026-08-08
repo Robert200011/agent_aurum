@@ -60,16 +60,10 @@ const router = createRouter({
           meta: { title: '投资组合' },
         },
         {
-          path: 'admin/projects',
-          name: 'admin-projects',
-          component: () => import('@/views/admin/AdminProjectsView.vue'),
-          meta: { title: 'Agent 项目', adminOnly: true },
-        },
-        {
-          path: 'admin/knowledge-bases',
-          name: 'admin-knowledge-bases',
-          component: () => import('@/views/admin/AdminKnowledgeBasesView.vue'),
-          meta: { title: '知识库工作台', adminOnly: true },
+          path: 'knowledge-bases',
+          name: 'knowledge-bases',
+          component: () => import('@/views/KnowledgeBasesView.vue'),
+          meta: { title: '个人知识库' },
         },
         {
           path: 'change-password',
@@ -97,17 +91,6 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.meta.guestOnly && auth.isAuthenticated) {
-    return { name: auth.mustChangePassword ? 'change-password' : 'dashboard' }
-  }
-  if (
-    auth.isAuthenticated &&
-    auth.mustChangePassword &&
-    to.name !== 'change-password' &&
-    to.name !== 'not-found'
-  ) {
-    return { name: 'change-password' }
-  }
-  if (to.meta.adminOnly && !auth.isAdmin) {
     return { name: 'dashboard' }
   }
 

@@ -8,12 +8,76 @@
   },
   "route_cases": [
     {
-      "id": "route-knowledge-budget",
+      "id": "route-direct-budget",
       "question": "如何制定预算？",
+      "intent": "direct",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": []
+    },
+    {
+      "id": "route-knowledge-document",
+      "question": "根据我的知识库，总结文档要点。",
       "intent": "knowledge",
       "needs_knowledge": true,
       "risk_policy": "standard",
       "tools": []
+    },
+    {
+      "id": "route-finance-personal-account-balance",
+      "question": "目前个人CNY账户的余额是多少",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_account_balances"]
+    },
+    {
+      "id": "route-finance-explicit-month-summary",
+      "question": "2026年8月支出",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_finance_summary"]
+    },
+    {
+      "id": "route-finance-current-account-balance",
+      "question": "账户当前余额是多少",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_account_balances"]
+    },
+    {
+      "id": "route-finance-explicit-month-transactions",
+      "question": "2026年7月有哪些交易",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["search_transactions"]
+    },
+    {
+      "id": "route-finance-personal-budget-status",
+      "question": "我的预算用了多少？",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_budget_status"]
+    },
+    {
+      "id": "route-finance-personal-portfolio",
+      "question": "我的基金投资收益怎么样？",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_portfolio_summary"]
+    },
+    {
+      "id": "route-finance-explicit-month-analysis",
+      "question": "请分析2026年8月的支出情况",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_income_expense_report"]
     },
     {
       "id": "route-finance-summary",
@@ -48,10 +112,10 @@
       "tools": ["get_portfolio_summary"]
     },
     {
-      "id": "route-mixed-anomaly",
+      "id": "route-finance-anomaly",
       "question": "本月餐饮支出为什么比上月高，应该如何调整？",
-      "intent": "mixed",
-      "needs_knowledge": true,
+      "intent": "finance",
+      "needs_knowledge": false,
       "risk_policy": "standard",
       "tools": ["analyze_expense_anomalies"]
     },
@@ -66,15 +130,15 @@
     {
       "id": "route-high-risk-market",
       "question": "AAPL 现在值得买吗？",
-      "intent": "mixed",
-      "needs_knowledge": true,
+      "intent": "finance",
+      "needs_knowledge": false,
       "risk_policy": "high_risk_investment",
       "tools": ["get_market_snapshot"]
     },
     {
       "id": "route-clarification",
       "question": "查找我的流水",
-      "intent": "finance",
+      "intent": "clarify",
       "needs_knowledge": false,
       "risk_policy": "standard",
       "tools": [],
@@ -82,6 +146,13 @@
     }
   ],
   "time_cases": [
+    {
+      "id": "time-explicit-chinese-month",
+      "question": "2026年8月支出",
+      "today": "2026-08-02",
+      "start_date": "2026-08-01",
+      "end_date": "2026-08-31"
+    },
     {
       "id": "time-month-end",
       "question": "上月支出",

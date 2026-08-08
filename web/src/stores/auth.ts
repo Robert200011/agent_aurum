@@ -11,10 +11,6 @@ export const useAuthStore = defineStore('auth', () => {
   const loading = ref(false)
 
   const isAuthenticated = computed(() => Boolean(user.value && tokenStorage.get()?.accessToken))
-  const isAdmin = computed(() => user.value?.role === 'admin')
-  const mustChangePassword = computed(
-    () => user.value?.must_change_password ?? tokenStorage.get()?.mustChangePassword ?? false,
-  )
 
   async function initialize(): Promise<void> {
     if (initialized.value) return
@@ -58,12 +54,17 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout(): Promise<void> {
+    const accessToken = tokenStorage.get()?.accessToken
+    tokenStorage.clear()
+    user.value = null
+    initialized.value = true
+
+    if (!accessToken) return
+
     try {
-      if (tokenStorage.get()?.accessToken) await authApi.logout()
-    } finally {
-      tokenStorage.clear()
-      user.value = null
-      initialized.value = true
+      await authApi.logout(accessToken)
+    } catch {
+      // 本地会话已经失效，服务端不可用不应阻止用户退出。
     }
   }
 
@@ -79,8 +80,6 @@ export const useAuthStore = defineStore('auth', () => {
     initialized,
     loading,
     isAuthenticated,
-    isAdmin,
-    mustChangePassword,
     initialize,
     login,
     register,

@@ -12,6 +12,7 @@ __pycache__/
 htmlcov/
 dist/
 build/
+/backups/
 .idea/workspace.xml
 postgres-data/
 redis-data/

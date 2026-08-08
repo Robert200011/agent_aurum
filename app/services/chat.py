@@ -35,9 +35,7 @@ from app.db.models.chat import (
     MessageCitation,
     MessageEvidence,
 )
-from app.db.models.rag import AgentProject
 from app.db.repositories.chat import ChatRepository
-from app.db.repositories.rag import RagRepository
 from app.db.session import set_tenant_context
 from app.errors import (
     ApplicationError,
@@ -124,7 +122,6 @@ type ChatAnswerStreamEvent = (
 @dataclass(frozen=True, slots=True)
 class StreamingRun:
     conversation_id: UUID
-    project_id: UUID
     thread_id: UUID
     question: str
     message_id: UUID
@@ -146,34 +143,20 @@ class ChatService:
         self._user_id = user_id
         self._answer_service = answer_service
         self._repository = ChatRepository(session)
-        self._rag_repository = RagRepository(session)
 
     @property
     def user_id(self) -> UUID:
         return self._user_id
 
-    async def list_available_projects(self) -> list[AgentProject]:
-        """List projects that can start a normal-user RAG conversation."""
-
-        await self._prepare()
-        return await self._rag_repository.list_available_chat_projects()
-
     async def create_conversation(
         self,
         *,
-        project_id: UUID,
         title: str | None,
     ) -> Conversation:
         await self._prepare()
-        project = await self._rag_repository.get_project(project_id)
-        if project is None or project.deleted_at is not None:
-            raise NotFoundError("agent project was not found")
-        if project.status != "active":
-            raise BusinessRuleError("conversation requires an active project")
         conversation = await self._repository.add(
             Conversation(
                 user_id=self._user_id,
-                project_id=project.id,
                 title=title or DEFAULT_CONVERSATION_TITLE,
                 status=ConversationStatus.ACTIVE.value,
             )
@@ -369,9 +352,6 @@ class ChatService:
         conversation = await self._owned_conversation(conversation_id, for_update=True)
         if conversation.status != ConversationStatus.ACTIVE.value:
             raise BusinessRuleError("only active conversations can receive messages")
-        if conversation.project_id is None:
-            raise BusinessRuleError("conversation project is no longer available")
-
         normalized_question = question.strip()
         if not normalized_question or len(normalized_question) > 2_000:
             raise BusinessRuleError("question is not valid")
@@ -413,7 +393,6 @@ class ChatService:
 
         try:
             result = await self._answer_service.answer(
-                project_id=conversation.project_id,
                 question=normalized_question,
                 thread_id=conversation.id,
             )
@@ -554,8 +533,6 @@ class ChatService:
         conversation = await self._owned_conversation(conversation_id, for_update=True)
         if conversation.status != ConversationStatus.ACTIVE.value:
             raise BusinessRuleError("only active conversations can regenerate answers")
-        if conversation.project_id is None:
-            raise BusinessRuleError("conversation project is no longer available")
         await self._ensure_no_running_run(conversation.id)
         assistant = await self._repository.get_message(
             user_id=self._user_id,
@@ -618,7 +595,6 @@ class ChatService:
         await self._session.commit()
         return StreamingRun(
             conversation_id=conversation.id,
-            project_id=conversation.project_id,
             thread_id=conversation.id,
             question=user_message.content,
             message_id=assistant.id,
@@ -639,7 +615,6 @@ class ChatService:
         try:
             yield ChatStreamStatus("understanding")
             async for event in self._answer_service.stream(
-                project_id=streaming_run.project_id,
                 question=streaming_run.question,
                 thread_id=streaming_run.thread_id,
             ):
@@ -711,8 +686,6 @@ class ChatService:
         conversation = await self._owned_conversation(conversation_id, for_update=True)
         if conversation.status != ConversationStatus.ACTIVE.value:
             raise BusinessRuleError("only active conversations can receive messages")
-        if conversation.project_id is None:
-            raise BusinessRuleError("conversation project is no longer available")
         await self._ensure_no_running_run(conversation.id)
 
         normalized_question = question.strip()
@@ -758,7 +731,6 @@ class ChatService:
         await self._session.commit()
         return StreamingRun(
             conversation_id=conversation.id,
-            project_id=conversation.project_id,
             thread_id=conversation.id,
             question=normalized_question,
             message_id=assistant_message.id,

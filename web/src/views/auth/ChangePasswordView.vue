@@ -47,14 +47,6 @@ async function submit(): Promise<void> {
       </div>
     </div>
 
-    <a-alert
-      v-if="auth.mustChangePassword"
-      type="warning"
-      show-icon
-      message="首次登录必须修改初始密码"
-      description="完成修改前，其他财务功能暂不可访问。"
-    />
-
     <a-card class="surface-card password-card" :bordered="false">
       <div class="security-heading">
         <div class="security-icon"><SafetyCertificateOutlined /></div>
