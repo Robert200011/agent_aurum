@@ -1,4 +1,17 @@
 :root {
+  --paper: #f7f2e8;
+  --paper-light: #fffcf6;
+  --apricot-100: #f8ddc7;
+  --apricot-300: #f4c7a1;
+  --orange-400: #efa46b;
+  --orange-600: #c96f45;
+  --graphite-900: #2f2b27;
+  --graphite-700: #514a44;
+  --taupe-500: #85786d;
+  --paper-line: #d9cfc2;
+  --canvas: #e7d2a4;
+  --canvas-light: #f3e5c6;
+  --canvas-deep: #cba76d;
   --ink-950: #071817;
   --ink-900: #0b2522;
   --ink-800: #13332f;
@@ -8,13 +21,12 @@
   --mint-500: #19a08f;
   --mint-100: #dff4ef;
   --gold-500: #d5a23f;
-  --paper: #f5f7f3;
   --surface: #ffffff;
   --line: #dfe7e2;
   --danger: #d84f4f;
   color: var(--ink-900);
   background: var(--paper);
-  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -63,7 +75,7 @@ a {
 .page-heading h1 {
   margin: 0;
   color: var(--ink-950);
-  font-family: 'Iowan Old Style', 'Songti SC', serif;
+  font-family: "Iowan Old Style", "Songti SC", serif;
   font-size: clamp(26px, 3vw, 38px);
   font-weight: 650;
   letter-spacing: -0.025em;

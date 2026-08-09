@@ -15,7 +15,11 @@
   color: white;
   background:
     linear-gradient(145deg, rgb(6 31 28 / 12%), rgb(6 31 28 / 92%)),
-    radial-gradient(circle at 82% 14%, rgb(29 166 141 / 34%), transparent 25rem),
+    radial-gradient(
+      circle at 82% 14%,
+      rgb(29 166 141 / 34%),
+      transparent 25rem
+    ),
     repeating-linear-gradient(
       115deg,
       transparent,
@@ -38,7 +42,7 @@
   box-shadow:
     0 0 0 48px rgb(213 162 63 / 3%),
     0 0 0 96px rgb(213 162 63 / 2%);
-  content: '';
+  content: "";
 }
 
 .story-copy {
@@ -60,7 +64,7 @@
 
 .story-copy h1 {
   margin: 0;
-  font-family: 'Iowan Old Style', 'Songti SC', serif;
+  font-family: "Iowan Old Style", "Songti SC", serif;
   font-size: clamp(44px, 5vw, 72px);
   font-weight: 560;
   letter-spacing: -0.045em;
@@ -91,7 +95,7 @@
 
 .story-metrics strong {
   color: #d8b766;
-  font-family: 'Iowan Old Style', serif;
+  font-family: "Iowan Old Style", serif;
   font-size: 20px;
   font-weight: 500;
 }
@@ -143,7 +147,7 @@
 .form-wrap h2 {
   margin: 0;
   color: var(--ink-950);
-  font-family: 'Iowan Old Style', 'Songti SC', serif;
+  font-family: "Iowan Old Style", "Songti SC", serif;
   font-size: 38px;
   font-weight: 620;
   letter-spacing: -0.03em;
@@ -236,5 +240,265 @@
 
   .form-wrap {
     padding-top: 64px;
+  }
+}
+
+/* The login route uses a two-scene editorial layout; registration keeps the legacy split shell above. */
+.login-page {
+  display: block;
+  min-width: 320px;
+  min-height: 100%;
+  color: var(--graphite-900);
+  background: var(--canvas);
+  overflow-x: clip;
+}
+
+.login-section {
+  position: relative;
+  display: grid;
+  min-height: 100svh;
+  grid-template-columns: minmax(420px, 1fr) minmax(460px, 0.94fr);
+  background:
+    radial-gradient(
+      ellipse 42% 70% at 82% 48%,
+      rgb(255 248 229 / 54%),
+      transparent 76%
+    ),
+    linear-gradient(104deg, rgb(255 241 211 / 12%), rgb(190 139 69 / 7%)),
+    var(--canvas);
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.login-section::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: url("../../assets/auth/ochre-canvas-texture.webp") center / 768px
+    repeat;
+  content: "";
+  mix-blend-mode: multiply;
+  opacity: 0.44;
+  pointer-events: none;
+}
+
+.login-art {
+  position: relative;
+  display: grid;
+  min-height: 100svh;
+  opacity: 0;
+  place-items: center;
+  transform: translateY(20px);
+  transition:
+    opacity 850ms 100ms ease-out,
+    transform 850ms 100ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.login-artwork {
+  display: block;
+  width: min(96%, 720px);
+  height: auto;
+  filter: saturate(0.88) contrast(0.94) sepia(0.05);
+}
+
+.login-form-panel {
+  position: relative;
+  display: grid;
+  min-height: 100svh;
+  padding: clamp(28px, 5vw, 72px);
+  background: transparent;
+  place-items: center;
+}
+
+.login-panel-brand {
+  position: absolute;
+  top: clamp(24px, 4vw, 54px);
+  right: clamp(24px, 5vw, 72px);
+  opacity: 0.62;
+}
+
+.login-form-wrap {
+  width: min(100%, 430px);
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    opacity 750ms 260ms ease-out,
+    transform 750ms 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.login-section.is-visible .login-art,
+.login-section.is-visible .login-form-wrap {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.login-form-wrap .form-kicker {
+  margin-bottom: 13px;
+  color: var(--orange-600);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+}
+
+.login-form-wrap h2 {
+  color: var(--graphite-900);
+  font-family: "Iowan Old Style", "Songti SC", "STSong", serif;
+  font-size: clamp(38px, 4vw, 54px);
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+
+.form-brush-line {
+  display: block;
+  width: 94px;
+  height: 9px;
+  margin: 12px 0 18px 2px;
+  background: var(--orange-600);
+  clip-path: polygon(
+    0 32%,
+    15% 16%,
+    31% 28%,
+    48% 12%,
+    66% 30%,
+    83% 14%,
+    100% 35%,
+    96% 68%,
+    74% 60%,
+    54% 78%,
+    31% 64%,
+    8% 82%,
+    0 66%
+  );
+  opacity: 0.9;
+}
+
+.login-form-wrap > p {
+  margin: 0 0 32px;
+  color: var(--taupe-500);
+  line-height: 1.7;
+}
+
+.login-page .auth-form :deep(.ant-form-item) {
+  margin-bottom: 22px;
+}
+
+.login-page .auth-form :deep(.ant-form-item-label > label) {
+  color: var(--graphite-700);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.login-page .auth-form :deep(.ant-input-affix-wrapper) {
+  min-height: 48px;
+  border: 1px solid var(--paper-line);
+  border-radius: 7px;
+  color: var(--graphite-700);
+  background: rgb(255 252 246 / 72%);
+  box-shadow: none;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.login-page .auth-form :deep(.ant-input-affix-wrapper:hover),
+.login-page .auth-form :deep(.ant-input-affix-wrapper-focused) {
+  border-color: var(--orange-600);
+  background: var(--paper-light);
+  box-shadow: 0 0 0 2px rgb(239 164 107 / 12%);
+}
+
+.login-page .auth-form :deep(.ant-input),
+.login-page .auth-form :deep(.ant-input-password-icon),
+.login-page .auth-form :deep(.anticon) {
+  color: var(--graphite-700);
+  background: transparent;
+}
+
+.login-page .auth-form :deep(.ant-input::placeholder) {
+  color: var(--taupe-500);
+  opacity: 0.7;
+}
+
+.login-page .submit-button {
+  height: 50px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--paper-light);
+  background: var(--orange-600);
+  box-shadow: none;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+.login-page .submit-button:hover,
+.login-page .submit-button:focus-visible {
+  background: var(--orange-400);
+}
+
+.login-page .auth-switch {
+  margin-top: 25px;
+  color: var(--taupe-500);
+}
+
+.login-page .auth-switch a {
+  color: var(--orange-600);
+  text-underline-offset: 4px;
+}
+
+.login-page .security-note {
+  margin-top: 34px;
+  border-top-color: var(--paper-line);
+  color: var(--taupe-500);
+  letter-spacing: 0.05em;
+  opacity: 0.72;
+}
+
+@media (max-width: 900px) {
+  .login-section {
+    display: block;
+  }
+
+  .login-art {
+    display: none;
+  }
+
+  .login-form-panel {
+    min-height: 100svh;
+    padding: 96px clamp(22px, 9vw, 72px) 50px;
+  }
+
+  .login-panel-brand {
+    top: 24px;
+    right: auto;
+    left: clamp(22px, 9vw, 72px);
+    opacity: 0.8;
+  }
+}
+
+@media (max-width: 600px) {
+  .login-form-panel {
+    padding-inline: 20px;
+  }
+
+  .login-panel-brand {
+    left: 20px;
+  }
+
+  .login-form-wrap h2 {
+    font-size: clamp(38px, 12vw, 50px);
+  }
+
+  .login-page .auth-form :deep(.ant-input-affix-wrapper),
+  .login-page .submit-button {
+    min-height: 50px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-art,
+  .login-form-wrap {
+    opacity: 1;
+    transform: none;
+    transition: none;
   }
 }

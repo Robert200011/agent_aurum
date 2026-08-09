@@ -1,26 +1,32 @@
 <script setup lang="ts">
 withDefaults(
   defineProps<{
-    compact?: boolean
-    inverse?: boolean
+    compact?: boolean;
+    inverse?: boolean;
   }>(),
   {
     compact: false,
     inverse: false,
   },
-)
+);
 </script>
 
 <template>
   <div class="brand" :class="{ compact, inverse }">
-    <div class="brand-mark" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-    </div>
+    <svg class="brand-mark" viewBox="0 0 44 44" aria-hidden="true">
+      <path class="brand-orbit" d="M5 25C8 10 22 4 34 12c11 7 8 23-4 28" />
+      <path
+        class="brand-rays"
+        d="m22 3 1 6M8 9l5 5M3 23l7-1M9 36l5-6m16-20 4-5m1 28 5 3"
+      />
+      <path
+        class="brand-sun"
+        d="M15 19c3-7 12-8 16-2 5 7 0 15-8 15-7 0-11-7-8-13Z"
+      />
+    </svg>
     <div v-if="!compact" class="brand-copy">
       <strong>Aurum</strong>
-      <small>FINANCIAL INTELLIGENCE</small>
+      <small>PERSONAL FINANCE, IN FOCUS</small>
     </div>
   </div>
 </template>
@@ -29,8 +35,8 @@ withDefaults(
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  color: var(--ink-950);
+  gap: 10px;
+  color: var(--graphite-900, var(--ink-950));
 }
 
 .brand.inverse {
@@ -38,38 +44,27 @@ withDefaults(
 }
 
 .brand-mark {
-  position: relative;
-  width: 38px;
-  height: 38px;
-  border: 1px solid rgb(213 162 63 / 65%);
-  border-radius: 12px;
-  background: linear-gradient(145deg, #f4d895, #c9912d);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 55%);
-  overflow: hidden;
+  width: 42px;
+  height: 42px;
+  fill: none;
+  stroke: var(--orange-600, #c96f45);
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.brand-mark span {
-  position: absolute;
-  left: 9px;
-  width: 19px;
-  height: 3px;
-  border-radius: 4px;
-  background: #0b302c;
-  transform: rotate(-14deg);
+.brand-orbit {
+  stroke-width: 1.35;
+  opacity: 0.72;
 }
 
-.brand-mark span:nth-child(1) {
-  top: 11px;
+.brand-rays {
+  stroke-width: 1.8;
 }
 
-.brand-mark span:nth-child(2) {
-  top: 18px;
-  width: 15px;
-}
-
-.brand-mark span:nth-child(3) {
-  top: 25px;
-  width: 11px;
+.brand-sun {
+  fill: var(--orange-400, #efa46b);
+  fill-opacity: 0.18;
+  stroke-width: 2;
 }
 
 .brand-copy {
@@ -78,23 +73,31 @@ withDefaults(
 }
 
 .brand-copy strong {
-  font-family: 'Iowan Old Style', Georgia, serif;
-  font-size: 23px;
-  font-weight: 650;
-  letter-spacing: 0.01em;
+  font-family: "Iowan Old Style", Georgia, serif;
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
   line-height: 1;
 }
 
 .brand-copy small {
   color: currentColor;
-  font-size: 8px;
+  font-size: 7px;
   font-weight: 700;
-  letter-spacing: 0.18em;
-  opacity: 0.58;
+  letter-spacing: 0.15em;
+  opacity: 0.62;
 }
 
 .compact .brand-mark {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
+}
+
+.inverse .brand-mark {
+  stroke: #f4c7a1;
+}
+
+.inverse .brand-sun {
+  fill: #efa46b;
 }
 </style>

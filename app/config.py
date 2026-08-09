@@ -154,7 +154,7 @@ class Settings(BaseSettings):
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
     jwt_issuer: str = "aurum-agent"
     jwt_audience: str = "aurum-web"
-    access_token_ttl_minutes: int = Field(default=15, ge=5, le=60)
+    access_token_ttl_minutes: int = Field(default=60, ge=5, le=60)
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
     refresh_token_cookie_name: str = Field(
         default="aurum_refresh_token",
