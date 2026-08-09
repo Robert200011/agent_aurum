@@ -26,6 +26,8 @@ const collapsed = ref(false)
 const mobileOpen = ref(false)
 const isMobile = ref(false)
 const loggingOut = ref(false)
+const logoutConfirmOpen = ref(false)
+const userMenuOpen = ref(false)
 
 const selectedKeys = computed(() => {
   const segments = route.path.split('/').filter(Boolean)
@@ -45,21 +47,30 @@ function navigate(key: string): void {
 }
 
 async function handleUserMenu(event: { key: string }): Promise<void> {
+  userMenuOpen.value = false
+
   if (event.key === 'password') {
     await router.push('/change-password')
     return
   }
 
   if (event.key === 'logout' && !loggingOut.value) {
-    loggingOut.value = true
-    const logoutRequest = auth.logout()
-    try {
-      // logout() 会同步清除本地身份，因此路由可以立即进入登录页。
-      await router.replace('/login')
-    } finally {
-      await logoutRequest
-      loggingOut.value = false
-    }
+    logoutConfirmOpen.value = true
+  }
+}
+
+async function confirmLogout(): Promise<void> {
+  if (loggingOut.value) return
+
+  loggingOut.value = true
+  logoutConfirmOpen.value = false
+  const logoutRequest = auth.logout()
+  try {
+    // logout() 会同步清除本地身份，因此路由可以立即进入登录页。
+    await router.replace('/login')
+  } finally {
+    await logoutRequest
+    loggingOut.value = false
   }
 }
 
@@ -178,7 +189,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <a-dropdown placement="bottomRight">
+        <a-dropdown v-model:open="userMenuOpen" placement="bottomRight">
           <button class="user-trigger" type="button">
             <a-avatar :size="36" class="user-avatar">
               <template #icon><UserOutlined /></template>
@@ -208,6 +219,26 @@ onBeforeUnmount(() => {
         </router-view>
       </a-layout-content>
     </a-layout>
+
+    <a-modal
+      v-model:open="logoutConfirmOpen"
+      centered
+      title="确认退出登录"
+      :width="420"
+      ok-text="是"
+      cancel-text="否"
+      :confirm-loading="loggingOut"
+      :closable="!loggingOut"
+      :keyboard="!loggingOut"
+      :mask-closable="!loggingOut"
+      :ok-button-props="{ danger: true }"
+      :cancel-button-props="{ disabled: loggingOut }"
+      @ok="confirmLogout"
+    >
+      <p class="logout-confirm-copy">
+        确定要退出当前账号吗？退出后需要重新登录才能继续使用 Aurum。
+      </p>
+    </a-modal>
   </a-layout>
 </template>
 
@@ -396,6 +427,12 @@ onBeforeUnmount(() => {
 .app-content {
   min-height: calc(100vh - 72px);
   padding: 30px;
+}
+
+.logout-confirm-copy {
+  margin: 6px 0 0;
+  color: var(--ink-700);
+  line-height: 1.7;
 }
 
 .mobile-brand {
