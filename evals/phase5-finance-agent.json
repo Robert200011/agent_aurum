@@ -1,5 +1,5 @@
 {
-  "version": "p5.6-v1",
+  "version": "p5.7-v1",
   "reference_date": "2026-08-02",
   "thresholds": {
     "deterministic_pass_rate": 1.0,
@@ -102,6 +102,30 @@
       "needs_knowledge": false,
       "risk_policy": "standard",
       "tools": ["search_transactions"]
+    },
+    {
+      "id": "route-finance-latest-expense-purpose",
+      "question": "最近的一次支出用于什么？具体费用是多少？",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_latest_transaction"]
+    },
+    {
+      "id": "route-finance-last-consumption",
+      "question": "当前账户最后一笔消费是多少钱以及用途是什么？",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_latest_transaction"]
+    },
+    {
+      "id": "route-finance-previous-spend",
+      "question": "上一笔花费是什么？",
+      "intent": "finance",
+      "needs_knowledge": false,
+      "risk_policy": "standard",
+      "tools": ["get_latest_transaction"]
     },
     {
       "id": "route-investment-portfolio",

@@ -23,6 +23,7 @@ from app.rag.constants import (
 Environment = Literal["development", "test", "staging", "production"]
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+
 class Settings(BaseSettings):
     """集中管理环境变量，并在配置不安全时阻止应用启动。"""
 
@@ -57,6 +58,7 @@ class Settings(BaseSettings):
     chat_model_max_tokens: int = Field(default=2_048, ge=1, le=65_536)
     chat_model_temperature: float = Field(default=0.1, gt=0.0, lt=2.0)
     chat_model_max_retries: int = Field(default=2, ge=0, le=10)
+    agent_model_planner_enabled: bool = True
     quota_chat_user_requests_per_minute: int = Field(default=10, ge=1, le=10_000)
     quota_chat_global_requests_per_minute: int = Field(default=100, ge=1, le=100_000)
     quota_global_model_requests_per_minute: int = Field(default=200, ge=1, le=1_000_000)
@@ -180,9 +182,7 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     otel_tracing_enabled: bool = False
     otel_service_name: str = Field(default="aurum-agent-api", min_length=1, max_length=128)
-    otel_exporter_otlp_traces_endpoint: str = (
-        "http://127.0.0.1:4318/v1/traces"
-    )
+    otel_exporter_otlp_traces_endpoint: str = "http://127.0.0.1:4318/v1/traces"
     otel_export_timeout_seconds: int = Field(default=5, ge=1, le=30)
 
     @property
@@ -305,9 +305,7 @@ class Settings(BaseSettings):
         if self.langgraph_aes_key is not None:
             checkpoint_key = self.langgraph_aes_key.get_secret_value().encode()
             if len(checkpoint_key) not in {16, 24, 32}:
-                raise ValueError(
-                    "AURUM_LANGGRAPH_AES_KEY must be 16, 24, or 32 bytes long"
-                )
+                raise ValueError("AURUM_LANGGRAPH_AES_KEY must be 16, 24, or 32 bytes long")
 
         if not self.is_production:
             return self

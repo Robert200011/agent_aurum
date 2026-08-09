@@ -24,6 +24,8 @@ from app.agents.tools.finance import (
     HoldingPerformanceRequest,
     IncomeExpenseReportInput,
     IncomeExpenseReportRequest,
+    LatestTransactionInput,
+    LatestTransactionRequest,
     MarketSnapshotInput,
     MarketSnapshotRequest,
     PortfolioSummaryInput,
@@ -62,6 +64,20 @@ _TRANSACTION_MARKERS = (
     "交易记录",
     "收支明细",
     "流水明细",
+)
+_LATEST_TRANSACTION_MARKERS = (
+    "最近一笔",
+    "最近的一笔",
+    "最近一次",
+    "最近的一次",
+    "最新一笔",
+    "最新的一笔",
+    "最后一笔",
+    "最后的一笔",
+    "上一笔",
+    "上一次",
+    "刚才那笔",
+    "刚刚那笔",
 )
 _BUDGET_STATUS_MARKERS = (
     "执行",
@@ -196,9 +212,7 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
     try:
         parsed_range = parse_date_range(normalized, today=today)
         primary_range = (
-            (parsed_range.start_date, parsed_range.end_date)
-            if parsed_range is not None
-            else None
+            (parsed_range.start_date, parsed_range.end_date) if parsed_range is not None else None
         )
     except DateRangeParseError:
         return AgentQuestionPlan(
@@ -208,6 +222,7 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
         )
 
     calls: list[FinanceToolRequest] = []
+    route_reason = "personal_finance_only"
     if high_risk:
         if symbol is not None and "我的" in normalized and "持仓" in normalized:
             calls.append(
@@ -223,9 +238,7 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
             )
         elif any(marker in normalized for marker in _INVESTMENT_MARKERS):
             calls.append(
-                PortfolioSummaryRequest(
-                    arguments=PortfolioSummaryInput(target_currency=currency)
-                )
+                PortfolioSummaryRequest(arguments=PortfolioSummaryInput(target_currency=currency))
             )
         needs_knowledge = _needs_knowledge(normalized)
         return AgentQuestionPlan(
@@ -255,13 +268,9 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
                 clarification="请补充要查询行情的证券代码，例如 AAPL、0700.HK 或 600519。",
             )
         calls.append(
-            MarketSnapshotRequest(
-                arguments=MarketSnapshotInput(symbol=symbol, currency=currency)
-            )
+            MarketSnapshotRequest(arguments=MarketSnapshotInput(symbol=symbol, currency=currency))
         )
-    elif "预算" in normalized and any(
-        marker in normalized for marker in _BUDGET_ADVICE_MARKERS
-    ):
+    elif "预算" in normalized and any(marker in normalized for marker in _BUDGET_ADVICE_MARKERS):
         advice_range = primary_range or (today.replace(day=1), today)
         calls.append(
             BudgetAdviceRequest(
@@ -274,9 +283,7 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
                 )
             )
         )
-    elif "预算" in normalized and any(
-        marker in normalized for marker in _BUDGET_STATUS_MARKERS
-    ):
+    elif "预算" in normalized and any(marker in normalized for marker in _BUDGET_STATUS_MARKERS):
         budget_range = primary_range or (today.replace(day=1), today)
         calls.append(
             BudgetStatusRequest(
@@ -290,8 +297,7 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
         )
     elif any(marker in normalized for marker in _INVESTMENT_MARKERS):
         if symbol is not None and (
-            "持仓" in normalized
-            or any(marker in normalized for marker in _PERFORMANCE_MARKERS)
+            "持仓" in normalized or any(marker in normalized for marker in _PERFORMANCE_MARKERS)
         ):
             calls.append(
                 HoldingPerformanceRequest(
@@ -303,13 +309,9 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
             )
         else:
             calls.append(
-                PortfolioSummaryRequest(
-                    arguments=PortfolioSummaryInput(target_currency=currency)
-                )
+                PortfolioSummaryRequest(arguments=PortfolioSummaryInput(target_currency=currency))
             )
-    elif symbol is not None and any(
-        marker in normalized for marker in _PERFORMANCE_MARKERS
-    ):
+    elif symbol is not None and any(marker in normalized for marker in _PERFORMANCE_MARKERS):
         calls.append(
             HoldingPerformanceRequest(
                 arguments=HoldingPerformanceInput(symbol=symbol, currency=currency)
@@ -317,8 +319,16 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
         )
     elif _is_balance_question(normalized):
         calls.append(
-            AccountBalancesRequest(
-                arguments=AccountBalancesInput(target_currency=currency)
+            AccountBalancesRequest(arguments=AccountBalancesInput(target_currency=currency))
+        )
+    elif _is_latest_transaction_question(normalized):
+        calls.append(
+            LatestTransactionRequest(
+                arguments=LatestTransactionInput(
+                    transaction_type=_transaction_type(normalized),
+                    category=_category(normalized),
+                    currency=currency,
+                )
             )
         )
     elif _is_transaction_question(normalized):
@@ -327,8 +337,7 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
                 intent="clarify",
                 needs_knowledge=False,
                 clarification=(
-                    "请补充要查询的流水时间范围，例如“本月”或"
-                    "“2026-07-01 至 2026-07-31”。"
+                    "请补充要查询的流水时间范围，例如“本月”或“2026-07-01 至 2026-07-31”。"
                 ),
             )
         calls.append(
@@ -342,12 +351,9 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
                 )
             )
         )
-    elif (
-        any(marker in normalized for marker in _ANOMALY_MARKERS)
-        or (
-            any(marker in normalized for marker in ("为什么", "为何"))
-            and any(marker in normalized for marker in ("支出", "消费", "花费"))
-        )
+    elif any(marker in normalized for marker in _ANOMALY_MARKERS) or (
+        any(marker in normalized for marker in ("为什么", "为何"))
+        and any(marker in normalized for marker in ("支出", "消费", "花费"))
     ):
         anomaly_range = primary_range or (today.replace(day=1), today)
         calls.append(
@@ -384,14 +390,13 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
                     start_date=report_range[0],
                     end_date=report_range[1],
                     target_currency=currency,
-                    comparison_start_date=(
-                        comparison.start_date if comparison else None
-                    ),
+                    comparison_start_date=(comparison.start_date if comparison else None),
                     comparison_end_date=(comparison.end_date if comparison else None),
                 )
             )
         )
     else:
+        route_reason = "deterministic_summary_default"
         summary_range = primary_range or (today.replace(day=1), today)
         calls.append(
             FinanceSummaryRequest(
@@ -409,9 +414,7 @@ def plan_agent_question(question: str, *, today: date) -> AgentQuestionPlan:
         needs_knowledge=needs_knowledge,
         finance_calls=tuple(calls),
         route_reason=(
-            "finance_with_explicit_personal_knowledge"
-            if needs_knowledge
-            else "personal_finance_only"
+            "finance_with_explicit_personal_knowledge" if needs_knowledge else route_reason
         ),
     )
 
@@ -443,24 +446,22 @@ def _is_high_risk_investment_question(question: str) -> bool:
 def _is_personal_finance_question(question: str) -> bool:
     if _is_balance_question(question):
         return True
+    if _is_latest_transaction_question(question):
+        return True
     if _is_transaction_question(question):
         has_supported_time = any(marker in question for marker in _TIME_MARKERS) or (
             _EXPLICIT_MONTH_PATTERN.search(question) is not None
         )
-        return has_supported_time or any(
-            marker in question for marker in _PERSONAL_MARKERS
-        )
+        return has_supported_time or any(marker in question for marker in _PERSONAL_MARKERS)
     if "预算" in question and any(
-        marker in question
-        for marker in (*_BUDGET_STATUS_MARKERS, *_BUDGET_ADVICE_MARKERS)
+        marker in question for marker in (*_BUDGET_STATUS_MARKERS, *_BUDGET_ADVICE_MARKERS)
     ):
         return True
     if any(marker in question for marker in _PERSONAL_MARKERS):
         return any(noun in question for noun in _FINANCE_NOUNS)
     if any(marker in question for marker in _INVESTMENT_MARKERS):
         return any(marker in question for marker in _PERSONAL_MARKERS) or any(
-            marker in question
-            for marker in ("投资组合", "资产组合", "投资收益", "浮盈", "浮亏")
+            marker in question for marker in ("投资组合", "资产组合", "投资收益", "浮盈", "浮亏")
         )
     if any(marker in question for marker in _MARKET_MARKERS):
         return _symbol(question) is not None or any(
@@ -482,6 +483,22 @@ def _is_balance_question(question: str) -> bool:
 
 def _is_transaction_question(question: str) -> bool:
     return any(marker in question for marker in _TRANSACTION_MARKERS)
+
+
+def _is_latest_transaction_question(question: str) -> bool:
+    if any(marker in question for marker in _LATEST_TRANSACTION_MARKERS):
+        transaction_nouns = (
+            "支出",
+            "消费",
+            "花费",
+            "交易",
+            "流水",
+            "账单",
+            "收入",
+            "进账",
+        )
+        return any(noun in question for noun in transaction_nouns)
+    return ("用途" in question or "用在" in question) and "最近" in question
 
 
 def _currency(question: str) -> str | None:
@@ -507,7 +524,9 @@ def _category(question: str) -> str | None:
 
 def _transaction_type(question: str) -> TransactionType | None:
     has_income = "收入" in question
-    has_expense = "支出" in question or "消费" in question
+    has_expense = any(
+        marker in question for marker in ("支出", "消费", "花费", "花销", "开销", "花了")
+    )
     if has_income and not has_expense:
         return TransactionType.INCOME
     if has_expense and not has_income:

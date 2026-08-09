@@ -104,7 +104,7 @@ class ChatRunCoordinator:
                         run_id=run.run_id,
                     ),
                 )
-            ]
+            ],
         )
         self._feeds[run.run_id] = feed
         feed.task = asyncio.create_task(
@@ -130,9 +130,7 @@ class ChatRunCoordinator:
         while True:
             async with feed.condition:
                 await feed.condition.wait_for(partial(_feed_ready, feed, cursor))
-                pending = [
-                    event for event in feed.events if event.sequence > cursor
-                ]
+                pending = [event for event in feed.events if event.sequence > cursor]
                 terminal = feed.terminal
                 error = feed.error
             for event in pending:
@@ -210,6 +208,7 @@ class ChatRunCoordinator:
                             context_source_max_characters=(
                                 self._settings.rag_context_source_max_characters
                             ),
+                            model_planner_enabled=(self._settings.agent_model_planner_enabled),
                             finance_timezone=self._settings.finance_timezone,
                             finance_tools=FinanceToolExecutor(
                                 FinanceService(session=session, user_id=user_id),
@@ -250,9 +249,7 @@ class ChatRunCoordinator:
     @staticmethod
     async def _append(feed: _RunFeed, event: ChatAnswerStreamEvent) -> None:
         async with feed.condition:
-            feed.events.append(
-                BufferedChatEvent(sequence=len(feed.events) + 1, event=event)
-            )
+            feed.events.append(BufferedChatEvent(sequence=len(feed.events) + 1, event=event))
             feed.condition.notify_all()
 
 

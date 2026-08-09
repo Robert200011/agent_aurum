@@ -112,6 +112,7 @@ class RagAnswerState(TypedDict, total=False):
     response_mode: Literal["complete", "stream"]
     current_date: date
     plan: AgentQuestionPlan
+    planning_completion: ChatCompletionResult | None
     finance_results: tuple[FinanceToolResult, ...]
     retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
@@ -129,4 +130,5 @@ class RagAnswerUpdate(TypedDict, total=False):
     answer: str
     citations: tuple[TrustedCitation, ...]
     plan: AgentQuestionPlan
+    planning_completion: ChatCompletionResult | None
     finance_results: tuple[FinanceToolResult, ...]

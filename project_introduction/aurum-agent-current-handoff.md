@@ -9,7 +9,7 @@
 Aurum Agent 已完成阶段一至阶段六的工程开发。当前系统包含安全鉴权与租户隔离、个人财务账本、
 知识库入库与 Hybrid Retrieval、可信引用 RAG、SSE/Checkpoint 会话，以及受控编排的
 只读个人财务 Agent。阶段五最终图版本为 `finance-agent-p5.6-v1`，当前加固图版本为
-`finance-agent-p6.3-v1`，迁移头为
+`finance-agent-flex-v1`（保留 P6.3 证据校验并增加受控模型规划与最近一笔流水），迁移头为
 `20260802_0012`。阶段六通过 GitHub PR #11 squash 合并，当前功能基线为 `e8aa6ea`；
 本地 `master` 与 `origin/master` 已对齐，阶段六旧本地分支和 stash 已完成清理。
 
