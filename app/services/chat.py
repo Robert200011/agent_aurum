@@ -431,6 +431,9 @@ class ChatService:
             persisted_run.completed_at = completed_at
             persisted_run.detail = {
                 "intent": result.plan.intent if result.plan is not None else "knowledge",
+                "planner_mode": _planner_mode(result),
+                "route_reason": result.plan.route_reason if result.plan is not None else None,
+                "planner_confidence": (result.plan.confidence if result.plan is not None else None),
                 "retrieval_source": (
                     "hybrid" if result.retrieval.knowledge_base_ids else "not_requested"
                 ),
@@ -438,9 +441,7 @@ class ChatService:
                 "citation_count": len(citations),
                 "embedding_model": result.retrieval.embedding_model,
                 "chat_model": result.completion.model if result.completion else None,
-                "chat_request_id": (
-                    result.completion.request_id if result.completion else None
-                ),
+                "chat_request_id": (result.completion.request_id if result.completion else None),
                 "finish_reason": (
                     result.completion.finish_reason if result.completion else "no_context"
                 ),
@@ -453,9 +454,7 @@ class ChatService:
                 "finance_tool_statuses": [
                     tool_result.status.value for tool_result in result.finance_results
                 ],
-                "risk_policy": (
-                    result.plan.risk_policy if result.plan is not None else "standard"
-                ),
+                "risk_policy": (result.plan.risk_policy if result.plan is not None else "standard"),
                 "risk_notice": _risk_notice(result),
             }
             await self._session.commit()
@@ -783,6 +782,9 @@ class ChatService:
         run.detail = {
             "response_mode": "sse",
             "intent": result.plan.intent if result.plan is not None else "knowledge",
+            "planner_mode": _planner_mode(result),
+            "route_reason": result.plan.route_reason if result.plan is not None else None,
+            "planner_confidence": (result.plan.confidence if result.plan is not None else None),
             "retrieval_source": (
                 "hybrid" if result.retrieval.knowledge_base_ids else "not_requested"
             ),
@@ -790,9 +792,7 @@ class ChatService:
             "citation_count": len(citations),
             "embedding_model": result.retrieval.embedding_model,
             "chat_model": result.completion.model if result.completion else None,
-            "chat_request_id": (
-                result.completion.request_id if result.completion else None
-            ),
+            "chat_request_id": (result.completion.request_id if result.completion else None),
             "finish_reason": (
                 result.completion.finish_reason if result.completion else "no_context"
             ),
@@ -805,9 +805,7 @@ class ChatService:
             "finance_tool_statuses": [
                 tool_result.status.value for tool_result in result.finance_results
             ],
-            "risk_policy": (
-                result.plan.risk_policy if result.plan is not None else "standard"
-            ),
+            "risk_policy": (result.plan.risk_policy if result.plan is not None else "standard"),
             "risk_notice": _risk_notice(result),
         }
         await self._session.commit()
@@ -854,9 +852,7 @@ class ChatService:
             )
         await self._repository.add_all(tool_calls)
         evidence: list[MessageEvidence] = []
-        for result, tool_call, record in zip(
-            typed_results, tool_calls, records, strict=True
-        ):
+        for result, tool_call, record in zip(typed_results, tool_calls, records, strict=True):
             if result.status != FinanceToolStatus.SUCCEEDED or result.data is None:
                 continue
             evidence.append(
@@ -1002,6 +998,16 @@ def _detail_datetime(value: object) -> datetime | None:
 
 def _detail_text(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _planner_mode(result: RagAnswerResult) -> str:
+    if result.plan is None:
+        return "rules"
+    if result.plan.route_reason == "model_structured_plan":
+        return "model"
+    if result.plan.route_reason.startswith("model_planner_"):
+        return "model_fallback"
+    return "rules"
 
 
 def _risk_notice(result: RagAnswerResult) -> str | None:

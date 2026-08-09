@@ -39,6 +39,7 @@ class RagAnswerService:
         context_max_characters: int,
         context_source_max_characters: int,
         finance_tools: FinanceToolExecutor | None = None,
+        model_planner_enabled: bool = False,
         finance_timezone: str = "Asia/Shanghai",
         checkpointer: BaseCheckpointSaver[str] | None = None,
     ) -> None:
@@ -55,6 +56,7 @@ class RagAnswerService:
             context_max_characters=context_max_characters,
             context_source_max_characters=context_source_max_characters,
             finance_tools=finance_tools,
+            model_planner_enabled=model_planner_enabled,
             checkpointer=checkpointer,
         )
 
@@ -132,9 +134,7 @@ class RagAnswerService:
                         "finalizing",
                     }:
                         yield RagAnswerStage(cast(Any, stage))
-                elif event.get("type") == "answer_delta" and isinstance(
-                    event.get("text"), str
-                ):
+                elif event.get("type") == "answer_delta" and isinstance(event.get("text"), str):
                     yield RagAnswerDelta(cast(str, event["text"]))
             elif mode == "values":
                 output = cast(RagAnswerOutput, data)
@@ -190,9 +190,5 @@ def _current_date(timezone_name: str, *, at: datetime | None = None) -> date:
 def _latest_finance_data_time(results: tuple[object, ...]) -> datetime | None:
     from app.agents.tools.finance import FinanceToolResult
 
-    timestamps = [
-        result.data_as_of
-        for result in results
-        if isinstance(result, FinanceToolResult)
-    ]
+    timestamps = [result.data_as_of for result in results if isinstance(result, FinanceToolResult)]
     return max(timestamps) if timestamps else None

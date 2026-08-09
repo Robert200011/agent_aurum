@@ -15,6 +15,7 @@ _TOOL_LABELS = {
     "get_finance_summary": "财务摘要",
     "get_account_balances": "账户余额",
     "search_transactions": "流水查询",
+    "get_latest_transaction": "最近一笔流水",
     "get_income_expense_report": "收支分析",
     "get_budget_status": "预算执行",
     "get_portfolio_summary": "投资组合",
@@ -28,6 +29,7 @@ _CALCULATION_BASES = {
     "get_finance_summary": "按请求区间和原币种确定性汇总收支、余额与预算。",
     "get_account_balances": "按有效账户和原币种汇总；目标币种结果仅使用已记录汇率。",
     "search_transactions": "按白名单条件查询当前用户流水，结果数量受服务器上限约束。",
+    "get_latest_transaction": "按业务日期和创建时间倒序读取当前用户符合条件的最近一笔流水。",
     "get_income_expense_report": "按包含首尾日期的区间聚合收入、支出和分类金额。",
     "get_budget_status": "按预算覆盖区间与请求区间交集计算额度、已用和执行率。",
     "get_portfolio_summary": "以持仓数量、成本和匹配币种的最新行情计算市值及未实现盈亏。",
@@ -72,6 +74,8 @@ _FACT_LABELS = {
     "projected_period_spend": "预计期末支出",
     "projected_overspend": "预计超支",
     "remaining_daily_allowance": "剩余日均可用",
+    "amount": "金额",
+    "transaction_date": "交易日期",
 }
 
 _SENSITIVE_KEYS = {

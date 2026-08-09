@@ -247,13 +247,12 @@ def get_rag_answer_service(
         retrieval_limit=settings.rag_retrieval_limit,
         context_max_characters=settings.rag_context_max_characters,
         context_source_max_characters=settings.rag_context_source_max_characters,
+        model_planner_enabled=settings.agent_model_planner_enabled,
         finance_timezone=settings.finance_timezone,
         finance_tools=FinanceToolExecutor(
             finance_service,
             market_stale_after_hours=settings.finance_market_stale_after_hours,
-            exchange_rate_stale_after_hours=(
-                settings.finance_exchange_rate_stale_after_hours
-            ),
+            exchange_rate_stale_after_hours=(settings.finance_exchange_rate_stale_after_hours),
         ),
     )
 

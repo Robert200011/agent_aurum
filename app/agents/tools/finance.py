@@ -42,6 +42,7 @@ class FinanceToolName(StrEnum):
     GET_FINANCE_SUMMARY = "get_finance_summary"
     GET_ACCOUNT_BALANCES = "get_account_balances"
     SEARCH_TRANSACTIONS = "search_transactions"
+    GET_LATEST_TRANSACTION = "get_latest_transaction"
     GET_INCOME_EXPENSE_REPORT = "get_income_expense_report"
     GET_BUDGET_STATUS = "get_budget_status"
     GET_PORTFOLIO_SUMMARY = "get_portfolio_summary"
@@ -131,6 +132,28 @@ class TransactionSearchInput(BaseModel):
         if self.end_date < self.start_date:
             raise ValueError("end_date must not be earlier than start_date")
         return self
+
+
+class LatestTransactionInput(BaseModel):
+    """查询当前用户符合条件的最近一笔流水，不要求人为补充日期范围。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    account_id: UUID | None = None
+    transaction_type: TransactionType | None = None
+    category: str | None = Field(default=None, min_length=1, max_length=128)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+
+    @field_validator("category")
+    @classmethod
+    def normalize_optional_category(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value is not None else None
+        return normalized or None
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_optional_currency(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value is not None else None
 
 
 class IncomeExpenseReportInput(DateRangeInput):
@@ -284,28 +307,29 @@ class BudgetAdviceInput(DateRangeInput):
 class FinanceSummaryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: Literal[FinanceToolName.GET_FINANCE_SUMMARY] = (
-        FinanceToolName.GET_FINANCE_SUMMARY
-    )
+    name: Literal[FinanceToolName.GET_FINANCE_SUMMARY] = FinanceToolName.GET_FINANCE_SUMMARY
     arguments: FinanceSummaryInput
 
 
 class AccountBalancesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: Literal[FinanceToolName.GET_ACCOUNT_BALANCES] = (
-        FinanceToolName.GET_ACCOUNT_BALANCES
-    )
+    name: Literal[FinanceToolName.GET_ACCOUNT_BALANCES] = FinanceToolName.GET_ACCOUNT_BALANCES
     arguments: AccountBalancesInput
 
 
 class TransactionSearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: Literal[FinanceToolName.SEARCH_TRANSACTIONS] = (
-        FinanceToolName.SEARCH_TRANSACTIONS
-    )
+    name: Literal[FinanceToolName.SEARCH_TRANSACTIONS] = FinanceToolName.SEARCH_TRANSACTIONS
     arguments: TransactionSearchInput
+
+
+class LatestTransactionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: Literal[FinanceToolName.GET_LATEST_TRANSACTION] = FinanceToolName.GET_LATEST_TRANSACTION
+    arguments: LatestTransactionInput
 
 
 class IncomeExpenseReportRequest(BaseModel):
@@ -320,36 +344,28 @@ class IncomeExpenseReportRequest(BaseModel):
 class BudgetStatusRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: Literal[FinanceToolName.GET_BUDGET_STATUS] = (
-        FinanceToolName.GET_BUDGET_STATUS
-    )
+    name: Literal[FinanceToolName.GET_BUDGET_STATUS] = FinanceToolName.GET_BUDGET_STATUS
     arguments: BudgetStatusInput
 
 
 class PortfolioSummaryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: Literal[FinanceToolName.GET_PORTFOLIO_SUMMARY] = (
-        FinanceToolName.GET_PORTFOLIO_SUMMARY
-    )
+    name: Literal[FinanceToolName.GET_PORTFOLIO_SUMMARY] = FinanceToolName.GET_PORTFOLIO_SUMMARY
     arguments: PortfolioSummaryInput
 
 
 class HoldingPerformanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: Literal[FinanceToolName.GET_HOLDING_PERFORMANCE] = (
-        FinanceToolName.GET_HOLDING_PERFORMANCE
-    )
+    name: Literal[FinanceToolName.GET_HOLDING_PERFORMANCE] = FinanceToolName.GET_HOLDING_PERFORMANCE
     arguments: HoldingPerformanceInput
 
 
 class MarketSnapshotRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: Literal[FinanceToolName.GET_MARKET_SNAPSHOT] = (
-        FinanceToolName.GET_MARKET_SNAPSHOT
-    )
+    name: Literal[FinanceToolName.GET_MARKET_SNAPSHOT] = FinanceToolName.GET_MARKET_SNAPSHOT
     arguments: MarketSnapshotInput
 
 
@@ -365,9 +381,7 @@ class ExpenseAnomalyRequest(BaseModel):
 class BudgetAdviceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: Literal[FinanceToolName.GET_BUDGET_ADVICE] = (
-        FinanceToolName.GET_BUDGET_ADVICE
-    )
+    name: Literal[FinanceToolName.GET_BUDGET_ADVICE] = FinanceToolName.GET_BUDGET_ADVICE
     arguments: BudgetAdviceInput
 
 
@@ -375,6 +389,7 @@ type FinanceToolRequest = Annotated[
     FinanceSummaryRequest
     | AccountBalancesRequest
     | TransactionSearchRequest
+    | LatestTransactionRequest
     | IncomeExpenseReportRequest
     | BudgetStatusRequest
     | PortfolioSummaryRequest
@@ -486,6 +501,12 @@ class TransactionSearchData(BaseModel):
     returned_count: int = Field(ge=0)
     total_count: int = Field(ge=0)
     truncated: bool
+
+
+class LatestTransactionData(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    transaction: TransactionData | None
 
 
 class CategoryCashFlowData(BaseModel):
@@ -761,6 +782,7 @@ type FinanceToolData = (
     FinanceSummaryData
     | AccountBalancesData
     | TransactionSearchData
+    | LatestTransactionData
     | IncomeExpenseReportData
     | BudgetStatusData
     | PortfolioSummaryData
@@ -773,6 +795,7 @@ type FinanceToolArguments = (
     FinanceSummaryInput
     | AccountBalancesInput
     | TransactionSearchInput
+    | LatestTransactionInput
     | IncomeExpenseReportInput
     | BudgetStatusInput
     | PortfolioSummaryInput
@@ -847,9 +870,7 @@ class FinanceToolExecutor:
             raise ValueError("exchange_rate_stale_after_hours must be positive")
         self._service = service
         self._market_stale_after = timedelta(hours=market_stale_after_hours)
-        self._exchange_rate_stale_after = timedelta(
-            hours=exchange_rate_stale_after_hours
-        )
+        self._exchange_rate_stale_after = timedelta(hours=exchange_rate_stale_after_hours)
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def execute_many(
@@ -865,13 +886,9 @@ class FinanceToolExecutor:
         observed_started = perf_counter()
         with start_span("finance.tool", tool=request.name.value):
             result = await self._execute_safely(request)
-        outcome = (
-            "success" if result.status == FinanceToolStatus.SUCCEEDED else "error"
-        )
+        outcome = "success" if result.status == FinanceToolStatus.SUCCEEDED else "error"
         TOOL_REQUESTS.labels(tool=request.name.value, outcome=outcome).inc()
-        TOOL_DURATION.labels(tool=request.name.value).observe(
-            perf_counter() - observed_started
-        )
+        TOOL_DURATION.labels(tool=request.name.value).observe(perf_counter() - observed_started)
         return result
 
     async def _execute_safely(self, request: FinanceToolRequest) -> FinanceToolResult:
@@ -958,9 +975,7 @@ class FinanceToolExecutor:
                 )
                 for currency in currencies
             ]
-            summary_groups = tuple(
-                _finance_summary_group(summary) for summary in summaries
-            )
+            summary_groups = tuple(_finance_summary_group(summary) for summary in summaries)
             rates, evidence, warnings = await self._conversion_rates(
                 currencies,
                 request.arguments.target_currency,
@@ -1033,10 +1048,7 @@ class FinanceToolExecutor:
                     converted_total=(
                         _money(
                             sum(
-                                (
-                                    balance * rates[currency]
-                                    for currency, balance in totals.items()
-                                ),
+                                (balance * rates[currency] for currency, balance in totals.items()),
                                 Decimal("0"),
                             )
                         )
@@ -1094,6 +1106,50 @@ class FinanceToolExecutor:
                 if transaction_page.total > len(transaction_page.items)
                 else (),
             )
+        if isinstance(request, LatestTransactionRequest):
+            transaction_page = await self._service.list_transactions(
+                account_id=request.arguments.account_id,
+                transaction_type=(
+                    request.arguments.transaction_type.value
+                    if request.arguments.transaction_type is not None
+                    else None
+                ),
+                category=request.arguments.category,
+                start_date=None,
+                end_date=None,
+                currency=request.arguments.currency,
+                search=None,
+                page=1,
+                page_size=1,
+            )
+            item = transaction_page.items[0] if transaction_page.items else None
+            return (
+                LatestTransactionData(
+                    transaction=(
+                        TransactionData(
+                            transaction_id=item.id,
+                            account_id=item.account_id,
+                            transaction_type=item.transaction_type,
+                            amount=item.amount,
+                            currency=item.currency,
+                            category=item.category,
+                            description=(item.description[:200] if item.description else None),
+                            transaction_date=item.transaction_date,
+                        )
+                        if item is not None
+                        else None
+                    )
+                ),
+                self._clock(),
+                (
+                    FinanceToolWarning(
+                        code="transaction_not_found",
+                        message="no transaction matches the requested filters",
+                    ),
+                )
+                if item is None
+                else (),
+            )
         if isinstance(request, IncomeExpenseReportRequest):
             report_currencies = set(
                 await self._service.cash_flow_currencies(
@@ -1128,9 +1184,7 @@ class FinanceToolExecutor:
                 IncomeExpenseCurrencyReportData(
                     period=_period_data(report.period),
                     comparison=(
-                        _period_data(report.comparison)
-                        if report.comparison is not None
-                        else None
+                        _period_data(report.comparison) if report.comparison is not None else None
                     ),
                 )
                 for report in income_reports
@@ -1175,9 +1229,7 @@ class FinanceToolExecutor:
                 )
                 for currency in currencies
             ]
-            budget_groups = tuple(
-                _budget_status_group(report) for report in budget_reports
-            )
+            budget_groups = tuple(_budget_status_group(report) for report in budget_reports)
             rates, evidence, conversion_warnings = await self._conversion_rates(
                 currencies,
                 request.arguments.target_currency,
@@ -1290,22 +1342,16 @@ class FinanceToolExecutor:
                 )
             return (
                 HoldingPerformanceResultData(
-                    holdings=tuple(
-                        _holding_data(item) for item in holding_report.holdings
-                    ),
+                    holdings=tuple(_holding_data(item) for item in holding_report.holdings),
                     returned_count=len(holding_report.holdings),
                     total_count=holding_report.total_count,
-                    truncated=(
-                        holding_report.total_count > len(holding_report.holdings)
-                    ),
+                    truncated=(holding_report.total_count > len(holding_report.holdings)),
                 ),
                 holding_report.data_as_of,
                 tuple(holding_warnings),
             )
         if isinstance(request, ExpenseAnomalyRequest):
-            window_days = (
-                request.arguments.end_date - request.arguments.start_date
-            ).days + 1
+            window_days = (request.arguments.end_date - request.arguments.start_date).days + 1
             history_start = request.arguments.start_date - timedelta(
                 days=window_days * request.arguments.history_window_count
             )
@@ -1324,17 +1370,14 @@ class FinanceToolExecutor:
                 )
                 for currency in currencies
             ]
-            anomaly_groups = tuple(
-                _expense_anomaly_group(report) for report in anomaly_reports
-            )
+            anomaly_groups = tuple(_expense_anomaly_group(report) for report in anomaly_reports)
             rates, evidence, conversion_warnings = await self._conversion_rates(
                 currencies,
                 request.arguments.target_currency,
             )
             anomaly_warnings = list(conversion_warnings)
             if not anomaly_groups or all(
-                group.current_total == 0 and group.comparison_total == 0
-                for group in anomaly_groups
+                group.current_total == 0 and group.comparison_total == 0 for group in anomaly_groups
             ):
                 anomaly_warnings.append(
                     FinanceToolWarning(
@@ -1413,9 +1456,7 @@ class FinanceToolExecutor:
                 )
                 for currency in currencies
             ]
-            advice_groups = tuple(
-                _budget_advice_group(report) for report in advice_reports
-            )
+            advice_groups = tuple(_budget_advice_group(report) for report in advice_reports)
             rates, evidence, conversion_warnings = await self._conversion_rates(
                 currencies,
                 request.arguments.target_currency,
@@ -1559,9 +1600,7 @@ class FinanceToolExecutor:
                 observed_at=quote.observed_at,
             )
             evidence.append(rate_data)
-            if quote.observed_at is not None and self._is_exchange_rate_stale(
-                quote.observed_at
-            ):
+            if quote.observed_at is not None and self._is_exchange_rate_stale(quote.observed_at):
                 warnings.append(
                     FinanceToolWarning(
                         code="exchange_rate_stale",
@@ -1601,9 +1640,7 @@ class FinanceToolExecutor:
                     )
                 )
             else:
-                warnings.extend(
-                    self._price_warnings(item.symbol, item.price_recorded_at)
-                )
+                warnings.extend(self._price_warnings(item.symbol, item.price_recorded_at))
             if item.cost_value == 0 and item.current_price is not None:
                 warnings.append(
                     FinanceToolWarning(
@@ -1728,9 +1765,7 @@ def _portfolio_group(portfolio: object, holding_limit: int) -> PortfolioCurrency
         total_cost_value=portfolio.total_cost_value,
         total_market_value=portfolio.total_market_value,
         total_unrealized_gain=portfolio.total_unrealized_gain,
-        complete_market_data=all(
-            item.current_price is not None for item in portfolio.holdings
-        ),
+        complete_market_data=all(item.current_price is not None for item in portfolio.holdings),
         holding_count=len(portfolio.holdings),
         returned_count=len(visible),
         holdings=tuple(_holding_data(item) for item in visible),
@@ -2059,12 +2094,8 @@ def _convert_budget_advice_group(
                             projection.historical_period_median,
                             rate,
                         ),
-                        "projected_period_spend": _money(
-                            projection.projected_period_spend * rate
-                        ),
-                        "projected_overspend": _money(
-                            projection.projected_overspend * rate
-                        ),
+                        "projected_period_spend": _money(projection.projected_period_spend * rate),
+                        "projected_overspend": _money(projection.projected_overspend * rate),
                         "remaining_daily_allowance": _optional_money(
                             projection.remaining_daily_allowance,
                             rate,
@@ -2084,10 +2115,7 @@ def _converted_sum(
 ) -> Decimal:
     return _money(
         sum(
-            (
-                Decimal(getattr(group, field)) * rates[str(group.currency)]
-                for group in groups
-            ),
+            (Decimal(getattr(group, field)) * rates[str(group.currency)] for group in groups),
             Decimal("0"),
         )
     )
