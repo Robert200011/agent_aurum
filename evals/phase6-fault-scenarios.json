@@ -1,5 +1,5 @@
 {
-  "version": "p6.3-faults-v1",
+  "version": "p6.3-faults-v2",
   "thresholds": {
     "minimum_required_fault_coverage": 1.0
   },
@@ -17,22 +17,22 @@
       "expected_outcome": "safe retryable provider error without response leakage"
     },
     {
-      "id": "fault-stream-cancel-releases-run",
+      "id": "fault-stream-cancel-stops-background-run",
       "fault": "stream_cancel",
-      "automated_check": "tests/unit/test_chat_service.py::test_stream_cancellation_marks_message_and_run_cancelled",
-      "expected_outcome": "cancelled terminal state and concurrent lease release"
+      "automated_check": "tests/unit/test_chat_service.py::test_stream_cancellation_stops_background_run",
+      "expected_outcome": "explicit cancellation stops the background model task"
     },
     {
-      "id": "fault-cache-publish-state-revalidation",
+      "id": "fault-cache-privacy-boundary",
       "fault": "cache_invalidation",
-      "automated_check": "tests/unit/test_project_retrieval.py::test_project_cache_hit_revalidates_chunks_and_skips_expensive_providers",
-      "expected_outcome": "PostgreSQL scope/version revalidation before cached chunks are returned"
+      "automated_check": "tests/unit/test_phase6_quota_and_cache.py::test_retrieval_cache_contains_only_identifiers_scores_and_algorithm_state",
+      "expected_outcome": "cache stores only identifiers, scores and algorithm state"
     },
     {
       "id": "fault-reranker-provider-degradation",
       "fault": "provider_degradation",
-      "automated_check": "tests/unit/test_project_retrieval.py::test_project_retrieval_falls_back_to_rrf_when_reranker_fails",
-      "expected_outcome": "deterministic RRF fallback with safe diagnostic code"
+      "automated_check": "tests/unit/test_dashscope_reranker.py::test_provider_status_error_is_safely_classified",
+      "expected_outcome": "reranker provider errors receive safe retryability classification"
     }
   ]
 }

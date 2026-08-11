@@ -37,7 +37,6 @@ from app.agents.tools.finance import (
     TransactionSearchInput,
     TransactionSearchRequest,
 )
-from app.finance.time_ranges import previous_month
 from app.finance.types import TransactionType
 from app.providers.model_provider import ChatToolDefinition
 
@@ -312,7 +311,7 @@ def resolve_time_range(value: SemanticRangeInput, *, today: date) -> tuple[date,
         case TimeScope.MONTH_TO_DATE:
             return today.replace(day=1), today
         case TimeScope.PREVIOUS_MONTH:
-            return previous_month(today)
+            return _previous_month(today)
         case TimeScope.QUARTER_TO_DATE:
             quarter_month = ((today.month - 1) // 3) * 3 + 1
             return today.replace(month=quarter_month, day=1), today
@@ -466,7 +465,7 @@ def _comparison_range(
     if mode == ComparisonMode.NONE:
         return None, None
     if mode == ComparisonMode.PREVIOUS_MONTH:
-        return previous_month(start)
+        return _previous_month(start)
     if mode == ComparisonMode.PREVIOUS_PERIOD:
         duration = end - start + timedelta(days=1)
         comparison_end = start - timedelta(days=1)
@@ -478,6 +477,12 @@ def _shift_year(value: date, years: int) -> date:
     target_year = value.year + years
     target_day = min(value.day, calendar.monthrange(target_year, value.month)[1])
     return value.replace(year=target_year, day=target_day)
+
+
+def _previous_month(reference: date) -> tuple[date, date]:
+    current_month_start = reference.replace(day=1)
+    end_date = current_month_start - timedelta(days=1)
+    return end_date.replace(day=1), end_date
 
 
 _FINANCE_CAPABILITIES = (

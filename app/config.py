@@ -58,8 +58,6 @@ class Settings(BaseSettings):
     chat_model_max_tokens: int = Field(default=2_048, ge=1, le=65_536)
     chat_model_temperature: float = Field(default=0.1, gt=0.0, lt=2.0)
     chat_model_max_retries: int = Field(default=2, ge=0, le=10)
-    agent_model_planner_enabled: bool = True
-    capability_agent_enabled: bool = True
     capability_agent_max_steps: int = Field(default=3, ge=1, le=6)
     capability_agent_max_tool_calls: int = Field(default=6, ge=1, le=20)
     capability_agent_history_messages: int = Field(default=8, ge=0, le=20)

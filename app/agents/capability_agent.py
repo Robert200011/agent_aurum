@@ -16,7 +16,7 @@ from app.agents.capabilities import (
     DirectResponseCapabilityInput,
     KnowledgeSearchCapabilityInput,
 )
-from app.agents.policies.finance_planner import AgentQuestionPlan
+from app.agents.contracts import AgentQuestionPlan
 from app.agents.policies.investment_risk import investment_risk_policy
 from app.agents.policies.rag_prompt import (
     build_answer_messages,

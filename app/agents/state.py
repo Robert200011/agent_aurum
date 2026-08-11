@@ -7,7 +7,7 @@ from datetime import date, datetime
 from typing import Literal, TypedDict
 from uuid import UUID
 
-from app.agents.policies.finance_planner import AgentQuestionPlan
+from app.agents.contracts import AgentQuestionPlan
 from app.agents.tools.finance import FinanceToolResult
 from app.providers.model_provider import ChatCompletionResult
 from app.rag.citations.structured import TrustedCitation
@@ -118,7 +118,6 @@ class RagAnswerState(TypedDict, total=False):
     current_date: date
     history: list[dict[str, str]]
     plan: AgentQuestionPlan
-    planning_completion: ChatCompletionResult | None
     finance_results: tuple[FinanceToolResult, ...]
     retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
@@ -138,7 +137,6 @@ class RagAnswerUpdate(TypedDict, total=False):
     answer: str
     citations: tuple[TrustedCitation, ...]
     plan: AgentQuestionPlan
-    planning_completion: ChatCompletionResult | None
     finance_results: tuple[FinanceToolResult, ...]
     capability_decision_steps: int
     capability_call_count: int
