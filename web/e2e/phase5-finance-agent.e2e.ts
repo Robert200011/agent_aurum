@@ -18,7 +18,7 @@ test('真实财务 Agent 与混合回答浏览器冒烟', async ({ page }) => {
   await page.getByLabel('确认密码', { exact: true }).fill(password)
   await page.getByRole('button', { name: '创建并进入工作台' }).click()
   await expect(page).toHaveURL('/')
-  await expect(page.getByRole('heading', { name: /你的财务全景/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: new RegExp(username) })).toBeVisible()
 
   const seed = await page.evaluate(async (): Promise<SeedResult> => {
     const stored = localStorage.getItem('aurum.auth.tokens')
@@ -108,6 +108,6 @@ test('真实财务 Agent 与混合回答浏览器冒烟', async ({ page }) => {
   )
   await page.getByRole('button', { name: '发送问题' }).click()
   await expect(page.locator('.finance-evidence')).toHaveCount(4, { timeout: 180_000 })
-  await expect(page.getByText('知识库依据').last()).toBeVisible()
+  await expect(page.getByText('参考依据').last()).toBeVisible()
   await expect(page.locator('.message-sources button').last()).toBeVisible()
 })

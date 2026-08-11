@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  ArrowLeftOutlined,
   DeleteOutlined,
   EditOutlined,
   FileSearchOutlined,
@@ -33,6 +34,10 @@ import type {
 import { citationLocation } from '@/utils/chat'
 
 dayjs.extend(relativeTime)
+
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
+  embedded: false,
+})
 
 const loading = ref(true)
 const detailLoading = ref(false)
@@ -78,7 +83,28 @@ const generationStatusText = computed(() => {
   if (generationStage.value === 'analyzing') return '正在分析财务证据和知识依据'
   if (generationStage.value === 'generating') return '正在生成回答'
   if (generationStage.value === 'finalizing') return '正在校验引用并保存'
-  return '正在检索个人知识库'
+  return '正在检索参考资料'
+})
+const conversationGroups = computed(() => {
+  const groups = [
+    { key: 'today', label: '今天', items: [] as Conversation[] },
+    { key: 'week', label: '过去 7 天', items: [] as Conversation[] },
+    { key: 'older', label: '更早', items: [] as Conversation[] },
+  ]
+  const today = dayjs().startOf('day')
+
+  for (const conversation of conversations.value) {
+    const updatedAt = dayjs(conversation.updated_at)
+    if (updatedAt.isAfter(today) || updatedAt.isSame(today)) {
+      groups[0]?.items.push(conversation)
+    } else if (updatedAt.isAfter(today.subtract(7, 'day'))) {
+      groups[1]?.items.push(conversation)
+    } else {
+      groups[2]?.items.push(conversation)
+    }
+  }
+
+  return groups.filter((group) => group.items.length)
 })
 
 function displayAnswer(content: string, riskNotice: string | null): string {
@@ -91,7 +117,7 @@ async function loadWorkspace(): Promise<void> {
   try {
     const conversationList = await chatApi.listConversations(conversationSearch.value)
     conversations.value = conversationList.items
-    if (conversations.value[0]) {
+    if (!props.embedded && conversations.value[0]) {
       await selectConversation(conversations.value[0].id)
     }
   } catch (error) {
@@ -163,6 +189,29 @@ async function recoverRunningAnswer(conversationId: string): Promise<void> {
 function openCreate(): void {
   createTitle.value = ''
   createOpen.value = true
+}
+
+async function startNewConversation(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
+  try {
+    const created = await chatApi.createConversation()
+    await refreshConversations()
+    await selectConversation(created.id, false)
+  } catch (error) {
+    message.error(apiErrorMessage(error, '新会话创建失败'))
+  } finally {
+    saving.value = false
+  }
+}
+
+function showConversationHistory(): void {
+  if (sending.value) {
+    message.info('回答生成完成后即可返回会话列表')
+    return
+  }
+  activeConversation.value = null
+  errorText.value = ''
 }
 
 async function createConversation(): Promise<void> {
@@ -247,7 +296,7 @@ function deleteConversation(): void {
         await chatApi.deleteConversation(conversationId)
         activeConversation.value = null
         await refreshConversations()
-        if (conversations.value[0]) {
+        if (!props.embedded && conversations.value[0]) {
           await selectConversation(conversations.value[0].id)
         }
         message.success('会话已删除')
@@ -439,12 +488,12 @@ onMounted(loadWorkspace)
 </script>
 
 <template>
-  <div class="chat-page">
-    <div class="page-heading chat-heading">
+  <div class="chat-page" :class="{ 'is-embedded': embedded }">
+    <div v-if="!embedded" class="page-heading chat-heading">
       <div>
         <span class="heading-kicker">ROUTED ASSISTANT</span>
         <h1>智能问答</h1>
-        <p>每轮问题按需选择直接回答、个人财务工具或个人知识库，并保留可核验引用。</p>
+        <p>每轮问题按需选择直接回答或个人财务工具，并保留可核验依据。</p>
       </div>
       <a-button
         type="primary"
@@ -455,9 +504,42 @@ onMounted(loadWorkspace)
       </a-button>
     </div>
 
-    <section class="chat-workspace surface-card">
+    <section
+      class="chat-workspace"
+      :class="{ 'surface-card': !embedded, 'has-active-chat': activeConversation }"
+    >
       <aside class="conversation-panel">
-        <div class="panel-heading">
+        <template v-if="embedded">
+          <div class="embedded-options">
+            <span class="embedded-section-label">更多选项</span>
+            <button
+              type="button"
+              :disabled="saving"
+              @click="startNewConversation"
+            >
+              <PlusOutlined />
+              <span>新建会话</span>
+              <b>›</b>
+            </button>
+            <button type="button" @click="openCreate">
+              <UserOutlined />
+              <span>自定义会话名称</span>
+              <b>›</b>
+            </button>
+          </div>
+          <div class="embedded-recents-heading">
+            <span class="embedded-section-label">最近会话</span>
+            <a-button
+              type="text"
+              aria-label="刷新会话"
+              :loading="loading"
+              @click="refreshConversations"
+            >
+              <ReloadOutlined />
+            </a-button>
+          </div>
+        </template>
+        <div v-else class="panel-heading">
           <div>
             <span>CONVERSATIONS</span>
             <strong>我的会话</strong>
@@ -471,7 +553,7 @@ onMounted(loadWorkspace)
             <ReloadOutlined />
           </a-button>
         </div>
-        <div class="conversation-search">
+        <div v-if="!embedded" class="conversation-search">
           <a-input
             v-model:value="conversationSearch"
             allow-clear
@@ -485,31 +567,43 @@ onMounted(loadWorkspace)
 
         <a-skeleton :loading="loading" active :paragraph="{ rows: 5 }">
           <div v-if="conversations.length" class="conversation-list">
-            <button
-              v-for="conversation in conversations"
-              :key="conversation.id"
-              type="button"
-              :class="[
-                'conversation-item',
-                {
-                  active: activeConversation?.id === conversation.id,
-                  archived: conversation.status === 'archived',
-                },
-              ]"
-              :disabled="sending"
-              @click="selectConversation(conversation.id)"
+            <section
+              v-for="group in conversationGroups"
+              :key="group.key"
+              class="conversation-group"
             >
-              <span class="conversation-icon"><MessageOutlined /></span>
-              <span class="conversation-copy">
-                <strong>{{ conversation.title }}</strong>
-                <small>动态路由</small>
-                <time>{{ dayjs(conversation.updated_at).fromNow() }}</time>
-              </span>
-              <InboxOutlined
-                v-if="conversation.status === 'archived'"
-                class="archive-mark"
-              />
-            </button>
+              <span class="conversation-group-label">{{ group.label }}</span>
+              <button
+                v-for="conversation in group.items"
+                :key="conversation.id"
+                type="button"
+                :class="[
+                  'conversation-item',
+                  {
+                    active: activeConversation?.id === conversation.id,
+                    archived: conversation.status === 'archived',
+                  },
+                ]"
+                :disabled="sending"
+                @click="selectConversation(conversation.id)"
+              >
+                <span v-if="!embedded" class="conversation-icon">
+                  <MessageOutlined />
+                </span>
+                <span class="conversation-copy">
+                  <strong>{{ conversation.title }}</strong>
+                  <template v-if="!embedded">
+                    <small>智能财务问答</small>
+                    <time>{{ dayjs(conversation.updated_at).fromNow() }}</time>
+                  </template>
+                </span>
+                <InboxOutlined
+                  v-if="conversation.status === 'archived'"
+                  class="archive-mark"
+                />
+                <span v-else-if="embedded" class="conversation-more">⋮</span>
+              </button>
+            </section>
           </div>
           <a-empty
             v-else
@@ -519,7 +613,7 @@ onMounted(loadWorkspace)
           >
             <a-button
               type="link"
-              @click="openCreate"
+              @click="embedded ? startNewConversation() : openCreate()"
             >
               创建第一个会话
             </a-button>
@@ -532,6 +626,16 @@ onMounted(loadWorkspace)
           <header class="message-header">
             <div>
               <div class="title-row">
+                <a-button
+                  v-if="embedded"
+                  type="text"
+                  class="history-back"
+                  aria-label="返回会话列表"
+                  :disabled="sending"
+                  @click="showConversationHistory"
+                >
+                  <ArrowLeftOutlined />
+                </a-button>
                 <strong>{{ activeConversation.title }}</strong>
                 <a-tag
                   :color="
@@ -545,7 +649,7 @@ onMounted(loadWorkspace)
               </div>
               <span>
                 <RobotOutlined />
-                按需使用个人知识
+                个人财务数据按需调用
               </span>
             </div>
             <div class="header-actions">
@@ -591,10 +695,10 @@ onMounted(loadWorkspace)
               class="welcome-state"
             >
               <div class="welcome-icon"><RobotOutlined /></div>
-              <span>知识库仅在问题需要时启用</span>
-              <h2>从项目知识中寻找答案</h2>
+              <span>AURUM AI AGENT</span>
+              <h2>今天想了解什么？</h2>
               <p>
-                可询问文档中的事实、规则或说明。回答后的引用编号可以点击核验。
+                可以询问收支、预算与投资情况；重要结论会保留可核验依据。
               </p>
             </div>
 
@@ -710,7 +814,7 @@ onMounted(loadWorkspace)
                   "
                   class="message-sources"
                 >
-                  <span>知识库依据</span>
+                  <span>参考依据</span>
                   <button
                     v-for="citation in chatMessage.citations"
                     :key="citation.chunk_id"
@@ -790,7 +894,7 @@ onMounted(loadWorkspace)
                       v-if="streamingCitations.length"
                       class="message-sources"
                     >
-                      <span>知识库依据</span>
+                      <span>参考依据</span>
                       <button
                         v-for="citation in streamingCitations"
                         :key="citation.chunk_id"
@@ -836,7 +940,7 @@ onMounted(loadWorkspace)
                 :auto-size="{ minRows: 2, maxRows: 6 }"
                 :maxlength="2000"
                 :disabled="sending"
-                placeholder="输入问题，例如：这份制度对费用报销有哪些要求？"
+                placeholder="问问 Aurum，例如：我这个月的主要支出是什么？"
                 @keydown="handleComposerKeydown"
               />
               <div class="composer-actions">
@@ -1508,6 +1612,347 @@ onMounted(loadWorkspace)
   background: #f7f8f4;
   line-height: 1.8;
   white-space: pre-wrap;
+}
+
+.chat-page.is-embedded {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  gap: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.is-embedded .chat-workspace {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.is-embedded .conversation-panel,
+.is-embedded .message-panel {
+  min-width: 0;
+  min-height: 0;
+  grid-area: 1 / 1;
+}
+
+.is-embedded .conversation-panel {
+  border: 0;
+  background: #ffffff;
+  overflow-y: auto;
+}
+
+.is-embedded .chat-workspace.has-active-chat .conversation-panel,
+.is-embedded .chat-workspace:not(.has-active-chat) .message-panel {
+  display: none;
+}
+
+.embedded-options {
+  padding: 18px 14px 8px;
+}
+
+.embedded-section-label,
+.conversation-group-label {
+  display: block;
+  color: #a1a1a8;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.embedded-options > .embedded-section-label {
+  margin: 0 0 12px 3px;
+}
+
+.embedded-options button {
+  display: grid;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #ececee;
+  color: #323237;
+  background: #ffffff;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
+
+.embedded-options button:first-of-type {
+  border-radius: 8px 8px 0 0;
+}
+
+.embedded-options button:last-of-type {
+  margin-top: -1px;
+  border-radius: 0 0 8px 8px;
+}
+
+.embedded-options button:hover {
+  position: relative;
+  z-index: 1;
+  border-color: #ddd9ff;
+  background: #faf9ff;
+}
+
+.embedded-options button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.embedded-options button > .anticon {
+  color: #74747b;
+  font-size: 12px;
+}
+
+.embedded-options button b {
+  color: #b1b1b6;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.embedded-recents-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 8px 14px 3px 17px;
+}
+
+.embedded-recents-heading :deep(.ant-btn) {
+  width: 28px;
+  height: 28px;
+  color: #9999a0;
+}
+
+.is-embedded .conversation-list {
+  display: block;
+  max-height: none;
+  padding: 0 14px 20px;
+  overflow: visible;
+}
+
+.conversation-group {
+  display: grid;
+}
+
+.is-embedded .conversation-group {
+  margin-bottom: 15px;
+}
+
+.is-embedded .conversation-group-label {
+  margin: 0 0 8px 3px;
+  color: #727279;
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.is-embedded .conversation-item {
+  display: grid;
+  align-items: center;
+  min-height: 43px;
+  margin: -1px 0 0;
+  padding: 0 10px 0 12px;
+  border: 1px solid #ececee;
+  border-radius: 0;
+  color: #56565d;
+  background: #ffffff;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.is-embedded .conversation-item:first-of-type {
+  margin-top: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.is-embedded .conversation-item:last-of-type {
+  border-radius: 0 0 8px 8px;
+}
+
+.is-embedded .conversation-item:only-of-type {
+  border-radius: 8px;
+}
+
+.is-embedded .conversation-item:hover,
+.is-embedded .conversation-item.active {
+  position: relative;
+  z-index: 1;
+  border-color: #ddd9ff;
+  background: #faf9ff;
+  box-shadow: none;
+}
+
+.is-embedded .conversation-copy strong {
+  color: #66666d;
+  font-size: 11px;
+  font-weight: 450;
+}
+
+.conversation-more {
+  color: #9999a0;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.is-embedded .conversation-empty {
+  margin-top: 56px;
+}
+
+.is-embedded .message-panel {
+  background: #ffffff;
+}
+
+.is-embedded .message-header {
+  min-height: 62px;
+  padding: 8px 10px 8px 8px;
+}
+
+.is-embedded .message-header > div:first-child {
+  min-width: 0;
+}
+
+.is-embedded .title-row {
+  min-width: 0;
+  gap: 2px;
+}
+
+.is-embedded .history-back {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #707077;
+}
+
+.is-embedded .title-row strong {
+  max-width: 180px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.is-embedded .title-row :deep(.ant-tag),
+.is-embedded .message-header > div:first-child > span {
+  display: none;
+}
+
+.is-embedded .header-actions :deep(.ant-btn) {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  color: #8b8b92;
+  font-size: 12px;
+}
+
+.is-embedded .message-scroller {
+  padding: 22px 18px 14px;
+}
+
+.is-embedded .message-row {
+  grid-template-columns: 27px minmax(0, 1fr);
+  gap: 9px;
+  margin-bottom: 22px;
+}
+
+.is-embedded .message-avatar {
+  width: 27px;
+  height: 27px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.is-embedded .is-assistant .message-avatar,
+.is-embedded .welcome-icon {
+  color: #8178ff;
+  background: #f1efff;
+}
+
+.is-embedded .message-meta {
+  margin: 2px 0 7px;
+}
+
+.is-embedded .message-meta strong {
+  font-size: 10px;
+}
+
+.is-embedded .user-question {
+  padding: 9px 11px;
+  border-radius: 3px 11px 11px;
+  background: #f3f3f5;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.is-embedded .answer-section-label,
+.is-embedded .message-sources > span {
+  font-size: 8px;
+}
+
+.is-embedded .welcome-state {
+  width: auto;
+  margin: 14vh 18px 0;
+}
+
+.is-embedded .welcome-icon {
+  width: 48px;
+  height: 48px;
+  border-color: #e7e3ff;
+  border-radius: 14px;
+  box-shadow: none;
+  font-size: 20px;
+}
+
+.is-embedded .welcome-state > span {
+  color: #8178ff;
+  font-size: 8px;
+}
+
+.is-embedded .welcome-state h2 {
+  margin-top: 9px;
+  font-family: inherit;
+  font-size: 20px;
+}
+
+.is-embedded .welcome-state p {
+  max-width: 280px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.is-embedded .composer {
+  padding: 10px 13px 11px;
+}
+
+.is-embedded .composer-box {
+  padding: 10px 9px 8px 12px;
+  border-color: #dedee2;
+  border-radius: 12px;
+  box-shadow: 0 6px 22px rgb(24 24 27 / 6%);
+}
+
+.is-embedded .composer-box:focus-within {
+  border-color: #cfcaff;
+  box-shadow: 0 7px 24px rgb(86 75 210 / 10%);
+}
+
+.is-embedded .composer-box :deep(textarea) {
+  font-size: 12px;
+}
+
+.is-embedded .composer-actions :deep(.ant-btn-primary) {
+  border-color: #8178ff;
+  background: #8178ff;
+}
+
+.is-embedded .answer-boundary {
+  font-size: 8px;
 }
 
 @keyframes thinking {

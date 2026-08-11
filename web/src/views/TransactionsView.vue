@@ -536,7 +536,7 @@ td small {
   border: 1px dashed #a8beb7;
   border-radius: 12px;
   color: var(--mint-700);
-  background: #f5faf7;
+  background: #f8f8f9;
   cursor: pointer;
   gap: 10px;
 }

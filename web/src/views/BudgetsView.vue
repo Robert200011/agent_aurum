@@ -156,7 +156,7 @@ onMounted(loadBudgets)
           type="circle"
           :percent="Math.min(100, aggregatePercent)"
           :size="112"
-          :stroke-color="aggregatePercent > 100 ? '#d84f4f' : '#0f766e'"
+          :stroke-color="aggregatePercent > 100 ? '#d84f4f' : '#5b75f7'"
         >
           <template #format>
             <span class="ring-value">{{ aggregatePercent }}%</span>
@@ -209,7 +209,7 @@ onMounted(loadBudgets)
           <a-progress
             :percent="Math.min(100, executionPercent(budget))"
             :show-info="false"
-            :stroke-color="executionPercent(budget) > 100 ? '#d84f4f' : '#0f766e'"
+            :stroke-color="executionPercent(budget) > 100 ? '#d84f4f' : '#5b75f7'"
           />
           <footer>
             <span>{{ formatDate(budget.start_date, 'MM.DD') }}—{{ formatDate(budget.end_date, 'MM.DD') }}</span>
@@ -283,10 +283,8 @@ onMounted(loadBudgets)
   gap: 24px;
   padding: 28px 32px;
   border: 1px solid var(--line);
-  border-radius: 20px;
-  background:
-    radial-gradient(circle at 80% 10%, rgb(26 156 136 / 10%), transparent 18rem),
-    white;
+  border-radius: 14px;
+  background: #ffffff;
 }
 
 .ring-value {
@@ -312,7 +310,7 @@ onMounted(loadBudgets)
 .budget-hero-copy h2 {
   margin: 0;
   color: var(--ink-950);
-  font-family: 'Iowan Old Style', Georgia, serif;
+  font-family: inherit;
   font-size: clamp(24px, 3vw, 34px);
 }
 
@@ -388,7 +386,7 @@ onMounted(loadBudgets)
 
 .budget-amount strong {
   color: var(--ink-950);
-  font-family: 'Iowan Old Style', Georgia, serif;
+  font-family: inherit;
   font-size: 26px;
 }
 

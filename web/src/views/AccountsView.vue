@@ -9,6 +9,7 @@ import {
 import { message, Modal } from 'ant-design-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 
+import OverviewHeader from '@/components/OverviewHeader.vue'
 import { financeApi } from '@/services/finance'
 import { apiErrorMessage } from '@/services/http'
 import type { Account, AccountInput, AccountType } from '@/types/api'
@@ -137,13 +138,15 @@ onMounted(loadAccounts)
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell accounts-page">
+    <OverviewHeader compact />
+
     <div class="page-heading">
       <div>
         <h1>账户管理</h1>
         <p>维护现金、储蓄、信用与投资账户。余额由期初值和交易自动推导，不能直接改写。</p>
       </div>
-      <a-button type="primary" size="large" @click="openCreate"><PlusOutlined />新建账户</a-button>
+      <a-button type="primary" @click="openCreate"><PlusOutlined />新建账户</a-button>
     </div>
 
     <section class="account-summary">
@@ -280,32 +283,55 @@ onMounted(loadAccounts)
 </template>
 
 <style scoped>
+.accounts-page {
+  width: 100%;
+  max-width: 1560px;
+  margin: 0 auto;
+  padding-inline: clamp(20px, 3vw, 56px);
+  gap: 14px;
+}
+
+.accounts-page .page-heading {
+  align-items: center;
+}
+
+.accounts-page .page-heading h1 {
+  font-size: 21px;
+  font-weight: 550;
+}
+
+.accounts-page .page-heading p {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .account-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .account-summary-card {
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-height: 92px;
-  padding: 20px;
+  gap: 11px;
+  min-height: 72px;
+  padding: 13px 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 12px;
   background: white;
 }
 
 .summary-icon,
 .account-name > div {
   display: grid;
-  width: 42px;
-  height: 42px;
-  border-radius: 13px;
-  color: var(--mint-700);
-  background: var(--mint-100);
-  font-size: 18px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: #5b75f7;
+  background: #eef1ff;
+  font-size: 15px;
   place-items: center;
 }
 
@@ -326,19 +352,24 @@ onMounted(loadAccounts)
 
 .account-summary-card strong {
   color: var(--ink-950);
-  font-family: 'Iowan Old Style', Georgia, serif;
-  font-size: 24px;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 550;
 }
 
 .table-card {
   overflow: hidden;
 }
 
+.accounts-page :deep(.table-card .ant-card-body) {
+  padding: 16px 18px;
+}
+
 .table-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 0 20px;
+  padding: 0 0 12px;
 }
 
 .table-toolbar > div {
@@ -347,7 +378,17 @@ onMounted(loadAccounts)
 
 .table-toolbar strong {
   color: var(--ink-950);
-  font-size: 16px;
+  font-size: 14px;
+}
+
+.accounts-page :deep(.ant-table-thead > tr > th) {
+  padding: 10px 12px;
+  font-size: 11px;
+}
+
+.accounts-page :deep(.ant-table-tbody > tr > td) {
+  padding: 9px 12px;
+  font-size: 11px;
 }
 
 .account-name {
@@ -357,10 +398,10 @@ onMounted(loadAccounts)
 }
 
 .account-name > div {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  font-size: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 13px;
 }
 
 .account-name > span {
@@ -381,6 +422,18 @@ onMounted(loadAccounts)
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .accounts-page {
+    padding-inline: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .accounts-page .page-heading {
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 560px) {

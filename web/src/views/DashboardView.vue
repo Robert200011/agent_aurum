@@ -3,19 +3,17 @@ import {
   ArrowDownOutlined,
   ArrowRightOutlined,
   ArrowUpOutlined,
-  BankOutlined,
   FundOutlined,
   ReloadOutlined,
   WalletOutlined,
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
-import dayjs from 'dayjs'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import OverviewHeader from '@/components/OverviewHeader.vue'
 import { financeApi } from '@/services/finance'
 import { apiErrorMessage } from '@/services/http'
-import { useAuthStore } from '@/stores/auth'
 import type {
   Account,
   FinanceSummary,
@@ -26,7 +24,6 @@ import { activeAccountsForCurrency } from '@/utils/finance'
 import { currentMonthRange, formatDate, formatMoney, toNumber } from '@/utils/format'
 
 const router = useRouter()
-const auth = useAuthStore()
 const loading = ref(true)
 const currency = ref('CNY')
 const range = ref<[string, string]>(currentMonthRange())
@@ -35,14 +32,6 @@ const portfolio = ref<PortfolioSummary | null>(null)
 const accounts = ref<Account[]>([])
 const recentTransactions = ref<Transaction[]>([])
 const selectedAccounts = computed(() => activeAccountsForCurrency(accounts.value, currency.value))
-
-const greeting = computed(() => {
-  const hour = dayjs().hour()
-  if (hour < 11) return '早上好'
-  if (hour < 14) return '中午好'
-  if (hour < 18) return '下午好'
-  return '晚上好'
-})
 
 const budgetUtilization = computed(() => {
   if (!summary.value || toNumber(summary.value.budget_amount) === 0) return 0
@@ -80,29 +69,21 @@ onMounted(loadDashboard)
 </script>
 
 <template>
-  <div class="page-shell">
-    <section class="dashboard-hero">
-      <div>
-        <span class="hero-kicker">{{ greeting }}，{{ auth.user?.username }}</span>
-        <h1>你的财务全景，<br />从清晰开始。</h1>
-        <p>
-          当前展示 {{ range[0] }} 至 {{ range[1] }} 的 {{ currency }} 现金流；
-          账户余额与投资组合使用最新账本状态。
-        </p>
-      </div>
-      <div class="hero-actions">
-        <a-select v-model:value="currency" style="width: 100px" @change="loadDashboard">
-          <a-select-option value="CNY">CNY</a-select-option>
-          <a-select-option value="USD">USD</a-select-option>
-          <a-select-option value="HKD">HKD</a-select-option>
-        </a-select>
-        <a-button :loading="loading" @click="loadDashboard"><ReloadOutlined />刷新数据</a-button>
-      </div>
-      <div class="hero-orbit" aria-hidden="true">
-        <span />
-        <span />
-      </div>
-    </section>
+  <div class="page-shell dashboard-page">
+    <OverviewHeader compact>
+      <template #actions>
+        <div class="hero-actions">
+          <a-select v-model:value="currency" style="width: 100px" @change="loadDashboard">
+            <a-select-option value="CNY">CNY</a-select-option>
+            <a-select-option value="USD">USD</a-select-option>
+            <a-select-option value="HKD">HKD</a-select-option>
+          </a-select>
+          <a-button :loading="loading" @click="loadDashboard">
+            <ReloadOutlined />刷新数据
+          </a-button>
+        </div>
+      </template>
+    </OverviewHeader>
 
     <a-skeleton :loading="loading" active :paragraph="{ rows: 8 }">
       <section class="metric-grid">
@@ -198,8 +179,8 @@ onMounted(loadDashboard)
             <a-progress
               type="dashboard"
               :percent="Math.min(100, budgetUtilization)"
-              :stroke-color="budgetUtilization > 100 ? '#d84f4f' : '#0f766e'"
-              :width="126"
+              :stroke-color="budgetUtilization > 100 ? '#d84f4f' : '#5b75f7'"
+              :width="104"
             >
               <template #format>
                 <div class="progress-copy">
@@ -257,78 +238,18 @@ onMounted(loadDashboard)
             </template>
           </a-list>
         </a-card>
-
-        <a-card class="surface-card accounts-card" :bordered="false">
-          <template #title>
-            <div class="card-title">
-              <div><span>ACCOUNTS</span><strong>{{ currency }} 资金账户</strong></div>
-              <router-link to="/accounts">管理账户 <ArrowRightOutlined /></router-link>
-            </div>
-          </template>
-          <div v-if="selectedAccounts.length" class="account-stack">
-            <div
-              v-for="account in selectedAccounts.slice(0, 4)"
-              :key="account.id"
-              class="account-row"
-            >
-              <div class="account-icon"><BankOutlined /></div>
-              <div>
-                <strong>{{ account.name }}</strong>
-                <span>{{ account.currency }} · {{ account.is_active ? '正常' : '已归档' }}</span>
-              </div>
-              <b>{{ formatMoney(account.balance, account.currency) }}</b>
-            </div>
-          </div>
-          <a-empty v-else :image="undefined" :description="`暂无 ${currency} 账户`" />
-        </a-card>
       </section>
     </a-skeleton>
   </div>
 </template>
 
 <style scoped>
-.dashboard-hero {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  min-height: 250px;
-  padding: clamp(28px, 4vw, 48px);
-  border-radius: 24px;
-  color: white;
-  background:
-    radial-gradient(circle at 84% 10%, rgb(45 175 151 / 30%), transparent 18rem),
-    linear-gradient(135deg, #0a2c29, #0b211f);
-  box-shadow: 0 24px 60px rgb(9 37 34 / 17%);
-  overflow: hidden;
-}
-
-.dashboard-hero > div:first-child {
-  position: relative;
-  z-index: 2;
-}
-
-.hero-kicker {
-  color: #d8b766;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.dashboard-hero h1 {
-  margin: 12px 0;
-  font-family: 'Iowan Old Style', 'Songti SC', serif;
-  font-size: clamp(34px, 4vw, 54px);
-  font-weight: 560;
-  letter-spacing: -0.04em;
-  line-height: 1.12;
-}
-
-.dashboard-hero p {
-  max-width: 650px;
-  margin: 0;
-  color: rgb(226 242 237 / 62%);
-  line-height: 1.7;
+.dashboard-page {
+  width: 100%;
+  max-width: 1560px;
+  margin: 0 auto;
+  padding-inline: clamp(20px, 3vw, 56px);
+  gap: 14px;
 }
 
 .hero-actions {
@@ -340,58 +261,41 @@ onMounted(loadDashboard)
 
 .hero-actions :deep(.ant-select-selector),
 .hero-actions .ant-btn {
-  border-color: rgb(255 255 255 / 12%);
-  color: white;
-  background: rgb(255 255 255 / 8%);
-}
-
-.hero-orbit span {
-  position: absolute;
-  top: -150px;
-  right: -80px;
-  width: 360px;
-  height: 360px;
-  border: 1px solid rgb(213 162 63 / 15%);
-  border-radius: 50%;
-}
-
-.hero-orbit span:last-child {
-  top: -104px;
-  right: -34px;
-  width: 270px;
-  height: 270px;
+  border-color: #d8d8dc;
+  color: var(--ink-900);
+  background: #ffffff;
 }
 
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .metric-card {
   display: grid;
   min-width: 0;
-  padding: 22px;
+  padding: 15px 16px;
   border: 1px solid var(--line);
-  border-radius: 17px;
-  background: rgb(255 255 255 / 90%);
-  box-shadow: 0 12px 32px rgb(11 37 34 / 5%);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .metric-icon {
   display: grid;
-  width: 38px;
-  height: 38px;
-  margin-bottom: 20px;
-  border-radius: 11px;
-  color: #0f766e;
-  background: #ddf4ee;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  color: #52525b;
+  background: #f2f2f3;
   place-items: center;
 }
 
 .metric-icon.income {
-  color: #087f5b;
-  background: #e5f7ef;
+  color: #4f6ff5;
+  background: #eef1ff;
 }
 
 .metric-icon.expense {
@@ -410,12 +314,12 @@ onMounted(loadDashboard)
 }
 
 .metric-card > strong {
-  margin: 7px 0;
+  margin: 4px 0;
   overflow: hidden;
   color: var(--ink-950);
-  font-family: 'Iowan Old Style', Georgia, serif;
-  font-size: clamp(23px, 2.2vw, 31px);
-  font-weight: 600;
+  font-family: inherit;
+  font-size: clamp(20px, 1.8vw, 25px);
+  font-weight: 500;
   letter-spacing: -0.025em;
   text-overflow: ellipsis;
 }
@@ -428,11 +332,24 @@ onMounted(loadDashboard)
 .dashboard-grid {
   display: grid;
   grid-template-columns: 1.18fr 0.82fr;
-  gap: 18px;
+  gap: 14px;
+}
+
+.dashboard-page :deep(.surface-card .ant-card-head) {
+  min-height: 46px;
+  padding: 0 18px;
+}
+
+.dashboard-page :deep(.surface-card .ant-card-head-title) {
+  padding: 10px 0;
+}
+
+.dashboard-page :deep(.surface-card .ant-card-body) {
+  padding: 16px 18px;
 }
 
 .lower-grid {
-  grid-template-columns: 1.25fr 0.75fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .card-title {
@@ -448,7 +365,7 @@ onMounted(loadDashboard)
 }
 
 .card-title span {
-  color: var(--mint-700);
+  color: var(--ink-500);
   font-size: 8px;
   font-weight: 750;
   letter-spacing: 0.14em;
@@ -456,8 +373,9 @@ onMounted(loadDashboard)
 
 .card-title strong {
   color: var(--ink-950);
-  font-family: 'Iowan Old Style', 'Songti SC', serif;
-  font-size: 19px;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 550;
 }
 
 .card-title a {
@@ -468,7 +386,7 @@ onMounted(loadDashboard)
 
 .cash-flow-number {
   display: grid;
-  margin-bottom: 30px;
+  margin-bottom: 18px;
 }
 
 .cash-flow-number span {
@@ -478,13 +396,14 @@ onMounted(loadDashboard)
 
 .cash-flow-number strong {
   margin-top: 4px;
-  font-family: 'Iowan Old Style', Georgia, serif;
-  font-size: 34px;
+  font-family: inherit;
+  font-size: 24px;
+  font-weight: 500;
 }
 
 .flow-visual {
   display: grid;
-  gap: 16px;
+  gap: 11px;
 }
 
 .flow-visual > div {
@@ -502,12 +421,12 @@ onMounted(loadDashboard)
 .flow-visual i {
   display: block;
   min-width: 6px;
-  height: 12px;
+  height: 9px;
   border-radius: 0 8px 8px 0;
 }
 
 .income-bar {
-  background: linear-gradient(90deg, #0f766e, #42b99f);
+  background: linear-gradient(90deg, #5b75f7, #90a1ff);
 }
 
 .expense-bar {
@@ -517,8 +436,8 @@ onMounted(loadDashboard)
 .flow-legend {
   display: flex;
   gap: 20px;
-  margin-top: 24px;
-  padding-top: 18px;
+  margin-top: 16px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
   color: var(--ink-500);
   font-size: 10px;
@@ -533,7 +452,7 @@ onMounted(loadDashboard)
 }
 
 .income-dot {
-  background: #0f766e;
+  background: #5b75f7;
 }
 
 .expense-dot {
@@ -543,8 +462,8 @@ onMounted(loadDashboard)
 .budget-overview {
   display: flex;
   align-items: center;
-  gap: 28px;
-  min-height: 170px;
+  gap: 22px;
+  min-height: 136px;
 }
 
 .progress-copy {
@@ -565,7 +484,7 @@ onMounted(loadDashboard)
 .budget-values {
   display: grid;
   flex: 1;
-  gap: 12px;
+  gap: 9px;
 }
 
 .budget-values span {
@@ -580,7 +499,7 @@ onMounted(loadDashboard)
 }
 
 .transaction-list :deep(.ant-list-item) {
-  padding: 12px 0;
+  padding: 8px 0;
 }
 
 .transaction-row {
@@ -592,15 +511,15 @@ onMounted(loadDashboard)
 
 .transaction-icon {
   display: grid;
-  width: 36px;
-  height: 36px;
-  border-radius: 11px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   place-items: center;
 }
 
 .transaction-icon.is-income {
-  color: #087f5b;
-  background: #e7f6ef;
+  color: #4f6ff5;
+  background: #eef1ff;
 }
 
 .transaction-icon.is-expense {
@@ -631,43 +550,6 @@ onMounted(loadDashboard)
   font-size: 12px;
 }
 
-.account-stack {
-  display: grid;
-  gap: 14px;
-}
-
-.account-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 12px;
-}
-
-.account-icon {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  border-radius: 11px;
-  color: var(--mint-700);
-  background: #e8f3ef;
-  place-items: center;
-}
-
-.account-row > div:nth-child(2) {
-  display: grid;
-}
-
-.account-row strong,
-.account-row b {
-  color: var(--ink-900);
-  font-size: 11px;
-}
-
-.account-row span {
-  color: var(--ink-500);
-  font-size: 9px;
-}
-
 @media (max-width: 1180px) {
   .metric-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -679,13 +561,13 @@ onMounted(loadDashboard)
   }
 }
 
-@media (max-width: 700px) {
-  .dashboard-hero {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 24px;
+@media (max-width: 900px) {
+  .dashboard-page {
+    padding-inline: 0;
   }
+}
 
+@media (max-width: 700px) {
   .hero-actions {
     width: 100%;
   }
