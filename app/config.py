@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     chat_model_temperature: float = Field(default=0.1, gt=0.0, lt=2.0)
     chat_model_max_retries: int = Field(default=2, ge=0, le=10)
     agent_model_planner_enabled: bool = True
+    capability_agent_enabled: bool = True
+    capability_agent_max_steps: int = Field(default=3, ge=1, le=6)
+    capability_agent_max_tool_calls: int = Field(default=6, ge=1, le=20)
+    capability_agent_history_messages: int = Field(default=8, ge=0, le=20)
     quota_chat_user_requests_per_minute: int = Field(default=10, ge=1, le=10_000)
     quota_chat_global_requests_per_minute: int = Field(default=100, ge=1, le=100_000)
     quota_global_model_requests_per_minute: int = Field(default=200, ge=1, le=1_000_000)

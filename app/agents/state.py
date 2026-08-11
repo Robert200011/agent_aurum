@@ -48,6 +48,8 @@ class RagAnswerResult:
     plan: AgentQuestionPlan | None = None
     finance_results: tuple[FinanceToolResult, ...] = ()
     data_as_of: datetime | None = None
+    capability_decision_steps: int = 0
+    capability_call_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +91,7 @@ class RagAnswerInput(TypedDict):
     min_score: float | None
     response_mode: Literal["complete", "stream"]
     current_date: date
+    history: list[dict[str, str]]
 
 
 class RagAnswerOutput(TypedDict):
@@ -101,6 +104,8 @@ class RagAnswerOutput(TypedDict):
     citations: tuple[TrustedCitation, ...]
     plan: AgentQuestionPlan
     finance_results: tuple[FinanceToolResult, ...]
+    capability_decision_steps: int
+    capability_call_count: int
 
 
 class RagAnswerState(TypedDict, total=False):
@@ -111,6 +116,7 @@ class RagAnswerState(TypedDict, total=False):
     min_score: float | None
     response_mode: Literal["complete", "stream"]
     current_date: date
+    history: list[dict[str, str]]
     plan: AgentQuestionPlan
     planning_completion: ChatCompletionResult | None
     finance_results: tuple[FinanceToolResult, ...]
@@ -119,6 +125,8 @@ class RagAnswerState(TypedDict, total=False):
     completion: ChatCompletionResult | None
     answer: str
     citations: tuple[TrustedCitation, ...]
+    capability_decision_steps: int
+    capability_call_count: int
 
 
 class RagAnswerUpdate(TypedDict, total=False):
@@ -132,3 +140,5 @@ class RagAnswerUpdate(TypedDict, total=False):
     plan: AgentQuestionPlan
     planning_completion: ChatCompletionResult | None
     finance_results: tuple[FinanceToolResult, ...]
+    capability_decision_steps: int
+    capability_call_count: int

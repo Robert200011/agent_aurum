@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.chat.types import ChatPromptRole
 
@@ -56,6 +56,53 @@ class ChatCompletionResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ChatToolDefinition:
+    """向模型公开的一项服务端受控能力。"""
+
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ChatToolCall:
+    """模型请求执行的一次结构化能力调用。"""
+
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ChatToolResultMessage:
+    """服务端执行结果对应的标准 tool 消息。"""
+
+    call_id: str
+    name: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class ChatToolExchange:
+    """一轮 assistant tool_calls 与逐项 tool 结果。"""
+
+    tool_calls: tuple[ChatToolCall, ...]
+    results: tuple[ChatToolResultMessage, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ChatToolCompletionResult:
+    """一次工具调用决策；文本和工具请求至少存在其一。"""
+
+    content: str | None
+    tool_calls: tuple[ChatToolCall, ...]
+    model: str
+    finish_reason: str | None
+    request_id: str | None
+    usage: ChatTokenUsage | None
+
+
+@dataclass(frozen=True, slots=True)
 class ChatStreamChunk:
     """流式文本增量；末尾的用量块可以不包含文本。"""
 
@@ -76,6 +123,15 @@ class ChatModelProvider(Protocol):
     def model_name(self) -> str: ...
 
     async def complete(self, messages: Sequence[ChatMessage]) -> ChatCompletionResult: ...
+
+    async def complete_with_tools(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ChatToolDefinition],
+        *,
+        require_tool: bool = False,
+        exchanges: Sequence[ChatToolExchange] = (),
+    ) -> ChatToolCompletionResult: ...
 
     def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[ChatStreamChunk]: ...
 

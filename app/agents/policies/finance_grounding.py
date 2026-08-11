@@ -21,6 +21,14 @@ _UUID_PATTERN = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
     r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b"
 )
+_TRANSACTION_DETAIL_PATTERN = re.compile(
+    r"(?:用途|来源|分类|类别|描述|商户)\s*(?:[：:]|为|是)\s*([^\n，。；;）)]+)"
+)
+_TRANSACTION_TOOLS = {
+    "search_transactions",
+    "get_recent_transactions",
+    "get_latest_transaction",
+}
 
 
 class FinanceGroundingValidationError(RuntimeError):
@@ -43,6 +51,8 @@ def validate_finance_answer(
         return
     if "user_id" in answer.casefold() or _UUID_PATTERN.search(answer):
         raise FinanceGroundingValidationError("finance_internal_identifier_untrusted")
+
+    _validate_transaction_details(answer=answer, finance_results=finance_results)
 
     executed_tools = {result.name.value for result in finance_results}
     mentioned_tools = set(_TOOL_NAME_PATTERN.findall(answer))
@@ -95,6 +105,40 @@ def _collect_numbers(value: Any, numbers: set[Decimal]) -> None:
             _collect_numbers(item, numbers)
 
 
+def _validate_transaction_details(
+    *,
+    answer: str,
+    finance_results: tuple[FinanceToolResult, ...],
+) -> None:
+    transaction_results = [
+        result for result in finance_results if result.name.value in _TRANSACTION_TOOLS
+    ]
+    if not transaction_results:
+        return
+    allowed: set[str] = set()
+    for result in transaction_results:
+        payload = result.model_dump(mode="json", include={"data"})
+        _collect_transaction_labels(payload, allowed)
+    for match in _TRANSACTION_DETAIL_PATTERN.finditer(answer):
+        candidate = match.group(1).strip().strip("*` '\"“”‘’")
+        if candidate == "用途未记录":
+            continue
+        if candidate not in allowed:
+            raise FinanceGroundingValidationError("finance_transaction_detail_untrusted")
+
+
+def _collect_transaction_labels(value: Any, labels: set[str]) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in {"description", "category"} and isinstance(item, str) and item.strip():
+                labels.add(item.strip())
+            else:
+                _collect_transaction_labels(item, labels)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_transaction_labels(item, labels)
+        return
 def _decimal(raw: str) -> Decimal | None:
     try:
         return Decimal(raw.replace(",", ""))

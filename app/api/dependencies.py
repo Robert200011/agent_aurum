@@ -248,6 +248,9 @@ def get_rag_answer_service(
         context_max_characters=settings.rag_context_max_characters,
         context_source_max_characters=settings.rag_context_source_max_characters,
         model_planner_enabled=settings.agent_model_planner_enabled,
+        capability_agent_enabled=settings.capability_agent_enabled,
+        capability_agent_max_steps=settings.capability_agent_max_steps,
+        capability_agent_max_tool_calls=settings.capability_agent_max_tool_calls,
         finance_timezone=settings.finance_timezone,
         finance_tools=FinanceToolExecutor(
             finance_service,
@@ -267,11 +270,13 @@ def get_chat_service(
     session: SessionDependency,
     context: AccessContextDependency,
     answer_service: RagAnswerServiceDependency,
+    settings: SettingsDependency,
 ) -> ChatService:
     return ChatService(
         session=session,
         user_id=context.user.id,
         answer_service=answer_service,
+        history_message_limit=settings.capability_agent_history_messages,
     )
 
 
