@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import UUID
-
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
@@ -14,17 +12,13 @@ from app.agents.policies.finance_grounding import (
     FinanceGroundingValidationError,
     validate_finance_answer,
 )
-from app.agents.policies.finance_planner import plan_agent_question
-from app.agents.policies.model_finance_planner import refine_agent_question_plan
 from app.agents.policies.output_security import (
     OutputSecurityValidationError,
     validate_safe_model_output,
 )
 from app.agents.policies.rag_prompt import (
-    NO_CONTEXT_ANSWER,
     apply_investment_risk_policy,
     build_answer_messages,
-    build_controlled_context,
 )
 from app.agents.state import (
     RagAnswerInput,
@@ -32,7 +26,7 @@ from app.agents.state import (
     RagAnswerState,
     RagAnswerUpdate,
 )
-from app.agents.tools.finance import FinanceToolExecutor, FinanceToolStatus
+from app.agents.tools.finance import FinanceToolExecutor
 from app.chat.types import ChatPromptRole
 from app.errors import ServiceUnavailableError
 from app.providers.model_provider import (
@@ -47,7 +41,7 @@ from app.rag.citations.structured import (
     StructuredCitationResult,
     structure_citations,
 )
-from app.services.retrieval import KnowledgeRetrievalResult, RagRetrievalService
+from app.services.retrieval import RagRetrievalService
 
 RAG_GRAPH_VERSION = "finance-capability-agent-v2"
 ANSWER_REPAIR_PROMPT = """上一次回答未通过服务端证据校验，请重新作答一次。
@@ -76,8 +70,6 @@ def build_rag_answer_graph(
     context_max_characters: int,
     context_source_max_characters: int,
     finance_tools: FinanceToolExecutor | None = None,
-    model_planner_enabled: bool = False,
-    capability_agent_enabled: bool = False,
     capability_agent_max_steps: int = 3,
     capability_agent_max_tool_calls: int = 6,
     checkpointer: BaseCheckpointSaver[str] | None = None,
@@ -87,34 +79,6 @@ def build_rag_answer_graph(
     def write_stage(state: RagAnswerState, stage: str) -> None:
         if state["response_mode"] == "stream":
             get_stream_writer()({"type": "stage", "stage": stage})
-
-    async def plan_question(state: RagAnswerState) -> RagAnswerUpdate:
-        write_stage(state, "understanding")
-        plan = plan_agent_question(
-            state["question"],
-            today=state["current_date"],
-        )
-        planning_completion = None
-        if model_planner_enabled:
-            planning = await refine_agent_question_plan(
-                question=state["question"],
-                today=state["current_date"],
-                deterministic_plan=plan,
-                chat_provider=chat_provider,
-            )
-            plan = planning.plan
-            planning_completion = planning.completion
-        return {
-            "plan": plan,
-            "planning_completion": planning_completion,
-            "retrieval": _empty_retrieval(
-                owner_user_id=retrieval_service.actor_user_id,
-                question=state["question"],
-            ),
-            "finance_results": (),
-            "capability_decision_steps": 0,
-            "capability_call_count": 0,
-        }
 
     async def run_v2_agent(state: RagAnswerState) -> RagAnswerUpdate:
         write_stage(state, "understanding")
@@ -142,121 +106,6 @@ def build_rag_answer_graph(
             "answer": outcome.answer,
             "capability_decision_steps": outcome.decision_steps,
             "capability_call_count": outcome.capability_call_count,
-        }
-
-    async def retrieve_knowledge(state: RagAnswerState) -> RagAnswerUpdate:
-        plan = state["plan"]
-        if not plan.needs_knowledge:
-            return {
-                "retrieval": _empty_retrieval(
-                    owner_user_id=retrieval_service.actor_user_id,
-                    question=state["question"],
-                )
-            }
-        write_stage(state, "retrieving")
-        retrieval = await retrieval_service.retrieve_user_knowledge(
-            query=state["question"],
-            limit=state["retrieval_limit"],
-            min_score=state["min_score"],
-        )
-        return {"retrieval": retrieval}
-
-    async def call_finance_tools(state: RagAnswerState) -> RagAnswerUpdate:
-        requests = state["plan"].finance_calls
-        if not requests:
-            return {"finance_results": ()}
-        if finance_tools is None:
-            raise ServiceUnavailableError("finance agent tools are unavailable")
-        write_stage(state, "querying_finance")
-        return {"finance_results": await finance_tools.execute_many(requests)}
-
-    async def generate_answer(state: RagAnswerState) -> RagAnswerUpdate:
-        retrieval = state["retrieval"]
-        context = build_controlled_context(
-            retrieval.items,
-            max_characters=context_max_characters,
-            max_source_characters=context_source_max_characters,
-        )
-        plan = state["plan"]
-        finance_results = state["finance_results"]
-        write_stage(state, "analyzing")
-        if plan.clarification is not None:
-            return {
-                "context": context,
-                "completion": _planning_only_completion(
-                    state.get("planning_completion"),
-                    answer=plan.clarification,
-                ),
-                "answer": plan.clarification,
-            }
-
-        if plan.intent == "knowledge" and not context.sources:
-            return {
-                "context": context,
-                "completion": _planning_only_completion(
-                    state.get("planning_completion"),
-                    answer=NO_CONTEXT_ANSWER,
-                ),
-                "answer": NO_CONTEXT_ANSWER,
-            }
-        if (
-            plan.intent == "finance"
-            and finance_results
-            and all(result.status == FinanceToolStatus.FAILED for result in finance_results)
-        ):
-            return {
-                "context": context,
-                "completion": None,
-                "answer": "当前无法读取所需的个人财务数据，请稍后重试。",
-            }
-
-        write_stage(state, "generating")
-        messages = build_answer_messages(
-            question=state["question"],
-            context=context,
-            finance_results=finance_results,
-            history=state["history"],
-        )
-        try:
-            if state["response_mode"] == "stream":
-                parts: list[str] = []
-                model = chat_provider.model_name
-                finish_reason: str | None = None
-                request_id: str | None = None
-                usage = None
-                async for chunk in chat_provider.stream(messages):
-                    model = chunk.model
-                    finish_reason = chunk.finish_reason or finish_reason
-                    request_id = chunk.request_id or request_id
-                    usage = chunk.usage or usage
-                    if chunk.delta:
-                        parts.append(chunk.delta)
-                completion = ChatCompletionResult(
-                    content="".join(parts).strip(),
-                    model=model,
-                    finish_reason=finish_reason,
-                    request_id=request_id,
-                    usage=usage,
-                )
-            else:
-                completion = await chat_provider.complete(messages)
-        except ChatModelProviderError as exc:
-            message = (
-                "chat model is not configured"
-                if exc.code == "chat_configuration_missing"
-                else "chat model provider is unavailable"
-            )
-            raise ServiceUnavailableError(message) from exc
-        planning_completion = state.get("planning_completion")
-        if planning_completion is not None:
-            completion = _merge_completion_usage(planning_completion, completion)
-        answer = completion.content.strip()
-        if not answer:
-            raise ServiceUnavailableError("chat model returned an invalid answer")
-        return {
-            "context": context,
-            "completion": completion,
-            "answer": answer,
         }
 
     def checked_answer(
@@ -347,68 +196,14 @@ def build_rag_answer_graph(
         output_schema=RagAnswerOutput,
     )
     builder.add_node("validate_citations", validate_citations)
-    if capability_agent_enabled:
-        builder.add_node("run_capability_agent", run_v2_agent)
-        builder.add_edge(START, "run_capability_agent")
-        builder.add_edge("run_capability_agent", "validate_citations")
-    else:
-        builder.add_node("plan_question", plan_question)
-        builder.add_node("retrieve_knowledge", retrieve_knowledge)
-        builder.add_node("call_finance_tools", call_finance_tools)
-        builder.add_node("generate_answer", generate_answer)
-        builder.add_edge(START, "plan_question")
-        builder.add_conditional_edges(
-            "plan_question",
-            _route_after_plan,
-            {
-                "retrieve_knowledge": "retrieve_knowledge",
-                "call_finance_tools": "call_finance_tools",
-                "generate_answer": "generate_answer",
-            },
-        )
-        builder.add_conditional_edges(
-            "retrieve_knowledge",
-            _route_after_retrieval,
-            {
-                "call_finance_tools": "call_finance_tools",
-                "generate_answer": "generate_answer",
-            },
-        )
-        builder.add_edge("call_finance_tools", "generate_answer")
-        builder.add_edge("generate_answer", "validate_citations")
+    builder.add_node("run_capability_agent", run_v2_agent)
+    builder.add_edge(START, "run_capability_agent")
+    builder.add_edge("run_capability_agent", "validate_citations")
     builder.add_edge("validate_citations", END)
     return builder.compile(
         checkpointer=checkpointer,
         name=RAG_GRAPH_VERSION,
     )
-
-
-def _route_after_plan(state: RagAnswerState) -> str:
-    plan = state["plan"]
-    if plan.clarification is not None:
-        return "generate_answer"
-    if plan.needs_knowledge:
-        return "retrieve_knowledge"
-    if plan.finance_calls:
-        return "call_finance_tools"
-    return "generate_answer"
-
-
-def _route_after_retrieval(state: RagAnswerState) -> str:
-    return "call_finance_tools" if state["plan"].finance_calls else "generate_answer"
-
-
-def _empty_retrieval(*, owner_user_id: UUID, question: str) -> KnowledgeRetrievalResult:
-    return KnowledgeRetrievalResult(
-        owner_user_id=owner_user_id,
-        knowledge_base_ids=(),
-        query=question.strip(),
-        embedding_model="",
-        latency_ms=0,
-        items=[],
-    )
-
-
 def _merge_completion_usage(
     first: ChatCompletionResult,
     repaired: ChatCompletionResult,
@@ -428,22 +223,4 @@ def _merge_completion_usage(
         finish_reason=repaired.finish_reason,
         request_id=repaired.request_id,
         usage=usage,
-    )
-
-
-def _planning_only_completion(
-    planning: ChatCompletionResult | None,
-    *,
-    answer: str,
-) -> ChatCompletionResult | None:
-    """保留仅发生规划调用时的模型和 Token 审计，但不暴露规划 JSON。"""
-
-    if planning is None:
-        return None
-    return ChatCompletionResult(
-        content=answer,
-        model=planning.model,
-        finish_reason=planning.finish_reason,
-        request_id=planning.request_id,
-        usage=planning.usage,
     )

@@ -8,55 +8,59 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
-from app.agents.policies.finance_planner import plan_agent_question
-from app.agents.tools.finance import FinanceToolRequest
-from app.finance.time_ranges import parse_date_range
+from app.agents.capabilities import (
+    KNOWLEDGE_SEARCH_CAPABILITY,
+    CapabilityRegistry,
+    SemanticRangeInput,
+    resolve_time_range,
+)
+from app.agents.policies.investment_risk import investment_risk_policy
 
 DEFAULT_DATASET = Path(__file__).parents[1] / "evals" / "phase5-finance-agent.json"
 
 
 def evaluate(dataset: dict[str, Any]) -> dict[str, Any]:
-    """执行路由、日期和契约拒绝用例，并返回机器可读结果。"""
+    """执行能力目录、服务端日期语义和拒绝用例，并返回机器可读结果。"""
 
     failures: list[dict[str, str]] = []
     passed = 0
     total = 0
-    reference_date = date.fromisoformat(dataset["reference_date"])
+    registry = CapabilityRegistry.read_only_default(
+        finance_enabled=True,
+        knowledge_enabled=True,
+    )
+    definitions = {item.name for item in registry.definitions()}
 
     for case in dataset["route_cases"]:
         total += 1
-        plan = plan_agent_question(case["question"], today=reference_date)
-        actual = {
-            "intent": plan.intent,
-            "needs_knowledge": plan.needs_knowledge,
-            "risk_policy": plan.risk_policy,
-            "tools": [request.name.value for request in plan.finance_calls],
-            "requires_clarification": plan.clarification is not None,
-        }
-        expected = {
-            "intent": case["intent"],
-            "needs_knowledge": case["needs_knowledge"],
-            "risk_policy": case["risk_policy"],
-            "tools": case["tools"],
-            "requires_clarification": case.get("requires_clarification", False),
-        }
-        if actual == expected:
+        expected_tools = set(case["tools"])
+        knowledge_available = (
+            not case["needs_knowledge"] or KNOWLEDGE_SEARCH_CAPABILITY in definitions
+        )
+        risk_policy_matches = (
+            investment_risk_policy(case["question"]) == case["risk_policy"]
+        )
+        if expected_tools.issubset(definitions) and knowledge_available and risk_policy_matches:
             passed += 1
         else:
             failures.append(
-                {"id": case["id"], "expected": str(expected), "actual": str(actual)}
+                {
+                    "id": case["id"],
+                    "expected": str(sorted(expected_tools)),
+                    "actual": str(sorted(definitions)),
+                }
             )
 
     for case in dataset["time_cases"]:
         total += 1
-        parsed = parse_date_range(case["question"], today=date.fromisoformat(case["today"]))
-        actual_range = (
-            (parsed.start_date.isoformat(), parsed.end_date.isoformat())
-            if parsed is not None
-            else None
+        semantic_input = SemanticRangeInput.model_validate(case["input"])
+        start, end = resolve_time_range(
+            semantic_input,
+            today=date.fromisoformat(case["today"]),
         )
+        actual_range = (start.isoformat(), end.isoformat())
         expected_range = (case["start_date"], case["end_date"])
         if actual_range == expected_range:
             passed += 1
@@ -69,12 +73,12 @@ def evaluate(dataset: dict[str, Any]) -> dict[str, Any]:
                 }
             )
 
-    adapter: TypeAdapter[FinanceToolRequest] = TypeAdapter(FinanceToolRequest)
     for case in dataset["rejection_cases"]:
         total += 1
         try:
-            adapter.validate_python(case["payload"])
-        except ValidationError:
+            payload = case["payload"]
+            registry.validate(payload["name"], payload["arguments"])
+        except (ValidationError, ValueError):
             passed += 1
         else:
             failures.append(

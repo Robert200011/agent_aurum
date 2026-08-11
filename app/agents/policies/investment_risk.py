@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.agents.policies.finance_planner import RiskPolicy
+from app.agents.contracts import RiskPolicy
 
 _HIGH_RISK_PHRASES = (
     "该买",

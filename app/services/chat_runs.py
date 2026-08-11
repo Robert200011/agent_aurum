@@ -208,8 +208,6 @@ class ChatRunCoordinator:
                             context_source_max_characters=(
                                 self._settings.rag_context_source_max_characters
                             ),
-                            model_planner_enabled=(self._settings.agent_model_planner_enabled),
-                            capability_agent_enabled=(self._settings.capability_agent_enabled),
                             capability_agent_max_steps=(
                                 self._settings.capability_agent_max_steps
                             ),

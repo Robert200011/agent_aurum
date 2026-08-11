@@ -1,6 +1,6 @@
 # Aurum Agent 当前开发进度交接说明
 
-> 交接日期：2026-08-03
+> 交接日期：2026-08-11
 > 项目路径：`E:\agent_aurum`
 > 当前阶段：阶段六 P6.1～P6.5 工程完成并已合入 `master`，待候选环境上线验收或进入阶段七规划
 
@@ -8,14 +8,19 @@
 
 Aurum Agent 已完成阶段一至阶段六的工程开发。当前系统包含安全鉴权与租户隔离、个人财务账本、
 知识库入库与 Hybrid Retrieval、可信引用 RAG、SSE/Checkpoint 会话，以及受控编排的
-只读个人财务 Agent。阶段五最终图版本为 `finance-agent-p5.6-v1`，当前加固图版本为
-`finance-agent-flex-v1`（保留 P6.3 证据校验并增加受控模型规划与最近一笔流水），迁移头为
+只读个人财务 Agent。阶段五最终图版本为 `finance-agent-p5.6-v1`，当前图版本为
+`finance-capability-agent-v2`：外接模型按动态能力目录自主规划并支持多轮只读调用，服务端继续
+负责身份绑定、权限、参数、时间语义、事实 Grounding 和风险策略。迁移头为
 `20260802_0012`。阶段六通过 GitHub PR #11 squash 合并，当前功能基线为 `e8aa6ea`；
 本地 `master` 与 `origin/master` 已对齐，阶段六旧本地分支和 stash 已完成清理。
 
 P5.6 已补齐版本化评测、数值 Grounding、跨用户恢复接口边界、真实浏览器自动化和交付
 文档。模型无法指定用户、执行写工具或把受控证据之外的数字、行情、工具名和引用保存为
 最终答案。
+
+2026-08-11 已在用户界面验收后删除旧规则规划器、旧 JSON 模型规划器、旧 LangGraph 分支、
+关键词日期解析和两个切换开关。`finance_planner.py` 仅保留历史 Checkpoint 类型路径兼容导出，
+不再含任何问题分类、时间解析或工具选择代码。
 
 阶段六 P6.1 已完成字段白名单 JSON 日志、统一脱敏、`contextvars` 关联上下文、
 OpenTelemetry OTLP Trace、Prometheus 指标、3 个 Grafana 面板和 6 条告警规则。完整

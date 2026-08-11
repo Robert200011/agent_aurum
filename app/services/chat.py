@@ -1051,15 +1051,7 @@ def _detail_text(value: object) -> str | None:
 
 
 def _planner_mode(result: RagAnswerResult) -> str:
-    if result.plan is None:
-        return "rules"
-    if result.plan.route_reason == "model_structured_plan":
-        return "model"
-    if result.plan.route_reason == "capability_agent_v2":
-        return "capability_agent_v2"
-    if result.plan.route_reason.startswith("model_planner_"):
-        return "model_fallback"
-    return "rules"
+    return "capability_agent_v2" if result.plan is not None else "unavailable"
 
 
 def _risk_notice(result: RagAnswerResult) -> str | None:

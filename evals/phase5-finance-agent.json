@@ -1,5 +1,5 @@
 {
-  "version": "p5.7-v1",
+  "version": "p5.8-capability-v2",
   "reference_date": "2026-08-02",
   "thresholds": {
     "deterministic_pass_rate": 1.0,
@@ -173,6 +173,11 @@
     {
       "id": "time-explicit-chinese-month",
       "question": "2026年8月支出",
+      "input": {
+        "time_scope": "explicit_range",
+        "start_date": "2026-08-01",
+        "end_date": "2026-08-31"
+      },
       "today": "2026-08-02",
       "start_date": "2026-08-01",
       "end_date": "2026-08-31"
@@ -180,6 +185,7 @@
     {
       "id": "time-month-end",
       "question": "上月支出",
+      "input": {"time_scope": "previous_month"},
       "today": "2026-03-31",
       "start_date": "2026-02-01",
       "end_date": "2026-02-28"
@@ -187,6 +193,7 @@
     {
       "id": "time-year-boundary",
       "question": "上月支出",
+      "input": {"time_scope": "previous_month"},
       "today": "2026-01-01",
       "start_date": "2025-12-01",
       "end_date": "2025-12-31"
@@ -194,6 +201,7 @@
     {
       "id": "time-leap-year",
       "question": "上月支出",
+      "input": {"time_scope": "previous_month"},
       "today": "2024-03-31",
       "start_date": "2024-02-01",
       "end_date": "2024-02-29"
@@ -201,6 +209,7 @@
     {
       "id": "time-relative-30-days",
       "question": "最近 30 天支出",
+      "input": {"time_scope": "last_n_days", "days": 30},
       "today": "2026-08-02",
       "start_date": "2026-07-04",
       "end_date": "2026-08-02"
