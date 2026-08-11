@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from time import perf_counter
 from typing import Any, cast
@@ -30,6 +31,11 @@ from app.providers.model_provider import (
     ChatModelProviderError,
     ChatStreamChunk,
     ChatTokenUsage,
+    ChatToolCall,
+    ChatToolCompletionResult,
+    ChatToolDefinition,
+    ChatToolExchange,
+    ChatToolResultMessage,
 )
 from app.providers.quota_store import RedisQuotaStore
 
@@ -124,6 +130,62 @@ class DashScopeChatModelProvider:
                     ),
                 )
 
+    async def complete_with_tools(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ChatToolDefinition],
+        *,
+        require_tool: bool = False,
+        exchanges: Sequence[ChatToolExchange] = (),
+    ) -> ChatToolCompletionResult:
+        """使用 OpenAI-compatible function tools 获取受控能力调用或最终文本。"""
+
+        payload = _validated_messages(messages)
+        payload.extend(_validated_tool_exchanges(exchanges))
+        tool_payload = _validated_tools(tools)
+        if self._quota_store is not None:
+            await self._quota_store.reserve_model_call()
+        create = self._require_create()
+        started = perf_counter()
+        outcome = "error"
+        result: ChatToolCompletionResult | None = None
+        with start_span(
+            "model.chat.tools",
+            provider=self.provider_name,
+            model=self.model_name,
+        ):
+            try:
+                response = await create(
+                    model=self._model_name,
+                    messages=payload,
+                    tools=tool_payload,
+                    tool_choice="required" if require_tool else "auto",
+                    temperature=self._temperature,
+                    max_tokens=self._max_tokens,
+                    n=1,
+                    stream=False,
+                )
+                result = self._parse_tool_completion(response)
+                if result.usage is not None:
+                    add_model_tokens(result.usage.total_tokens)
+                outcome = "success"
+                return result
+            except ChatModelProviderFailure:
+                raise
+            except Exception as exc:
+                raise _provider_failure(exc) from exc
+            finally:
+                usage = result.usage if result is not None else None
+                record_model_call(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    mode="tools",
+                    outcome=outcome,
+                    duration_seconds=perf_counter() - started,
+                    prompt_tokens=usage.prompt_tokens if usage is not None else 0,
+                    completion_tokens=(usage.completion_tokens if usage is not None else 0),
+                )
+
     async def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[ChatStreamChunk]:
         payload = _validated_messages(messages)
         if self._quota_store is not None:
@@ -213,6 +275,31 @@ class DashScopeChatModelProvider:
             usage=_parse_usage(_value(response, "usage")),
         )
 
+    def _parse_tool_completion(self, response: object) -> ChatToolCompletionResult:
+        choices = _sequence_value(response, "choices")
+        if len(choices) != 1:
+            raise ChatModelProviderFailure("chat_response_invalid", retryable=True)
+        choice = choices[0]
+        message = _value(choice, "message")
+        raw_content = _value(message, "content")
+        content = raw_content.strip() if isinstance(raw_content, str) else None
+        raw_calls = _value(message, "tool_calls", default=())
+        if raw_calls is None:
+            raw_calls = ()
+        if not isinstance(raw_calls, Sequence) or isinstance(raw_calls, (str, bytes)):
+            raise ChatModelProviderFailure("chat_response_invalid", retryable=True)
+        calls = tuple(_parse_tool_call(item) for item in raw_calls)
+        if not content and not calls:
+            raise ChatModelProviderFailure("chat_response_invalid", retryable=True)
+        return ChatToolCompletionResult(
+            content=content or None,
+            tool_calls=calls,
+            model=_response_model(response, self._model_name),
+            finish_reason=_optional_string(_value(choice, "finish_reason")),
+            request_id=_optional_string(_value(response, "id")),
+            usage=_parse_usage(_value(response, "usage")),
+        )
+
     def _parse_stream_chunk(self, response: object) -> ChatStreamChunk | None:
         usage = _parse_usage(_value(response, "usage"))
         choices = _sequence_value(response, "choices")
@@ -247,10 +334,10 @@ class DashScopeChatModelProvider:
         )
 
 
-def _validated_messages(messages: Sequence[ChatMessage]) -> list[dict[str, str]]:
+def _validated_messages(messages: Sequence[ChatMessage]) -> list[dict[str, object]]:
     if not messages:
         raise ChatModelProviderFailure("chat_input_invalid", retryable=False)
-    payload: list[dict[str, str]] = []
+    payload: list[dict[str, object]] = []
     expected_role = ChatPromptRole.USER
     for index, message in enumerate(messages):
         if not isinstance(message, ChatMessage) or not message.content.strip():
@@ -270,6 +357,100 @@ def _validated_messages(messages: Sequence[ChatMessage]) -> list[dict[str, str]]
     if messages[-1].role != ChatPromptRole.USER:
         raise ChatModelProviderFailure("chat_input_invalid", retryable=False)
     return payload
+
+
+def _validated_tool_exchanges(
+    exchanges: Sequence[ChatToolExchange],
+) -> list[dict[str, object]]:
+    payload: list[dict[str, object]] = []
+    for exchange in exchanges:
+        if (
+            not isinstance(exchange, ChatToolExchange)
+            or not exchange.tool_calls
+            or len(exchange.tool_calls) != len(exchange.results)
+        ):
+            raise ChatModelProviderFailure("chat_input_invalid", retryable=False)
+        expected_ids = {call.call_id for call in exchange.tool_calls}
+        if expected_ids != {result.call_id for result in exchange.results}:
+            raise ChatModelProviderFailure("chat_input_invalid", retryable=False)
+        payload.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [_tool_call_payload(call) for call in exchange.tool_calls],
+            }
+        )
+        for result in exchange.results:
+            if not isinstance(result, ChatToolResultMessage) or not result.content.strip():
+                raise ChatModelProviderFailure("chat_input_invalid", retryable=False)
+            payload.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": result.call_id,
+                    "name": result.name,
+                    "content": result.content,
+                }
+            )
+    return payload
+
+
+def _tool_call_payload(call: ChatToolCall) -> dict[str, object]:
+    return {
+        "id": call.call_id,
+        "type": "function",
+        "function": {
+            "name": call.name,
+            "arguments": json.dumps(
+                call.arguments,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        },
+    }
+
+
+def _validated_tools(tools: Sequence[ChatToolDefinition]) -> list[dict[str, object]]:
+    if not tools:
+        raise ChatModelProviderFailure("chat_input_invalid", retryable=False)
+    payload: list[dict[str, object]] = []
+    names: set[str] = set()
+    for tool in tools:
+        if (
+            not isinstance(tool, ChatToolDefinition)
+            or not tool.name.strip()
+            or not tool.description.strip()
+            or tool.name in names
+            or tool.parameters.get("type") != "object"
+        ):
+            raise ChatModelProviderFailure("chat_input_invalid", retryable=False)
+        names.add(tool.name)
+        payload.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
+            }
+        )
+    return payload
+
+
+def _parse_tool_call(value: object) -> ChatToolCall:
+    call_id = _optional_string(_value(value, "id"))
+    function = _value(value, "function")
+    name = _optional_string(_value(function, "name"))
+    raw_arguments = _value(function, "arguments")
+    if not call_id or not name:
+        raise ChatModelProviderFailure("chat_response_invalid", retryable=True)
+    try:
+        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+    except json.JSONDecodeError as exc:
+        raise ChatModelProviderFailure("chat_response_invalid", retryable=True) from exc
+    if not isinstance(arguments, dict):
+        raise ChatModelProviderFailure("chat_response_invalid", retryable=True)
+    return ChatToolCall(call_id=call_id, name=name, arguments=arguments)
 
 
 def _parse_usage(value: object) -> ChatTokenUsage | None:

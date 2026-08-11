@@ -42,6 +42,7 @@ class FinanceToolName(StrEnum):
     GET_FINANCE_SUMMARY = "get_finance_summary"
     GET_ACCOUNT_BALANCES = "get_account_balances"
     SEARCH_TRANSACTIONS = "search_transactions"
+    GET_RECENT_TRANSACTIONS = "get_recent_transactions"
     GET_LATEST_TRANSACTION = "get_latest_transaction"
     GET_INCOME_EXPENSE_REPORT = "get_income_expense_report"
     GET_BUDGET_STATUS = "get_budget_status"
@@ -154,6 +155,12 @@ class LatestTransactionInput(BaseModel):
     @classmethod
     def normalize_optional_currency(cls, value: str | None) -> str | None:
         return value.strip().upper() if value is not None else None
+
+
+class RecentTransactionsInput(LatestTransactionInput):
+    """查询不受自然月限制的最近若干笔流水。"""
+
+    limit: int = Field(default=5, ge=1, le=MAX_TOOL_TRANSACTIONS)
 
 
 class IncomeExpenseReportInput(DateRangeInput):
@@ -332,6 +339,15 @@ class LatestTransactionRequest(BaseModel):
     arguments: LatestTransactionInput
 
 
+class RecentTransactionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: Literal[FinanceToolName.GET_RECENT_TRANSACTIONS] = (
+        FinanceToolName.GET_RECENT_TRANSACTIONS
+    )
+    arguments: RecentTransactionsInput
+
+
 class IncomeExpenseReportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -389,6 +405,7 @@ type FinanceToolRequest = Annotated[
     FinanceSummaryRequest
     | AccountBalancesRequest
     | TransactionSearchRequest
+    | RecentTransactionsRequest
     | LatestTransactionRequest
     | IncomeExpenseReportRequest
     | BudgetStatusRequest
@@ -795,6 +812,7 @@ type FinanceToolArguments = (
     FinanceSummaryInput
     | AccountBalancesInput
     | TransactionSearchInput
+    | RecentTransactionsInput
     | LatestTransactionInput
     | IncomeExpenseReportInput
     | BudgetStatusInput
@@ -1074,6 +1092,51 @@ class FinanceToolExecutor:
                 end_date=request.arguments.end_date,
                 currency=request.arguments.currency,
                 search=request.arguments.search,
+                page=1,
+                page_size=request.arguments.limit,
+            )
+            return (
+                TransactionSearchData(
+                    transactions=tuple(
+                        TransactionData(
+                            transaction_id=item.id,
+                            account_id=item.account_id,
+                            transaction_type=item.transaction_type,
+                            amount=item.amount,
+                            currency=item.currency,
+                            category=item.category,
+                            description=(item.description[:200] if item.description else None),
+                            transaction_date=item.transaction_date,
+                        )
+                        for item in transaction_page.items
+                    ),
+                    returned_count=len(transaction_page.items),
+                    total_count=transaction_page.total,
+                    truncated=transaction_page.total > len(transaction_page.items),
+                ),
+                self._clock(),
+                (
+                    FinanceToolWarning(
+                        code="transaction_result_truncated",
+                        message="transaction result was truncated",
+                    ),
+                )
+                if transaction_page.total > len(transaction_page.items)
+                else (),
+            )
+        if isinstance(request, RecentTransactionsRequest):
+            transaction_page = await self._service.list_transactions(
+                account_id=request.arguments.account_id,
+                transaction_type=(
+                    request.arguments.transaction_type.value
+                    if request.arguments.transaction_type is not None
+                    else None
+                ),
+                category=request.arguments.category,
+                start_date=None,
+                end_date=None,
+                currency=request.arguments.currency,
+                search=None,
                 page=1,
                 page_size=request.arguments.limit,
             )

@@ -40,6 +40,9 @@ class RagAnswerService:
         context_source_max_characters: int,
         finance_tools: FinanceToolExecutor | None = None,
         model_planner_enabled: bool = False,
+        capability_agent_enabled: bool = False,
+        capability_agent_max_steps: int = 3,
+        capability_agent_max_tool_calls: int = 6,
         finance_timezone: str = "Asia/Shanghai",
         checkpointer: BaseCheckpointSaver[str] | None = None,
     ) -> None:
@@ -57,6 +60,9 @@ class RagAnswerService:
             context_source_max_characters=context_source_max_characters,
             finance_tools=finance_tools,
             model_planner_enabled=model_planner_enabled,
+            capability_agent_enabled=capability_agent_enabled,
+            capability_agent_max_steps=capability_agent_max_steps,
+            capability_agent_max_tool_calls=capability_agent_max_tool_calls,
             checkpointer=checkpointer,
         )
 
@@ -65,6 +71,7 @@ class RagAnswerService:
         *,
         question: str,
         thread_id: UUID,
+        history: list[dict[str, str]] | None = None,
     ) -> RagAnswerResult:
         """执行单轮项目问答；结构化引用和消息落库由下一步接入。"""
 
@@ -75,6 +82,7 @@ class RagAnswerService:
             min_score=None,
             response_mode="complete",
             current_date=_current_date(self._finance_timezone),
+            history=history or [],
         )
         config = _graph_config(thread_id)
         output = cast(
@@ -96,6 +104,8 @@ class RagAnswerService:
             plan=output["plan"],
             finance_results=output["finance_results"],
             data_as_of=_latest_finance_data_time(output["finance_results"]),
+            capability_decision_steps=output["capability_decision_steps"],
+            capability_call_count=output["capability_call_count"],
         )
 
     async def stream(
@@ -103,6 +113,7 @@ class RagAnswerService:
         *,
         question: str,
         thread_id: UUID,
+        history: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[RagAnswerStreamEvent]:
         """通过 LangGraph custom stream 转发模型文本并保存每个节点恢复点。"""
 
@@ -113,6 +124,7 @@ class RagAnswerService:
             min_score=None,
             response_mode="stream",
             current_date=_current_date(self._finance_timezone),
+            history=history or [],
         )
         config = _graph_config(thread_id)
         output: RagAnswerOutput | None = None
@@ -155,6 +167,8 @@ class RagAnswerService:
                 plan=output["plan"],
                 finance_results=output["finance_results"],
                 data_as_of=_latest_finance_data_time(output["finance_results"]),
+                capability_decision_steps=output["capability_decision_steps"],
+                capability_call_count=output["capability_call_count"],
             )
         )
 

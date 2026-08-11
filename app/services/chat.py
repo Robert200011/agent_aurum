@@ -127,6 +127,7 @@ class StreamingRun:
     message_id: UUID
     run_id: UUID
     started_at: datetime
+    history_before: datetime
 
 
 class ChatService:
@@ -138,10 +139,12 @@ class ChatService:
         session: AsyncSession,
         user_id: UUID,
         answer_service: RagAnswerService,
+        history_message_limit: int = 8,
     ) -> None:
         self._session = session
         self._user_id = user_id
         self._answer_service = answer_service
+        self._history_message_limit = history_message_limit
         self._repository = ChatRepository(session)
 
     @property
@@ -356,6 +359,10 @@ class ChatService:
         if not normalized_question or len(normalized_question) > 2_000:
             raise BusinessRuleError("question is not valid")
         started_at = datetime.now(UTC)
+        history = await self._conversation_history(
+            conversation_id=conversation.id,
+            before=started_at,
+        )
         user_message = Message(
             conversation_id=conversation.id,
             user_id=self._user_id,
@@ -395,6 +402,7 @@ class ChatService:
             result = await self._answer_service.answer(
                 question=normalized_question,
                 thread_id=conversation.id,
+                history=history,
             )
             await self._prepare()
             assistant = await self._required_message(assistant_message.id, for_update=True)
@@ -454,6 +462,8 @@ class ChatService:
                 "finance_tool_statuses": [
                     tool_result.status.value for tool_result in result.finance_results
                 ],
+                "capability_decision_steps": result.capability_decision_steps,
+                "capability_call_count": result.capability_call_count,
                 "risk_policy": (result.plan.risk_policy if result.plan is not None else "standard"),
                 "risk_notice": _risk_notice(result),
             }
@@ -599,6 +609,7 @@ class ChatService:
             message_id=assistant.id,
             run_id=run.id,
             started_at=started_at,
+            history_before=user_message.created_at,
         )
 
     async def execute_streaming_run(
@@ -613,9 +624,14 @@ class ChatService:
         last_stage: str = "understanding"
         try:
             yield ChatStreamStatus("understanding")
+            history = await self._conversation_history(
+                conversation_id=streaming_run.conversation_id,
+                before=streaming_run.history_before,
+            )
             async for event in self._answer_service.stream(
                 question=streaming_run.question,
                 thread_id=streaming_run.thread_id,
+                history=history,
             ):
                 if isinstance(event, RagAnswerStage):
                     if event.stage == last_stage:
@@ -735,6 +751,7 @@ class ChatService:
             message_id=assistant_message.id,
             run_id=run.id,
             started_at=started_at,
+            history_before=started_at,
         )
 
     async def _persist_streamed_answer(
@@ -805,6 +822,8 @@ class ChatService:
             "finance_tool_statuses": [
                 tool_result.status.value for tool_result in result.finance_results
             ],
+            "capability_decision_steps": result.capability_decision_steps,
+            "capability_call_count": result.capability_call_count,
             "risk_policy": (result.plan.risk_policy if result.plan is not None else "standard"),
             "risk_notice": _risk_notice(result),
         }
@@ -932,6 +951,37 @@ class ChatService:
     async def _prepare(self) -> None:
         await set_tenant_context(self._session, self._user_id)
 
+    async def _conversation_history(
+        self,
+        *,
+        conversation_id: UUID,
+        before: datetime,
+    ) -> list[dict[str, str]]:
+        """只提供目标问题之前的有限已完成消息，避免重生成时未来消息倒灌。"""
+
+        if self._history_message_limit <= 0:
+            return []
+        messages = await self._repository.list_messages(
+            user_id=self._user_id,
+            conversation_id=conversation_id,
+        )
+        eligible = [
+            message
+            for message in messages
+            if message.created_at < before
+            and message.status == MessageStatus.COMPLETED.value
+            and message.role in {MessageRole.USER.value, MessageRole.ASSISTANT.value}
+            and message.content.strip()
+        ]
+        selected = eligible[-self._history_message_limit :]
+        return [
+            {
+                "role": message.role,
+                "content": message.content.strip()[:2_000],
+            }
+            for message in selected
+        ]
+
     async def _ensure_no_running_run(self, conversation_id: UUID) -> None:
         running = await self._repository.get_running_agent_run(
             user_id=self._user_id,
@@ -1005,6 +1055,8 @@ def _planner_mode(result: RagAnswerResult) -> str:
         return "rules"
     if result.plan.route_reason == "model_structured_plan":
         return "model"
+    if result.plan.route_reason == "capability_agent_v2":
+        return "capability_agent_v2"
     if result.plan.route_reason.startswith("model_planner_"):
         return "model_fallback"
     return "rules"

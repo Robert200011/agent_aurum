@@ -209,6 +209,13 @@ class ChatRunCoordinator:
                                 self._settings.rag_context_source_max_characters
                             ),
                             model_planner_enabled=(self._settings.agent_model_planner_enabled),
+                            capability_agent_enabled=(self._settings.capability_agent_enabled),
+                            capability_agent_max_steps=(
+                                self._settings.capability_agent_max_steps
+                            ),
+                            capability_agent_max_tool_calls=(
+                                self._settings.capability_agent_max_tool_calls
+                            ),
                             finance_timezone=self._settings.finance_timezone,
                             finance_tools=FinanceToolExecutor(
                                 FinanceService(session=session, user_id=user_id),
@@ -224,6 +231,9 @@ class ChatRunCoordinator:
                             session=session,
                             user_id=user_id,
                             answer_service=answering,
+                            history_message_limit=(
+                                self._settings.capability_agent_history_messages
+                            ),
                         )
                         async for event in service.execute_streaming_run(run):
                             await self._append(feed, event)
