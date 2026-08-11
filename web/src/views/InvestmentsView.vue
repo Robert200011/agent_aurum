@@ -644,13 +644,12 @@ onMounted(loadData)
   grid-template-columns: 1.1fr 1fr;
   align-items: end;
   gap: 32px;
-  min-height: 210px;
-  padding: 34px;
-  border-radius: 22px;
-  color: white;
-  background:
-    radial-gradient(circle at 85% 0%, rgb(213 162 63 / 24%), transparent 18rem),
-    linear-gradient(135deg, #0b2d29, #10211f);
+  min-height: 180px;
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--ink-950);
+  background: #ffffff;
   overflow: hidden;
 }
 
@@ -659,7 +658,7 @@ onMounted(loadData)
 }
 
 .portfolio-hero > div:first-child span {
-  color: #d8b766;
+  color: var(--ink-500);
   font-size: 9px;
   font-weight: 750;
   letter-spacing: 0.16em;
@@ -667,13 +666,13 @@ onMounted(loadData)
 
 .portfolio-hero > div:first-child strong {
   margin: 8px 0;
-  font-family: 'Iowan Old Style', Georgia, serif;
-  font-size: clamp(34px, 5vw, 52px);
-  font-weight: 550;
+  font-family: inherit;
+  font-size: clamp(28px, 4vw, 42px);
+  font-weight: 500;
 }
 
 .portfolio-hero small {
-  color: rgb(226 242 237 / 55%);
+  color: var(--ink-500);
   font-size: 10px;
 }
 
@@ -685,13 +684,13 @@ onMounted(loadData)
 
 .portfolio-metrics span {
   display: grid;
-  color: rgb(226 242 237 / 52%);
+  color: var(--ink-500);
   font-size: 9px;
 }
 
 .portfolio-metrics strong {
   margin-top: 5px;
-  color: white;
+  color: var(--ink-950);
   font-size: 15px;
 }
 
@@ -715,8 +714,8 @@ onMounted(loadData)
 .performance-item {
   padding: 20px;
   border: 1px solid var(--line);
-  border-radius: 15px;
-  background: #fbfcfa;
+  border-radius: 12px;
+  background: #ffffff;
 }
 
 .performance-item header {

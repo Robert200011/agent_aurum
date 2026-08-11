@@ -56,4 +56,29 @@ describe('AppShell logout confirmation', () => {
     expect(logout).toHaveBeenCalledOnce()
     expect(replace).toHaveBeenCalledWith('/login')
   })
+
+  it('opens and closes the embedded agent from the sidebar button', async () => {
+    const wrapper = shallowMount(AppShell, {
+      global: {
+        stubs: {
+          RouterView: {
+            template: '<div><slot :Component="null" /></div>',
+          },
+          ChatView: true,
+        },
+      },
+    })
+    const launcher = wrapper.get('.assistant-entry')
+
+    expect(launcher.attributes('aria-expanded')).toBe('false')
+
+    await launcher.trigger('click')
+
+    expect(launcher.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('.agent-drawer').isVisible()).toBe(true)
+
+    await wrapper.get('.agent-drawer-header button').trigger('click')
+
+    expect(launcher.attributes('aria-expanded')).toBe('false')
+  })
 })
