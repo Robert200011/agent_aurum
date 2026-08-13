@@ -145,7 +145,7 @@ class PersonalFinancialProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         CheckConstraint(
             "annual_expense_budget IS NULL OR annual_expense_budget >= 0",
-            name="annual_expense_budget_nonnegative",
+            name="expense_budget_nonnegative",
         ),
         CheckConstraint(
             "currency ~ '^[A-Z]{3}$'",
