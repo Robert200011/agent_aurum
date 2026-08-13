@@ -259,6 +259,36 @@ class AuthService:
         await self._session.commit()
         return user
 
+    async def deactivate_account(
+        self,
+        *,
+        user: User,
+        claims: AccessTokenClaims,
+        confirmation_username: str,
+        current_password: str,
+        request: RequestMetadata,
+    ) -> None:
+        """软停用当前账户，并立即使所有现有登录凭证失效。"""
+
+        if confirmation_username != user.username:
+            raise BusinessRuleError("confirmation username does not match")
+        if not verify_password(current_password, user.password_hash):
+            raise AuthenticationError("current password is incorrect")
+
+        user.status = UserStatus.DISABLED
+        user.token_version += 1
+        await self._refresh_tokens.revoke_all_for_user(user.id)
+        await self._security_store.revoke_access_token(claims.jti, claims.expires_at)
+        self._audit.add(
+            action="auth.account_deactivated",
+            actor_user_id=user.id,
+            resource_type="user",
+            resource_id=str(user.id),
+            ip=request.ip,
+            user_agent=request.user_agent,
+        )
+        await self._session.commit()
+
     async def _issue_token_pair(
         self,
         *,

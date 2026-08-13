@@ -17,7 +17,7 @@ from app.db.models.finance import (
     InvestmentTransaction,
     MarketPriceSnapshot,
 )
-from app.db.models.identity import AuditLog, RefreshToken, User
+from app.db.models.identity import AuditLog, RefreshToken, User, UserPreference, UserProfile
 from app.db.models.rag import (
     Document,
     DocumentChunk,
@@ -54,4 +54,6 @@ __all__ = [
     "RefreshToken",
     "RetrievalLog",
     "User",
+    "UserPreference",
+    "UserProfile",
 ]

@@ -36,6 +36,7 @@ from app.services.chat_runs import ChatRunCoordinator
 from app.services.finance import FinanceService
 from app.services.rag import PersonalKnowledgeService
 from app.services.retrieval import RagRetrievalService
+from app.services.user_settings import UserSettingsService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -163,6 +164,19 @@ def get_finance_service(
 
 
 FinanceServiceDependency = Annotated[FinanceService, Depends(get_finance_service)]
+
+
+def get_user_settings_service(
+    session: SessionDependency,
+    context: AccessContextDependency,
+) -> UserSettingsService:
+    return UserSettingsService(session=session, user_id=context.user.id)
+
+
+UserSettingsServiceDependency = Annotated[
+    UserSettingsService,
+    Depends(get_user_settings_service),
+]
 
 
 async def get_personal_knowledge_service(

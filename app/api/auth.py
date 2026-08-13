@@ -11,6 +11,7 @@ from app.api.dependencies import (
 )
 from app.api.schemas.auth import (
     ChangePasswordRequest,
+    DeactivateAccountRequest,
     LoginRequest,
     MessageResponse,
     RegisterRequest,
@@ -175,3 +176,26 @@ async def change_password(
     )
     _delete_refresh_cookie(response, settings)
     return MessageResponse(message="password changed; sign in again")
+
+
+@router.post("/deactivate-account", response_model=MessageResponse)
+async def deactivate_account(
+    payload: DeactivateAccountRequest,
+    request: Request,
+    response: Response,
+    context: AccessContextDependency,
+    service: AuthServiceDependency,
+    settings: SettingsDependency,
+) -> MessageResponse:
+    """经用户名、密码和固定确认值校验后软停用当前账户。"""
+
+    _validate_cookie_request_origin(request, settings)
+    await service.deactivate_account(
+        user=context.user,
+        claims=context.claims,
+        confirmation_username=payload.username,
+        current_password=payload.current_password.get_secret_value(),
+        request=_request_metadata(request),
+    )
+    _delete_refresh_cookie(response, settings)
+    return MessageResponse(message="account deactivated")

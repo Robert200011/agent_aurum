@@ -1,5 +1,5 @@
 import type { Account } from '@/types/api'
-import { activeAccountsForCurrency } from '@/utils/finance'
+import { activeAccountsForCurrency, defaultAccountForTransaction } from '@/utils/finance'
 
 function account(overrides: Partial<Account>): Account {
   return {
@@ -33,5 +33,21 @@ describe('总览账户币种筛选', () => {
     const result = activeAccountsForCurrency([account({ currency: 'HKD' })], 'CNY')
 
     expect(result).toEqual([])
+  })
+})
+
+describe('新交易默认账户', () => {
+  it('优先选择有效的用户默认账户', () => {
+    const first = account({ id: 'first' })
+    const preferred = account({ id: 'preferred' })
+
+    expect(defaultAccountForTransaction([first, preferred], preferred.id)).toBe(preferred)
+  })
+
+  it('默认账户不可用时回退到首个有效账户', () => {
+    const archived = account({ id: 'archived', is_active: false })
+    const fallback = account({ id: 'fallback' })
+
+    expect(defaultAccountForTransaction([archived, fallback], archived.id)).toBe(fallback)
   })
 })

@@ -58,3 +58,11 @@ playwright-report/
 *.swo
 /.claude/settings.local.json
 /tests/
+!/tests/
+/tests/*
+!/tests/unit/
+/tests/unit/*
+!/tests/unit/test_user_settings_service.py
+!/tests/integration/
+/tests/integration/*
+!/tests/integration/test_user_settings_isolation.py
