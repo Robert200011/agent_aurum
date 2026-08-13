@@ -11,9 +11,17 @@ import {
   SettingOutlined,
 } from "@ant-design/icons-vue";
 import { message, Modal } from "ant-design-vue";
-import { computed, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 
-type EmploymentStatus = "" | "employed" | "self_employed" | "student" | "retired" | "other";
+import { apiErrorMessage } from "@/services/http";
+import { settingsApi } from "@/services/settings";
+import type {
+  EmploymentStatus as ApiEmploymentStatus,
+  PersonalFinancialProfile,
+  PersonalFinancialProfileInput,
+} from "@/types/api";
+
+type EmploymentStatus = "" | ApiEmploymentStatus;
 type MemoryCategory = "goal" | "preference" | "constraint" | "personal";
 
 interface FinancialProfileDraft {
@@ -47,6 +55,11 @@ const profile = reactive<FinancialProfileDraft>({
 });
 const profileForm = reactive<FinancialProfileDraft>({ ...profile });
 const profileEditorOpen = ref(false);
+const profileLoading = ref(true);
+const profileSaving = ref(false);
+const profileLoadFailed = ref(false);
+const profileExists = ref(false);
+const profileCurrency = ref("CNY");
 const memorySettingsOpen = ref(false);
 const memoryListOpen = ref(false);
 const memoryEditorOpen = ref(false);
@@ -146,14 +159,89 @@ function displayMoney(value: string): string {
 }
 
 function openProfileEditor(): void {
+  if (profileLoading.value || profileLoadFailed.value || profileSaving.value) return;
   Object.assign(profileForm, profile);
   profileEditorOpen.value = true;
 }
 
-function saveProfilePreview(): void {
-  Object.assign(profile, profileForm);
-  profileEditorOpen.value = false;
-  message.success("档案预览已更新，本阶段尚未同步到后端");
+function nullableText(value: string): string | null {
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function nullableMoney(value: string): string | null {
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function profilePayload(): PersonalFinancialProfileInput {
+  return {
+    birth_date: profileForm.birthDate || null,
+    residence_province: nullableText(profileForm.residenceProvince),
+    residence_city: nullableText(profileForm.residenceCity),
+    employment_status: profileForm.employmentStatus || null,
+    occupation: nullableText(profileForm.occupation),
+    annual_income: nullableMoney(profileForm.annualIncome),
+    annual_expense_budget: nullableMoney(profileForm.annualExpenseBudget),
+    currency: profileCurrency.value,
+  };
+}
+
+function applyServerProfile(value: PersonalFinancialProfile): void {
+  profileCurrency.value = value.currency;
+  Object.assign(profile, {
+    birthDate: value.birth_date ?? "",
+    residenceProvince: value.residence_province ?? "",
+    residenceCity: value.residence_city ?? "",
+    employmentStatus: value.employment_status ?? "",
+    occupation: value.occupation ?? "",
+    annualIncome: value.annual_income == null ? "" : String(value.annual_income),
+    annualExpenseBudget:
+      value.annual_expense_budget == null ? "" : String(value.annual_expense_budget),
+  });
+}
+
+async function loadFinancialProfile(): Promise<void> {
+  profileLoading.value = true;
+  profileLoadFailed.value = false;
+  try {
+    const value = await settingsApi.financialProfile();
+    profileExists.value = value !== null;
+    if (value) applyServerProfile(value);
+    else Object.assign(profile, {
+      birthDate: "",
+      residenceProvince: "",
+      residenceCity: "",
+      employmentStatus: "",
+      occupation: "",
+      annualIncome: "",
+      annualExpenseBudget: "",
+    });
+  } catch (error) {
+    profileLoadFailed.value = true;
+    message.error(apiErrorMessage(error, "个人财务档案加载失败"));
+  } finally {
+    profileLoading.value = false;
+  }
+}
+
+async function saveFinancialProfile(): Promise<void> {
+  if (profileSaving.value) return;
+  profileSaving.value = true;
+  try {
+    const payload = profilePayload();
+    const saved = profileExists.value
+      ? await settingsApi.updateFinancialProfile(payload)
+      : await settingsApi.createFinancialProfile(payload);
+    applyServerProfile(saved);
+    profileExists.value = true;
+    profileEditorOpen.value = false;
+    message.success("个人财务档案已保存");
+  } catch (error) {
+    message.error(apiErrorMessage(error, "个人财务档案保存失败"));
+  } finally {
+    profileSaving.value = false;
+  }
 }
 
 function openMemorySettings(): void {
@@ -218,6 +306,8 @@ function deleteMemory(memory: MemoryDraft): void {
     },
   });
 }
+
+onMounted(loadFinancialProfile);
 </script>
 
 <template>
@@ -230,16 +320,16 @@ function deleteMemory(memory: MemoryDraft): void {
         <span>PERSONAL FINANCE</span>
         <h2>个人财务档案</h2>
       </div>
-      <span class="preview-badge">界面预览</span>
+      <span class="preview-badge">档案已接入</span>
     </header>
 
     <div class="profile-scroll">
       <a-alert
-        type="info"
+        type="warning"
         show-icon
         class="preview-alert"
-        message="前端骨架阶段"
-        description="当前档案与记忆仅在本次页面会话中演示，刷新后会重置，尚未用于 Agent 回答。"
+        message="记忆功能仍为界面预览"
+        description="个人财务档案现已保存到后端数据库；下方记忆内容仍只在本次页面会话中演示，尚未用于 Agent 回答。"
       />
 
       <section class="memory-card" :class="{ 'is-disabled': !memoryEnabled }">
@@ -269,7 +359,7 @@ function deleteMemory(memory: MemoryDraft): void {
         </button>
       </section>
 
-      <section class="profile-card">
+      <section class="profile-card" :aria-busy="profileLoading">
         <div class="card-heading">
           <div>
             <span class="card-kicker">PROFILE</span>
@@ -279,48 +369,61 @@ function deleteMemory(memory: MemoryDraft): void {
             type="button"
             class="icon-button subtle"
             aria-label="编辑个人信息"
+            :disabled="profileLoading || profileLoadFailed || profileSaving"
             @click="openProfileEditor"
           >
             <EditOutlined />
           </button>
         </div>
 
-        <div class="completion-row">
-          <span>档案完整度</span>
-          <strong>{{ profileCompletion }}%</strong>
-          <a-progress :percent="profileCompletion" :show-info="false" size="small" />
+        <div v-if="profileLoading" class="profile-state">
+          <a-spin size="small" />
+          <span>正在加载已保存的档案…</span>
         </div>
 
-        <dl class="profile-fields">
-          <div>
-            <dt>出生日期</dt>
-            <dd>{{ displayDate(profile.birthDate) }}</dd>
+        <div v-else-if="profileLoadFailed" class="profile-state error">
+          <span>档案加载失败，请检查网络后重试。</span>
+          <a-button size="small" @click="loadFinancialProfile">重新加载</a-button>
+        </div>
+
+        <template v-else>
+          <div class="completion-row">
+            <span>档案完整度</span>
+            <strong>{{ profileCompletion }}%</strong>
+            <a-progress :percent="profileCompletion" :show-info="false" size="small" />
           </div>
-          <div>
-            <dt>年龄</dt>
-            <dd>{{ age }}</dd>
-          </div>
-          <div>
-            <dt>居住省市</dt>
-            <dd>{{ residence }}</dd>
-          </div>
-          <div>
-            <dt>就业情况</dt>
-            <dd>{{ employmentLabels[profile.employmentStatus] }}</dd>
-          </div>
-          <div>
-            <dt>职业</dt>
-            <dd>{{ profile.occupation || "待完善" }}</dd>
-          </div>
-          <div>
-            <dt>申报年收入</dt>
-            <dd>{{ displayMoney(profile.annualIncome) }}</dd>
-          </div>
-          <div>
-            <dt>年度开销预算</dt>
-            <dd>{{ displayMoney(profile.annualExpenseBudget) }}</dd>
-          </div>
-        </dl>
+
+          <dl class="profile-fields">
+            <div>
+              <dt>出生日期</dt>
+              <dd>{{ displayDate(profile.birthDate) }}</dd>
+            </div>
+            <div>
+              <dt>年龄</dt>
+              <dd>{{ age }}</dd>
+            </div>
+            <div>
+              <dt>居住省市</dt>
+              <dd>{{ residence }}</dd>
+            </div>
+            <div>
+              <dt>就业情况</dt>
+              <dd>{{ employmentLabels[profile.employmentStatus] }}</dd>
+            </div>
+            <div>
+              <dt>职业</dt>
+              <dd>{{ profile.occupation || "待完善" }}</dd>
+            </div>
+            <div>
+              <dt>申报年收入</dt>
+              <dd>{{ displayMoney(profile.annualIncome) }}</dd>
+            </div>
+            <div>
+              <dt>年度开销预算</dt>
+              <dd>{{ displayMoney(profile.annualExpenseBudget) }}</dd>
+            </div>
+          </dl>
+        </template>
       </section>
 
       <section class="live-data-note">
@@ -364,9 +467,12 @@ function deleteMemory(memory: MemoryDraft): void {
       centered
       title="编辑个人信息"
       :width="520"
-      ok-text="保存预览"
+      ok-text="保存"
       cancel-text="取消"
-      @ok="saveProfilePreview"
+      :confirm-loading="profileSaving"
+      :mask-closable="!profileSaving"
+      :keyboard="!profileSaving"
+      @ok="saveFinancialProfile"
     >
       <a-form layout="vertical" class="profile-form">
         <div class="form-grid">
@@ -374,7 +480,12 @@ function deleteMemory(memory: MemoryDraft): void {
             <a-input v-model:value="profileForm.birthDate" type="date" />
           </a-form-item>
           <a-form-item label="就业情况">
-            <a-select v-model:value="profileForm.employmentStatus" placeholder="请选择">
+            <a-select
+              v-model:value="profileForm.employmentStatus"
+              allow-clear
+              placeholder="请选择"
+              @clear="profileForm.employmentStatus = ''"
+            >
               <a-select-option value="employed">在职</a-select-option>
               <a-select-option value="self_employed">自由职业 / 个体经营</a-select-option>
               <a-select-option value="student">学生</a-select-option>
@@ -549,6 +660,11 @@ function deleteMemory(memory: MemoryDraft): void {
   background: #faf9ff;
 }
 
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .icon-button.subtle {
   width: 32px;
   height: 32px;
@@ -675,6 +791,21 @@ function deleteMemory(memory: MemoryDraft): void {
   padding: 11px 14px 5px;
   color: #8c8c93;
   font-size: 9px;
+}
+
+.profile-state {
+  display: flex;
+  min-height: 150px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 20px;
+  color: #77777f;
+  font-size: 11px;
+}
+
+.profile-state.error {
+  flex-direction: column;
 }
 
 .completion-row strong {

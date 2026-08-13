@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
@@ -14,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     func,
 )
@@ -116,6 +118,62 @@ class UserPreference(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey(f"{FINANCE_SCHEMA}.financial_accounts.id", ondelete="SET NULL"),
         index=True,
     )
+
+
+class EmploymentStatus(StrEnum):
+    EMPLOYED = "employed"
+    SELF_EMPLOYED = "self_employed"
+    STUDENT = "student"
+    RETIRED = "retired"
+    OTHER = "other"
+
+
+class PersonalFinancialProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """用户主动维护的稳定财务背景，不包含账户、流水或持仓快照。"""
+
+    __tablename__ = "personal_financial_profiles"
+    __table_args__ = (
+        Index("uq_personal_financial_profiles_user_id", "user_id", unique=True),
+        CheckConstraint(
+            "employment_status IS NULL OR employment_status IN "
+            "('employed', 'self_employed', 'student', 'retired', 'other')",
+            name="employment_status_valid",
+        ),
+        CheckConstraint(
+            "annual_income IS NULL OR annual_income >= 0",
+            name="annual_income_nonnegative",
+        ),
+        CheckConstraint(
+            "annual_expense_budget IS NULL OR annual_expense_budget >= 0",
+            name="annual_expense_budget_nonnegative",
+        ),
+        CheckConstraint(
+            "currency ~ '^[A-Z]{3}$'",
+            name="currency_valid",
+        ),
+        {"schema": IDENTITY_SCHEMA},
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    birth_date: Mapped[date | None]
+    residence_province: Mapped[str | None] = mapped_column(String(32))
+    residence_city: Mapped[str | None] = mapped_column(String(32))
+    employment_status: Mapped[EmploymentStatus | None] = mapped_column(
+        SAEnum(
+            EmploymentStatus,
+            name="personal_financial_profile_employment_status",
+            native_enum=False,
+            length=32,
+            values_callable=lambda enum: [item.value for item in enum],
+        )
+    )
+    occupation: Mapped[str | None] = mapped_column(String(64))
+    annual_income: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    annual_expense_budget: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    currency: Mapped[str] = mapped_column(String(3), default="CNY", nullable=False)
 
 
 class RefreshToken(UUIDPrimaryKeyMixin, Base):

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 
 from app.api.dependencies import AccessContextDependency, UserSettingsServiceDependency
 from app.api.schemas.auth import UserResponse
 from app.api.schemas.users import (
+    FinancialProfileCreate,
+    FinancialProfileResponse,
+    FinancialProfileUpdate,
     PreferenceResponse,
     PreferenceUpdate,
     ProfileResponse,
@@ -53,3 +56,44 @@ async def update_preferences(
         fields_set=payload.model_fields_set,
     )
     return PreferenceResponse.model_validate(preferences)
+
+
+@router.post(
+    "/me/financial-profile",
+    response_model=FinancialProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_financial_profile(
+    payload: FinancialProfileCreate,
+    service: UserSettingsServiceDependency,
+) -> FinancialProfileResponse:
+    profile = await service.create_financial_profile(
+        values=payload.model_dump(),
+        fields_set=payload.model_fields_set,
+    )
+    return FinancialProfileResponse.model_validate(profile)
+
+
+@router.get("/me/financial-profile", response_model=FinancialProfileResponse)
+async def get_financial_profile(
+    service: UserSettingsServiceDependency,
+) -> FinancialProfileResponse:
+    return FinancialProfileResponse.model_validate(await service.get_financial_profile())
+
+
+@router.patch("/me/financial-profile", response_model=FinancialProfileResponse)
+async def update_financial_profile(
+    payload: FinancialProfileUpdate,
+    service: UserSettingsServiceDependency,
+) -> FinancialProfileResponse:
+    profile = await service.update_financial_profile(
+        values=payload.model_dump(exclude_unset=True),
+        fields_set=payload.model_fields_set,
+    )
+    return FinancialProfileResponse.model_validate(profile)
+
+
+@router.delete("/me/financial-profile", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_financial_profile(service: UserSettingsServiceDependency) -> Response:
+    await service.delete_financial_profile()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

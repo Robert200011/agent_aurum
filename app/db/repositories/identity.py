@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.identity import (
     AuditLog,
+    PersonalFinancialProfile,
     RefreshToken,
     User,
     UserPreference,
@@ -70,10 +71,26 @@ class UserSettingsRepository:
             statement = statement.with_for_update()
         return cast(UserPreference | None, await self._session.scalar(statement))
 
-    async def add(self, instance: UserProfile | UserPreference) -> UserProfile | UserPreference:
+    async def get_financial_profile(
+        self, user_id: UUID, *, for_update: bool = False
+    ) -> PersonalFinancialProfile | None:
+        statement = select(PersonalFinancialProfile).where(
+            PersonalFinancialProfile.user_id == user_id
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return cast(PersonalFinancialProfile | None, await self._session.scalar(statement))
+
+    async def add(
+        self, instance: UserProfile | UserPreference | PersonalFinancialProfile
+    ) -> UserProfile | UserPreference | PersonalFinancialProfile:
         self._session.add(instance)
         await self._session.flush()
         return instance
+
+    async def delete_financial_profile(self, profile: PersonalFinancialProfile) -> None:
+        await self._session.delete(profile)
+        await self._session.flush()
 
     async def clear_default_account(self, user_id: UUID, account_id: UUID) -> bool:
         """仅当失效账户正是当前默认值时执行原子清理。"""

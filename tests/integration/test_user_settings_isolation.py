@@ -9,7 +9,13 @@ import pytest
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.db.models.identity import User, UserPreference, UserProfile, UserStatus
+from app.db.models.identity import (
+    PersonalFinancialProfile,
+    User,
+    UserPreference,
+    UserProfile,
+    UserStatus,
+)
 from app.db.session import set_tenant_context
 
 INTEGRATION_DATABASE_URL = os.getenv("AURUM_RAG_INTEGRATION_DATABASE_URL")
@@ -51,10 +57,16 @@ async def test_user_profile_and_preferences_are_hidden_from_other_users() -> Non
             await set_tenant_context(session, owner_id)
             profile = UserProfile(user_id=owner_id, display_name="Private name")
             preferences = UserPreference(user_id=owner_id, base_currency="USD")
-            session.add_all([profile, preferences])
+            financial_profile = PersonalFinancialProfile(
+                user_id=owner_id,
+                residence_city="Private city",
+                annual_income=100000,
+            )
+            session.add_all([profile, preferences, financial_profile])
             await session.commit()
             profile_id = profile.id
             preferences_id = preferences.id
+            financial_profile_id = financial_profile.id
 
         async with factory() as session:
             await set_tenant_context(session, other_id)
@@ -68,6 +80,14 @@ async def test_user_profile_and_preferences_are_hidden_from_other_users() -> Non
                 )
                 is None
             )
+            assert (
+                await session.scalar(
+                    select(PersonalFinancialProfile).where(
+                        PersonalFinancialProfile.id == financial_profile_id
+                    )
+                )
+                is None
+            )
 
         async with factory() as session:
             rows = (
@@ -76,15 +96,20 @@ async def test_user_profile_and_preferences_are_hidden_from_other_users() -> Non
                         "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
                         "JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace "
                         "WHERE nspname = 'identity' AND relname IN "
-                        "('user_profiles', 'user_preferences')"
+                        "('user_profiles', 'user_preferences', 'personal_financial_profiles')"
                     )
                 )
             ).all()
-            assert len(rows) == 2
+            assert len(rows) == 3
             assert all(row.relrowsecurity and row.relforcerowsecurity for row in rows)
     finally:
         async with factory() as session:
             await set_tenant_context(session, owner_id)
+            await session.execute(
+                delete(PersonalFinancialProfile).where(
+                    PersonalFinancialProfile.user_id == owner_id
+                )
+            )
             await session.execute(delete(UserPreference).where(UserPreference.user_id == owner_id))
             await session.execute(delete(UserProfile).where(UserProfile.user_id == owner_id))
             await session.execute(delete(User).where(User.id.in_([owner_id, other_id])))
