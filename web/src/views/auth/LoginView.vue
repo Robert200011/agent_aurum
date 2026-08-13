@@ -47,6 +47,9 @@ onBeforeUnmount(() => loginObserver?.disconnect());
 if (route.query.expired === "1") {
   message.warning("登录状态已过期，请重新登录");
 }
+if (route.query.deactivated === "1") {
+  message.success("账户已注销并退出登录");
+}
 
 async function submit(): Promise<void> {
   try {

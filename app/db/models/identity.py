@@ -8,6 +8,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -23,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import (
     AUDIT_SCHEMA,
+    FINANCE_SCHEMA,
     IDENTITY_SCHEMA,
     Base,
     TimestampMixin,
@@ -60,6 +63,58 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("uq_users_username_lower", func.lower(username), unique=True),
         Index("uq_users_email_lower", func.lower(email), unique=True),
         {"schema": IDENTITY_SCHEMA},
+    )
+
+
+class UserProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """可编辑的个人展示资料，与登录身份字段保持隔离。"""
+
+    __tablename__ = "user_profiles"
+    __table_args__ = (
+        Index("uq_user_profiles_user_id", "user_id", unique=True),
+        {"schema": IDENTITY_SCHEMA},
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    display_name: Mapped[str | None] = mapped_column(String(64))
+
+
+class UserPreference(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """影响财务口径和界面呈现的用户级偏好。"""
+
+    __tablename__ = "user_preferences"
+    __table_args__ = (
+        Index("uq_user_preferences_user_id", "user_id", unique=True),
+        CheckConstraint(
+            "base_currency ~ '^[A-Z]{3}$'",
+            name="base_currency_valid",
+        ),
+        CheckConstraint(
+            "font_size IN ('small', 'medium', 'large')",
+            name="font_size_valid",
+        ),
+        CheckConstraint(
+            "layout_density IN ('comfortable', 'compact')",
+            name="layout_density_valid",
+        ),
+        {"schema": IDENTITY_SCHEMA},
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    base_currency: Mapped[str] = mapped_column(String(3), default="CNY", nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Shanghai", nullable=False)
+    font_size: Mapped[str] = mapped_column(String(16), default="medium", nullable=False)
+    layout_density: Mapped[str] = mapped_column(String(16), default="comfortable", nullable=False)
+    hide_sensitive_amounts: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    default_account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(f"{FINANCE_SCHEMA}.financial_accounts.id", ondelete="SET NULL"),
+        index=True,
     )
 
 

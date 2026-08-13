@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
@@ -29,6 +30,19 @@ class LoginRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: SecretStr
     new_password: SecretStr
+
+
+class DeactivateAccountRequest(BaseModel):
+    """高风险账户停用请求，要求重复确认身份和操作意图。"""
+
+    username: str = Field(min_length=1, max_length=64)
+    current_password: SecretStr
+    confirmation: Literal["DEACTIVATE"]
+
+    @field_validator("username")
+    @classmethod
+    def normalize_confirmation_username(cls, value: str) -> str:
+        return value.strip()
 
 
 class UserResponse(BaseModel):

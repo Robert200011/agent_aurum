@@ -3,110 +3,190 @@ import {
   BarChartOutlined,
   CloseOutlined,
   DashboardOutlined,
-  LockOutlined,
-  LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MessageOutlined,
   PieChartOutlined,
+  SettingOutlined,
   SwapOutlined,
   UserOutlined,
-} from '@ant-design/icons-vue'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+} from "@ant-design/icons-vue";
+import { message } from "ant-design-vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
+import { useRoute, useRouter } from "vue-router";
 
-import BrandMark from '@/components/BrandMark.vue'
-import ChatView from '@/views/ChatView.vue'
-import { useAuthStore } from '@/stores/auth'
+import BrandMark from "@/components/BrandMark.vue";
+import ChatView from "@/views/ChatView.vue";
+import SettingsDrawer from "@/components/settings/SettingsDrawer.vue";
+import { apiErrorMessage } from "@/services/http";
+import { useAuthStore } from "@/stores/auth";
+import { useSettingsStore } from "@/stores/settings";
 
-const route = useRoute()
-const router = useRouter()
-const auth = useAuthStore()
-const collapsed = ref(false)
-const mobileOpen = ref(false)
-const isMobile = ref(false)
-const loggingOut = ref(false)
-const logoutConfirmOpen = ref(false)
-const userMenuOpen = ref(false)
-const agentOpen = ref(false)
-const agentHasOpened = ref(false)
+const route = useRoute();
+const router = useRouter();
+const auth = useAuthStore();
+const settings = useSettingsStore();
+const collapsed = ref(false);
+const mobileOpen = ref(false);
+const isMobile = ref(false);
+const loggingOut = ref(false);
+const logoutConfirmOpen = ref(false);
+const deactivationConfirmOpen = ref(false);
+const deactivatingAccount = ref(false);
+const deactivationUsernameInput = ref<{ focus: () => void } | null>(null);
+const deactivationForm = reactive({
+  acknowledged: false,
+  username: "",
+  currentPassword: "",
+});
+const settingsOpen = ref(false);
+const agentOpen = ref(false);
+const agentHasOpened = ref(false);
 
 const selectedKeys = computed(() => {
-  const segments = route.path.split('/').filter(Boolean)
-  const activeSection = segments[0] || 'dashboard'
-  return [activeSection === 'accounts' ? 'dashboard' : activeSection]
-})
+  const segments = route.path.split("/").filter(Boolean);
+  const activeSection = segments[0] || "dashboard";
+  return [activeSection === "accounts" ? "dashboard" : activeSection];
+});
 
-const pageTitle = computed(() => String(route.meta.title ?? 'Aurum Agent'))
+const pageTitle = computed(() => String(route.meta.title ?? "Aurum Agent"));
+const canDeactivateAccount = computed(
+  () =>
+    deactivationForm.acknowledged &&
+    deactivationForm.username === auth.user?.username &&
+    Boolean(deactivationForm.currentPassword),
+);
 
 function updateViewport(): void {
-  isMobile.value = window.innerWidth < 900
-  if (isMobile.value) collapsed.value = true
+  isMobile.value = window.innerWidth < 900;
+  if (isMobile.value) collapsed.value = true;
 }
 
 function navigate(key: string): void {
-  mobileOpen.value = false
-  if (key === 'chat') {
-    toggleAgent()
-    return
+  mobileOpen.value = false;
+  if (key === "chat") {
+    toggleAgent();
+    return;
   }
-  void router.push(key === 'dashboard' ? '/' : `/${key}`)
+  void router.push(key === "dashboard" ? "/" : `/${key}`);
 }
 
 function toggleAgent(): void {
-  agentHasOpened.value = true
-  agentOpen.value = !agentOpen.value
+  agentHasOpened.value = true;
+  agentOpen.value = !agentOpen.value;
 }
 
 function handleGlobalKeydown(event: KeyboardEvent): void {
-  if (event.key === '/' && event.ctrlKey) {
-    event.preventDefault()
-    toggleAgent()
+  const target = event.target;
+  const editing =
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+  if (event.key === "/" && event.ctrlKey && !editing) {
+    event.preventDefault();
+    toggleAgent();
   }
 }
 
-async function handleUserMenu(event: { key: string }): Promise<void> {
-  userMenuOpen.value = false
+function openSettings(): void {
+  agentOpen.value = false;
+  settingsOpen.value = true;
+}
 
-  if (event.key === 'password') {
-    await router.push('/change-password')
-    return
-  }
+async function openChangePassword(): Promise<void> {
+  settingsOpen.value = false;
+  await router.push("/change-password");
+}
 
-  if (event.key === 'logout' && !loggingOut.value) {
-    logoutConfirmOpen.value = true
+async function openAccountManagement(): Promise<void> {
+  settingsOpen.value = false;
+  await router.push("/accounts");
+}
+
+function requestAccountDeactivation(): void {
+  settingsOpen.value = false;
+  deactivationForm.acknowledged = false;
+  deactivationForm.username = "";
+  deactivationForm.currentPassword = "";
+  deactivationConfirmOpen.value = true;
+}
+
+function resetDeactivationForm(): void {
+  deactivationForm.acknowledged = false;
+  deactivationForm.username = "";
+  deactivationForm.currentPassword = "";
+}
+
+watch(deactivationConfirmOpen, (open) => {
+  if (!open) {
+    resetDeactivationForm();
+    return;
   }
+  void nextTick(() => deactivationUsernameInput.value?.focus());
+});
+
+async function confirmAccountDeactivation(): Promise<void> {
+  if (!canDeactivateAccount.value || deactivatingAccount.value || !auth.user) return;
+
+  deactivatingAccount.value = true;
+  try {
+    await auth.deactivateAccount(
+      deactivationForm.username,
+      deactivationForm.currentPassword,
+    );
+    deactivationConfirmOpen.value = false;
+    await router.replace({ path: "/login", query: { deactivated: "1" } });
+  } catch (error) {
+    message.error(apiErrorMessage(error, "账户注销失败，请确认用户名和密码"));
+  } finally {
+    deactivationForm.currentPassword = "";
+    deactivatingAccount.value = false;
+  }
+}
+
+function requestLogout(): void {
+  settingsOpen.value = false;
+  if (!loggingOut.value) logoutConfirmOpen.value = true;
 }
 
 async function confirmLogout(): Promise<void> {
-  if (loggingOut.value) return
+  if (loggingOut.value) return;
 
-  loggingOut.value = true
-  logoutConfirmOpen.value = false
-  const logoutRequest = auth.logout()
+  loggingOut.value = true;
+  logoutConfirmOpen.value = false;
+  const logoutRequest = auth.logout();
   try {
     // logout() 会同步清除本地身份，因此路由可以立即进入登录页。
-    await router.replace('/login')
+    await router.replace("/login");
   } finally {
-    await logoutRequest
-    loggingOut.value = false
+    await logoutRequest;
+    loggingOut.value = false;
   }
 }
 
 onMounted(() => {
-  updateViewport()
-  window.addEventListener('resize', updateViewport)
-  window.addEventListener('keydown', handleGlobalKeydown)
-})
+  updateViewport();
+  window.addEventListener("resize", updateViewport);
+  window.addEventListener("keydown", handleGlobalKeydown);
+  void settings.initialize();
+});
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateViewport)
-  window.removeEventListener('keydown', handleGlobalKeydown)
-})
+  window.removeEventListener("resize", updateViewport);
+  window.removeEventListener("keydown", handleGlobalKeydown);
+});
 </script>
 
 <template>
-  <a-layout class="app-layout">
+  <a-layout class="app-layout" :class="{ 'agent-is-open': agentOpen }">
     <a-layout-sider
       v-if="!isMobile"
       v-model:collapsed="collapsed"
@@ -203,29 +283,45 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <a-dropdown v-model:open="userMenuOpen" placement="bottomRight">
-          <button class="user-trigger" type="button">
+        <div class="header-actions">
+          <button
+            type="button"
+            class="header-agent-entry"
+            :class="{ 'is-active': agentOpen }"
+            aria-label="打开智能问答"
+            :aria-expanded="agentOpen"
+            title="智能问答"
+            @click="toggleAgent"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M10 1c.7 5.6 3.4 8.3 9 9-5.6.7-8.3 3.4-9 9-.7-5.6-3.4-8.3-9-9 5.6-.7 8.3-3.4 9-9Z"
+              />
+            </svg>
+          </button>
+
+          <div class="user-trigger" aria-label="当前用户">
             <a-avatar :size="36" class="user-avatar">
               <template #icon><UserOutlined /></template>
             </a-avatar>
             <span class="user-copy">
-              <strong>{{ auth.user?.username }}</strong>
+              <strong>{{ settings.displayName || auth.user?.username }}</strong>
               <small>个人用户</small>
             </span>
+          </div>
+
+          <button
+            class="settings-trigger"
+            type="button"
+            aria-label="打开设置中心"
+            :aria-expanded="settingsOpen"
+            aria-controls="aurum-settings-drawer"
+            title="设置中心"
+            @click="openSettings"
+          >
+            <SettingOutlined />
           </button>
-          <template #overlay>
-            <a-menu @click="handleUserMenu">
-              <a-menu-item key="password">
-                <LockOutlined />
-                修改密码
-              </a-menu-item>
-              <a-menu-divider />
-              <a-menu-item key="logout" :disabled="loggingOut" danger>
-                <LogoutOutlined />退出登录
-              </a-menu-item>
-            </a-menu>
-          </template>
-        </a-dropdown>
+        </div>
       </a-layout-header>
 
       <a-layout-content class="app-content">
@@ -246,13 +342,29 @@ onBeforeUnmount(() => {
       >
         <header class="agent-drawer-header">
           <span>AI AGENT</span>
-          <button type="button" aria-label="关闭智能问答" @click="agentOpen = false">
+          <button
+            type="button"
+            aria-label="关闭智能问答"
+            @click="agentOpen = false"
+          >
             <CloseOutlined />
           </button>
         </header>
         <ChatView embedded />
       </aside>
     </transition>
+
+    <SettingsDrawer
+      id="aurum-settings-drawer"
+      v-model:open="settingsOpen"
+      :user="auth.user"
+      :logging-out="loggingOut"
+      :deactivating-account="deactivatingAccount"
+      @change-password="openChangePassword"
+      @manage-accounts="openAccountManagement"
+      @request-account-deactivation="requestAccountDeactivation"
+      @logout="requestLogout"
+    />
 
     <a-modal
       v-model:open="logoutConfirmOpen"
@@ -273,11 +385,58 @@ onBeforeUnmount(() => {
         确定要退出当前账号吗？退出后需要重新登录才能继续使用 Aurum。
       </p>
     </a-modal>
+
+    <a-modal
+      v-model:open="deactivationConfirmOpen"
+      centered
+      title="二次确认注销账户"
+      :width="460"
+      ok-text="确认注销"
+      cancel-text="取消"
+      :confirm-loading="deactivatingAccount"
+      :closable="!deactivatingAccount"
+      :keyboard="!deactivatingAccount"
+      :mask-closable="!deactivatingAccount"
+      :ok-button-props="{ danger: true, disabled: !canDeactivateAccount }"
+      :cancel-button-props="{ disabled: deactivatingAccount }"
+      @ok="confirmAccountDeactivation"
+    >
+      <div class="deactivation-confirm-copy">
+        <a-alert
+          type="error"
+          show-icon
+          message="此操作会立即停用账户"
+          description="你将被退出，所有现有登录凭证都会失效，之后无法自行登录。"
+        />
+        <a-checkbox v-model:checked="deactivationForm.acknowledged">
+          我已了解注销后的影响，并确认继续
+        </a-checkbox>
+        <label>
+          <span>输入当前用户名“{{ auth.user?.username }}”</span>
+          <a-input
+            ref="deactivationUsernameInput"
+            v-model:value="deactivationForm.username"
+            autocomplete="off"
+            placeholder="当前用户名"
+          />
+        </label>
+        <label>
+          <span>当前密码</span>
+          <a-input-password
+            v-model:value="deactivationForm.currentPassword"
+            autocomplete="current-password"
+            placeholder="用于验证本人操作"
+            @press-enter="confirmAccountDeactivation"
+          />
+        </label>
+      </div>
+    </a-modal>
   </a-layout>
 </template>
 
 <style scoped>
 .app-layout {
+  --agent-panel-width: 390px;
   --ink-950: #171719;
   --ink-900: #242428;
   --ink-800: #34343a;
@@ -408,10 +567,10 @@ onBeforeUnmount(() => {
   inset: 0 0 0 auto;
   z-index: 50;
   display: flex;
-  width: min(390px, calc(100vw - 64px));
+  width: var(--agent-panel-width);
   border-left: 1px solid #dedee2;
   background: #ffffff;
-  box-shadow: -18px 0 48px rgb(24 24 27 / 8%);
+  box-shadow: -10px 0 28px rgb(24 24 27 / 4%);
   flex-direction: column;
 }
 
@@ -484,8 +643,18 @@ onBeforeUnmount(() => {
 .main-layout {
   min-width: 0;
   margin-left: 220px;
+  margin-right: 0;
   background: #ffffff;
-  transition: margin-left 0.2s;
+  transition:
+    margin-left 0.2s ease,
+    margin-right 0.24s ease;
+}
+
+/* 桌面端将 Agent 作为独立右栏，为头像和业务内容预留真实布局空间。 */
+@media (min-width: 901px) {
+  .agent-is-open .main-layout {
+    margin-right: var(--agent-panel-width);
+  }
 }
 
 .ant-layout-sider-collapsed + .main-layout {
@@ -545,22 +714,83 @@ onBeforeUnmount(() => {
   line-height: 1.2;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-agent-entry {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid #ececee;
+  border-radius: 50%;
+  color: #8178ff;
+  background: #f3f1ff;
+  cursor: pointer;
+  place-items: center;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.header-agent-entry:hover,
+.header-agent-entry.is-active {
+  border-color: #d8d3ff;
+  background: #ebe8ff;
+  transform: translateY(-1px);
+}
+
+.header-agent-entry:focus-visible {
+  outline: 2px solid #8178ff;
+  outline-offset: 2px;
+}
+
+.header-agent-entry svg {
+  width: 16px;
+  height: 16px;
+  fill: currentcolor;
+}
+
 .user-trigger {
   display: flex;
   align-items: center;
   gap: 6px;
   min-height: 44px;
-  padding: 4px 6px;
-  border: 0;
-  border-radius: 12px;
+  padding: 4px 0;
   color: var(--ink-900);
-  background: transparent;
-  cursor: pointer;
   line-height: 1;
 }
 
-.user-trigger:hover {
-  background: #f4f4f5;
+.settings-trigger {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  color: #65656c;
+  background: transparent;
+  cursor: pointer;
+  font-size: 20px;
+  place-items: center;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.settings-trigger:hover,
+.settings-trigger[aria-expanded="true"] {
+  color: #26262a;
+  background: #f2f2f3;
+}
+
+.settings-trigger:focus-visible {
+  outline: 2px solid #8178ff;
+  outline-offset: 2px;
 }
 
 .user-avatar {
@@ -591,7 +821,7 @@ onBeforeUnmount(() => {
 
 .app-content {
   min-height: calc(100vh - 64px);
-  padding: 28px;
+  padding: var(--aurum-content-padding);
   background: #ffffff;
 }
 
@@ -599,6 +829,35 @@ onBeforeUnmount(() => {
   margin: 6px 0 0;
   color: var(--ink-700);
   line-height: 1.7;
+}
+
+.deactivation-confirm-copy {
+  display: grid;
+  gap: 16px;
+  margin-top: 6px;
+}
+
+.deactivation-confirm-copy label {
+  display: grid;
+  gap: 7px;
+  color: var(--ink-800);
+  font-size: 12px;
+}
+
+@media (max-width: 520px) {
+  .deactivation-confirm-copy {
+    gap: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-layout,
+  .agent-slide-enter-active,
+  .agent-slide-leave-active,
+  .page-fade-enter-active,
+  .page-fade-leave-active {
+    transition: none;
+  }
 }
 
 .mobile-brand {

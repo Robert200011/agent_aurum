@@ -25,7 +25,7 @@ from app.db.models.finance import (
     MarketPriceSnapshot,
 )
 from app.db.repositories.finance import FinanceRepository
-from app.db.repositories.identity import AuditRepository
+from app.db.repositories.identity import AuditRepository, UserSettingsRepository
 from app.db.session import set_tenant_context
 from app.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.finance.analytics import (
@@ -262,6 +262,7 @@ class FinanceService:
         self._session = session
         self._user_id = user_id
         self._repository = FinanceRepository(session)
+        self._settings_repository = UserSettingsRepository(session)
         self._audit = AuditRepository(session)
 
     async def _prepare(self) -> None:
@@ -304,6 +305,23 @@ class FinanceService:
             ip=None,
             user_agent=None,
             detail=detail,
+        )
+
+    async def _clear_default_account(self, account_id: UUID) -> None:
+        """账户失效时在同一事务中移除默认账户引用。"""
+
+        if not await self._settings_repository.clear_default_account(
+            self._user_id, account_id
+        ):
+            return
+        self._audit.add(
+            action="identity.default_account_cleared",
+            actor_user_id=self._user_id,
+            resource_type="financial_account",
+            resource_id=str(account_id),
+            ip=None,
+            user_agent=None,
+            detail={"reason": "account_inactive"},
         )
 
     async def _account(
@@ -498,6 +516,8 @@ class FinanceService:
             account.account_type = account_type
         if is_active is not None:
             account.is_active = is_active
+            if not is_active:
+                await self._clear_default_account(account.id)
         account.updated_at = datetime.now(UTC)
         self._record_audit("finance.account_updated", "financial_account", account.id)
         await self._commit("account update conflicts with an existing record")
@@ -511,6 +531,7 @@ class FinanceService:
         await self._prepare()
         account = await self._account(account_id, for_update=True)
         account.is_active = False
+        await self._clear_default_account(account.id)
         account.updated_at = datetime.now(UTC)
         self._record_audit("finance.account_archived", "financial_account", account.id)
         await self._session.commit()

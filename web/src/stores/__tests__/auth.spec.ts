@@ -12,6 +12,7 @@ vi.mock('@/services/auth', () => ({
     me: vi.fn(),
     logout: vi.fn(),
     changePassword: vi.fn(),
+    deactivateAccount: vi.fn(),
   },
 }))
 
@@ -56,5 +57,34 @@ describe('auth store logout', () => {
 
     await expect(useAuthStore().logout()).resolves.toBeUndefined()
     expect(tokenStorage.get()).toBeNull()
+  })
+
+  it('clears local identity only after account deactivation succeeds', async () => {
+    vi.mocked(authApi.deactivateAccount).mockResolvedValue(undefined)
+    tokenStorage.save({
+      access_token: 'access-token',
+      token_type: 'bearer',
+      expires_in: 900,
+      refresh_expires_in: 3600,
+    })
+    const store = useAuthStore()
+    store.user = {
+      id: 'user-id',
+      username: 'aurum_user',
+      email: 'user@example.com',
+      status: 'active',
+      password_changed_at: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }
+
+    await store.deactivateAccount('aurum_user', 'Correct-pass-123')
+
+    expect(authApi.deactivateAccount).toHaveBeenCalledWith(
+      'aurum_user',
+      'Correct-pass-123',
+    )
+    expect(tokenStorage.get()).toBeNull()
+    expect(store.user).toBeNull()
   })
 })

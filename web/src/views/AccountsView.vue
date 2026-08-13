@@ -5,136 +5,157 @@ import {
   PlusOutlined,
   StopOutlined,
   WalletOutlined,
-} from '@ant-design/icons-vue'
-import { message, Modal } from 'ant-design-vue'
-import { computed, onMounted, reactive, ref } from 'vue'
+} from "@ant-design/icons-vue";
+import { message, Modal } from "ant-design-vue";
+import { computed, onMounted, reactive, ref } from "vue";
 
-import OverviewHeader from '@/components/OverviewHeader.vue'
-import { financeApi } from '@/services/finance'
-import { apiErrorMessage } from '@/services/http'
-import type { Account, AccountInput, AccountType } from '@/types/api'
-import { accountTypeLabels, formatDate, formatMoney, toNumber } from '@/utils/format'
+import OverviewHeader from "@/components/OverviewHeader.vue";
+import { financeApi } from "@/services/finance";
+import { apiErrorMessage } from "@/services/http";
+import { useSettingsStore } from "@/stores/settings";
+import type { Account, AccountInput, AccountType } from "@/types/api";
+import {
+  accountTypeLabels,
+  formatDate,
+  formatMoney,
+  toNumber,
+} from "@/utils/format";
 
-const loading = ref(false)
-const saving = ref(false)
-const modalOpen = ref(false)
-const includeInactive = ref(false)
-const accounts = ref<Account[]>([])
-const editing = ref<Account | null>(null)
+const settings = useSettingsStore();
+const loading = ref(false);
+const saving = ref(false);
+const modalOpen = ref(false);
+const includeInactive = ref(false);
+const accounts = ref<Account[]>([]);
+const editing = ref<Account | null>(null);
 const form = reactive<AccountInput & { is_active: boolean }>({
-  name: '',
-  account_type: 'checking',
-  currency: 'CNY',
+  name: "",
+  account_type: "checking",
+  currency: settings.preferences.base_currency,
   opening_balance: 0,
   is_active: true,
-})
+});
 
-const activeAccounts = computed(() => accounts.value.filter((item) => item.is_active))
+const activeAccounts = computed(() =>
+  accounts.value.filter((item) => item.is_active),
+);
 const totalByCurrency = computed(() => {
-  const totals = new Map<string, number>()
+  const totals = new Map<string, number>();
   for (const account of activeAccounts.value) {
-    totals.set(account.currency, (totals.get(account.currency) ?? 0) + toNumber(account.balance))
+    totals.set(
+      account.currency,
+      (totals.get(account.currency) ?? 0) + toNumber(account.balance),
+    );
   }
-  return [...totals.entries()]
-})
+  return [...totals.entries()];
+});
 
 const columns = [
-  { title: '账户', key: 'account', dataIndex: 'name' },
-  { title: '类型', key: 'account_type', dataIndex: 'account_type', width: 130 },
-  { title: '币种', dataIndex: 'currency', width: 90 },
-  { title: '当前余额', key: 'balance', dataIndex: 'balance', align: 'right' as const },
-  { title: '状态', key: 'status', width: 100 },
-  { title: '更新时间', key: 'updated_at', dataIndex: 'updated_at', width: 130 },
-  { title: '操作', key: 'actions', width: 130, fixed: 'right' as const },
-]
+  { title: "账户", key: "account", dataIndex: "name" },
+  { title: "类型", key: "account_type", dataIndex: "account_type", width: 130 },
+  { title: "币种", dataIndex: "currency", width: 90 },
+  {
+    title: "当前余额",
+    key: "balance",
+    dataIndex: "balance",
+    align: "right" as const,
+  },
+  { title: "状态", key: "status", width: 100 },
+  { title: "更新时间", key: "updated_at", dataIndex: "updated_at", width: 130 },
+  { title: "操作", key: "actions", width: 130, fixed: "right" as const },
+];
 
 async function loadAccounts(): Promise<void> {
-  loading.value = true
+  loading.value = true;
   try {
-    accounts.value = (await financeApi.listAccounts(includeInactive.value)).items
+    accounts.value = (
+      await financeApi.listAccounts(includeInactive.value)
+    ).items;
   } catch (error) {
-    message.error(apiErrorMessage(error, '账户列表加载失败'))
+    message.error(apiErrorMessage(error, "账户列表加载失败"));
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function resetForm(): void {
   Object.assign(form, {
-    name: '',
-    account_type: 'checking' as AccountType,
-    currency: 'CNY',
+    name: "",
+    account_type: "checking" as AccountType,
+    currency: settings.preferences.base_currency,
     opening_balance: 0,
     is_active: true,
-  })
+  });
 }
 
 function openCreate(): void {
-  editing.value = null
-  resetForm()
-  modalOpen.value = true
+  editing.value = null;
+  resetForm();
+  modalOpen.value = true;
 }
 
 function openEdit(account: Account): void {
-  editing.value = account
+  editing.value = account;
   Object.assign(form, {
     name: account.name,
     account_type: account.account_type,
     currency: account.currency,
     opening_balance: 0,
     is_active: account.is_active,
-  })
-  modalOpen.value = true
+  });
+  modalOpen.value = true;
 }
 
 async function saveAccount(): Promise<void> {
-  saving.value = true
+  saving.value = true;
   try {
     if (editing.value) {
       await financeApi.updateAccount(editing.value.id, {
         name: form.name.trim(),
         account_type: form.account_type,
         is_active: form.is_active,
-      })
-      message.success('账户信息已更新')
+      });
+      if (!form.is_active) await settings.refreshPreferences();
+      message.success("账户信息已更新");
     } else {
       await financeApi.createAccount({
         name: form.name.trim(),
         account_type: form.account_type,
         currency: form.currency,
         opening_balance: form.opening_balance,
-      })
-      message.success('账户创建成功')
+      });
+      message.success("账户创建成功");
     }
-    modalOpen.value = false
-    await loadAccounts()
+    modalOpen.value = false;
+    await loadAccounts();
   } catch (error) {
-    message.error(apiErrorMessage(error, '账户保存失败'))
+    message.error(apiErrorMessage(error, "账户保存失败"));
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
 function archiveAccount(account: Account): void {
   Modal.confirm({
     title: `归档“${account.name}”？`,
-    content: '归档后不能再记入新交易，但历史数据和报表仍会保留。',
-    okText: '确认归档',
-    okType: 'danger',
-    cancelText: '取消',
+    content: "归档后不能再记入新交易，但历史数据和报表仍会保留。",
+    okText: "确认归档",
+    okType: "danger",
+    cancelText: "取消",
     async onOk() {
       try {
-        await financeApi.archiveAccount(account.id)
-        message.success('账户已归档')
-        await loadAccounts()
+        await financeApi.archiveAccount(account.id);
+        await settings.refreshPreferences();
+        message.success("账户已归档");
+        await loadAccounts();
       } catch (error) {
-        message.error(apiErrorMessage(error, '账户归档失败'))
+        message.error(apiErrorMessage(error, "账户归档失败"));
       }
     },
-  })
+  });
 }
 
-onMounted(loadAccounts)
+onMounted(loadAccounts);
 </script>
 
 <template>
@@ -144,19 +165,33 @@ onMounted(loadAccounts)
     <div class="page-heading">
       <div>
         <h1>账户管理</h1>
-        <p>维护现金、储蓄、信用与投资账户。余额由期初值和交易自动推导，不能直接改写。</p>
+        <p>
+          维护现金、储蓄、信用与投资账户。余额由期初值和交易自动推导，不能直接改写。
+        </p>
       </div>
-      <a-button type="primary" @click="openCreate"><PlusOutlined />新建账户</a-button>
+      <a-button type="primary" @click="openCreate">
+        <PlusOutlined />新建账户
+      </a-button>
     </div>
 
     <section class="account-summary">
       <article class="account-summary-card">
         <div class="summary-icon"><BankOutlined /></div>
-        <div><span>有效账户</span><strong>{{ activeAccounts.length }}</strong></div>
+        <div>
+          <span>有效账户</span><strong>{{ activeAccounts.length }}</strong>
+        </div>
       </article>
-      <article v-for="[currency, total] in totalByCurrency" :key="currency" class="account-summary-card">
+      <article
+        v-for="[currency, total] in totalByCurrency"
+        :key="currency"
+        class="account-summary-card"
+      >
         <div class="summary-icon gold"><WalletOutlined /></div>
-        <div><span>{{ currency }} 总余额</span><strong>{{ formatMoney(total, currency) }}</strong></div>
+        <div>
+          <span>{{ currency }} 总余额</span><strong class="sensitive-amount">{{
+            formatMoney(total, currency)
+          }}</strong>
+        </div>
       </article>
     </section>
 
@@ -181,7 +216,15 @@ onMounted(loadAccounts)
         :scroll="{ x: 820 }"
         row-key="id"
       >
-        <template #bodyCell="{ column, record }: { column: { key: string }; record: Account }">
+        <template
+          #bodyCell="{
+            column,
+            record,
+          }: {
+            column: { key: string };
+            record: Account;
+          }"
+        >
           <template v-if="column.key === 'account'">
             <div class="account-name">
               <div><BankOutlined /></div>
@@ -192,13 +235,16 @@ onMounted(loadAccounts)
             {{ accountTypeLabels[record.account_type] }}
           </template>
           <template v-else-if="column.key === 'balance'">
-            <strong :class="toNumber(record.balance) < 0 ? 'money-negative' : ''">
+            <strong
+              class="sensitive-amount"
+              :class="toNumber(record.balance) < 0 ? 'money-negative' : ''"
+            >
               {{ formatMoney(record.balance, record.currency) }}
             </strong>
           </template>
           <template v-else-if="column.key === 'status'">
             <a-tag :color="record.is_active ? 'green' : 'default'">
-              {{ record.is_active ? '正常' : '已归档' }}
+              {{ record.is_active ? "正常" : "已归档" }}
             </a-tag>
           </template>
           <template v-else-if="column.key === 'updated_at'">
@@ -206,7 +252,11 @@ onMounted(loadAccounts)
           </template>
           <template v-else-if="column.key === 'actions'">
             <a-space>
-              <a-button type="link" class="table-action" @click="openEdit(record)">
+              <a-button
+                type="link"
+                class="table-action"
+                @click="openEdit(record)"
+              >
                 <EditOutlined />编辑
               </a-button>
               <a-button
@@ -223,7 +273,9 @@ onMounted(loadAccounts)
         </template>
         <template #emptyText>
           <a-empty description="还没有资金账户">
-            <a-button type="primary" @click="openCreate">创建第一个账户</a-button>
+            <a-button type="primary" @click="openCreate">
+              创建第一个账户
+            </a-button>
           </a-empty>
         </template>
       </a-table>
@@ -254,14 +306,21 @@ onMounted(loadAccounts)
         </a-form-item>
         <div class="form-grid">
           <a-form-item label="币种" required>
-            <a-select v-model:value="form.currency" :disabled="Boolean(editing)">
+            <a-select
+              v-model:value="form.currency"
+              :disabled="Boolean(editing)"
+            >
               <a-select-option value="CNY">CNY</a-select-option>
               <a-select-option value="USD">USD</a-select-option>
               <a-select-option value="HKD">HKD</a-select-option>
             </a-select>
           </a-form-item>
           <a-form-item v-if="!editing" label="期初余额" required>
-            <a-input-number v-model:value="form.opening_balance" :precision="2" style="width: 100%" />
+            <a-input-number
+              v-model:value="form.opening_balance"
+              :precision="2"
+              style="width: 100%"
+            />
           </a-form-item>
           <a-form-item v-else label="账户状态">
             <a-switch

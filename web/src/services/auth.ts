@@ -25,4 +25,11 @@ export const authApi = {
       new_password: newPassword,
     })
   },
+  async deactivateAccount(username: string, currentPassword: string): Promise<void> {
+    await http.post('/auth/deactivate-account', {
+      username,
+      current_password: currentPassword,
+      confirmation: 'DEACTIVATE',
+    })
+  },
 }

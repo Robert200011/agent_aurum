@@ -1,4 +1,6 @@
 :root {
+  --aurum-base-font-size: 16px;
+  --aurum-content-padding: 28px;
   --paper: #f7f2e8;
   --paper-light: #fffcf6;
   --apricot-100: #f8ddc7;
@@ -31,6 +33,18 @@
   text-rendering: optimizeLegibility;
 }
 
+html[data-font-size="small"] {
+  --aurum-base-font-size: 14px;
+}
+
+html[data-font-size="large"] {
+  --aurum-base-font-size: 18px;
+}
+
+html[data-layout-density="compact"] {
+  --aurum-content-padding: 18px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -45,9 +59,46 @@ body,
 
 body {
   min-height: 100vh;
+  font-size: var(--aurum-base-font-size);
   background:
     radial-gradient(circle at 90% 0%, rgb(28 142 124 / 8%), transparent 30rem),
     var(--paper);
+}
+
+html[data-font-size="small"] :is(button, input, textarea, select),
+html[data-font-size="small"] .ant-select,
+html[data-font-size="small"] .ant-table,
+html[data-font-size="small"] .ant-form,
+html[data-font-size="small"] .ant-card {
+  font-size: 12px;
+}
+
+html[data-font-size="large"] :is(button, input, textarea, select),
+html[data-font-size="large"] .ant-select,
+html[data-font-size="large"] .ant-table,
+html[data-font-size="large"] .ant-form,
+html[data-font-size="large"] .ant-card {
+  font-size: 15px;
+}
+
+html[data-layout-density="compact"] .app-content {
+  padding: var(--aurum-content-padding) !important;
+}
+
+html[data-layout-density="compact"] .surface-card .ant-card-body {
+  padding: 14px !important;
+}
+
+html[data-hide-sensitive-amounts="true"] .sensitive-amount {
+  color: transparent !important;
+  font-size: 0 !important;
+  user-select: none;
+}
+
+html[data-hide-sensitive-amounts="true"] .sensitive-amount::after {
+  color: var(--ink-900);
+  content: "••••••";
+  font-size: 14px;
 }
 
 button,

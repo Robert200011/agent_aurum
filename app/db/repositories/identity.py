@@ -9,7 +9,13 @@ from uuid import UUID
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.identity import AuditLog, RefreshToken, User
+from app.db.models.identity import (
+    AuditLog,
+    RefreshToken,
+    User,
+    UserPreference,
+    UserProfile,
+)
 
 
 class UserRepository:
@@ -42,6 +48,46 @@ class UserRepository:
         self._session.add(user)
         await self._session.flush()
         return user
+
+
+class UserSettingsRepository:
+    """所有查询同时带归属谓词，并由数据库 RLS 重复约束。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_profile(self, user_id: UUID, *, for_update: bool = False) -> UserProfile | None:
+        statement = select(UserProfile).where(UserProfile.user_id == user_id)
+        if for_update:
+            statement = statement.with_for_update()
+        return cast(UserProfile | None, await self._session.scalar(statement))
+
+    async def get_preferences(
+        self, user_id: UUID, *, for_update: bool = False
+    ) -> UserPreference | None:
+        statement = select(UserPreference).where(UserPreference.user_id == user_id)
+        if for_update:
+            statement = statement.with_for_update()
+        return cast(UserPreference | None, await self._session.scalar(statement))
+
+    async def add(self, instance: UserProfile | UserPreference) -> UserProfile | UserPreference:
+        self._session.add(instance)
+        await self._session.flush()
+        return instance
+
+    async def clear_default_account(self, user_id: UUID, account_id: UUID) -> bool:
+        """仅当失效账户正是当前默认值时执行原子清理。"""
+
+        cleared_id = await self._session.scalar(
+            update(UserPreference)
+            .where(
+                UserPreference.user_id == user_id,
+                UserPreference.default_account_id == account_id,
+            )
+            .values(default_account_id=None)
+            .returning(UserPreference.id)
+        )
+        return cleared_id is not None
 
 
 class RefreshTokenRepository:

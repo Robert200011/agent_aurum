@@ -1,33 +1,37 @@
 <script setup lang="ts">
-import dayjs from 'dayjs'
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import dayjs from "dayjs";
+import { computed } from "vue";
+import { useRoute } from "vue-router";
 
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from "@/stores/auth";
+import { useSettingsStore } from "@/stores/settings";
 
 withDefaults(
   defineProps<{
-    subtitle?: string
-    compact?: boolean
+    subtitle?: string;
+    compact?: boolean;
   }>(),
   {
-    subtitle: '',
+    subtitle: "",
     compact: false,
   },
-)
+);
 
-const route = useRoute()
-const auth = useAuthStore()
+const route = useRoute();
+const auth = useAuthStore();
+const settings = useSettingsStore();
 
 const greeting = computed(() => {
-  const hour = dayjs().hour()
-  if (hour < 11) return '早上好'
-  if (hour < 14) return '中午好'
-  if (hour < 18) return '下午好'
-  return '晚上好'
-})
+  const hour = dayjs().hour();
+  if (hour < 11) return "早上好";
+  if (hour < 14) return "中午好";
+  if (hour < 18) return "下午好";
+  return "晚上好";
+});
 
-const activeTab = computed(() => (route.name === 'accounts' ? 'accounts' : 'overview'))
+const activeTab = computed(() =>
+  route.name === "accounts" ? "accounts" : "overview",
+);
 </script>
 
 <template>
@@ -35,7 +39,9 @@ const activeTab = computed(() => (route.name === 'accounts' ? 'accounts' : 'over
     <div class="overview-heading-row">
       <div>
         <span v-if="!compact" class="overview-kicker">FINANCIAL OVERVIEW</span>
-        <h1>{{ greeting }}，{{ auth.user?.username }}</h1>
+        <h1>
+          {{ greeting }}，{{ settings.displayName || auth.user?.username }}
+        </h1>
         <p v-if="!compact && subtitle">{{ subtitle }}</p>
       </div>
       <div v-if="$slots.actions" class="overview-actions">
@@ -158,7 +164,7 @@ const activeTab = computed(() => (route.name === 'accounts' ? 'accounts' : 'over
   height: 2px;
   border-radius: 2px 2px 0 0;
   background: #8178ff;
-  content: '';
+  content: "";
 }
 
 @media (max-width: 700px) {
