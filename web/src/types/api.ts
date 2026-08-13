@@ -11,6 +11,12 @@ export type InvestmentTransactionType = "buy" | "sell";
 export type UserStatus = "active" | "disabled" | "locked";
 export type FontSizePreference = "small" | "medium" | "large";
 export type LayoutDensityPreference = "comfortable" | "compact";
+export type EmploymentStatus =
+  | "employed"
+  | "self_employed"
+  | "student"
+  | "retired"
+  | "other";
 
 export interface PageResponse {
   page: number;
@@ -52,6 +58,31 @@ export interface UserPreferenceUpdate {
   font_size?: FontSizePreference;
   layout_density?: LayoutDensityPreference;
   hide_sensitive_amounts?: boolean;
+}
+
+export interface PersonalFinancialProfile {
+  id: string;
+  birth_date: string | null;
+  residence_province: string | null;
+  residence_city: string | null;
+  employment_status: EmploymentStatus | null;
+  occupation: string | null;
+  annual_income: MoneyValue | null;
+  annual_expense_budget: MoneyValue | null;
+  currency: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonalFinancialProfileInput {
+  birth_date: string | null;
+  residence_province: string | null;
+  residence_city: string | null;
+  employment_status: EmploymentStatus | null;
+  occupation: string | null;
+  annual_income: string | null;
+  annual_expense_budget: string | null;
+  currency: string;
 }
 
 export interface AuthTokenResponse {

@@ -63,6 +63,8 @@ playwright-report/
 !/tests/unit/
 /tests/unit/*
 !/tests/unit/test_user_settings_service.py
+!/tests/unit/test_personal_financial_profile_service.py
+!/tests/unit/test_personal_financial_profile_schemas.py
 !/tests/integration/
 /tests/integration/*
 !/tests/integration/test_user_settings_isolation.py

@@ -17,7 +17,15 @@ from app.db.models.finance import (
     InvestmentTransaction,
     MarketPriceSnapshot,
 )
-from app.db.models.identity import AuditLog, RefreshToken, User, UserPreference, UserProfile
+from app.db.models.identity import (
+    AuditLog,
+    EmploymentStatus,
+    PersonalFinancialProfile,
+    RefreshToken,
+    User,
+    UserPreference,
+    UserProfile,
+)
 from app.db.models.rag import (
     Document,
     DocumentChunk,
@@ -40,6 +48,7 @@ __all__ = [
     "DocumentUploadRequest",
     "DocumentVersion",
     "ExchangeRateSnapshot",
+    "EmploymentStatus",
     "FinancialAccount",
     "FinancialTransaction",
     "IngestionJob",
@@ -51,6 +60,7 @@ __all__ = [
     "MessageCitation",
     "MessageEvidence",
     "OutboxEvent",
+    "PersonalFinancialProfile",
     "RefreshToken",
     "RetrievalLog",
     "User",

@@ -4,6 +4,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   FileSearchOutlined,
+  IdcardOutlined,
   InboxOutlined,
   MessageOutlined,
   PlusOutlined,
@@ -21,6 +22,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import AnswerContent from '@/components/chat/AnswerContent.vue'
 import FinanceEvidencePanel from '@/components/chat/FinanceEvidencePanel.vue'
+import FinancialProfilePanel from '@/components/profile/FinancialProfilePanel.vue'
 import { ChatStreamRequestError, chatApi } from '@/services/chat'
 import { apiErrorMessage } from '@/services/http'
 import type {
@@ -46,6 +48,7 @@ const sending = ref(false)
 const conversations = ref<Conversation[]>([])
 const activeConversation = ref<ConversationDetail | null>(null)
 const conversationSearch = ref('')
+const embeddedPage = ref<'chat' | 'profile'>('chat')
 const question = ref('')
 const pendingQuestion = ref('')
 const streamingAnswer = ref('')
@@ -189,6 +192,15 @@ async function recoverRunningAnswer(conversationId: string): Promise<void> {
 function openCreate(): void {
   createTitle.value = ''
   createOpen.value = true
+}
+
+function openFinancialProfile(): void {
+  if (!props.embedded || sending.value) return
+  embeddedPage.value = 'profile'
+}
+
+function closeFinancialProfile(): void {
+  embeddedPage.value = 'chat'
 }
 
 async function startNewConversation(): Promise<void> {
@@ -488,7 +500,11 @@ onMounted(loadWorkspace)
 </script>
 
 <template>
-  <div class="chat-page" :class="{ 'is-embedded': embedded }">
+  <FinancialProfilePanel
+    v-if="embedded && embeddedPage === 'profile'"
+    @back="closeFinancialProfile"
+  />
+  <div v-else class="chat-page" :class="{ 'is-embedded': embedded }">
     <div v-if="!embedded" class="page-heading chat-heading">
       <div>
         <span class="heading-kicker">ROUTED ASSISTANT</span>
@@ -524,6 +540,11 @@ onMounted(loadWorkspace)
             <button type="button" @click="openCreate">
               <UserOutlined />
               <span>自定义会话名称</span>
+              <b>›</b>
+            </button>
+            <button type="button" :disabled="sending" @click="openFinancialProfile">
+              <IdcardOutlined />
+              <span>个人财务档案</span>
               <b>›</b>
             </button>
           </div>
@@ -1688,8 +1709,11 @@ onMounted(loadWorkspace)
   border-radius: 8px 8px 0 0;
 }
 
-.embedded-options button:last-of-type {
+.embedded-options button + button {
   margin-top: -1px;
+}
+
+.embedded-options button:last-of-type {
   border-radius: 0 0 8px 8px;
 }
 
