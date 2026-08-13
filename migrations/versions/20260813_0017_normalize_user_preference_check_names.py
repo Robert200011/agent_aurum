@@ -36,7 +36,6 @@ CHECK_CONSTRAINT_RENAMES: tuple[tuple[str, str], ...] = (
 
 
 def _constraint_exists(constraint: str) -> bool:
-    connection = op.get_bind()
     statement = sa.text(
         """
         SELECT EXISTS (
@@ -54,15 +53,17 @@ def _constraint_exists(constraint: str) -> bool:
         """
     )
     return bool(
-        connection.execute(
+        op.get_bind()
+        .execute(
             statement,
             {"schema": SCHEMA, "table": TABLE, "constraint": constraint},
-        ).scalar_one()
+        )
+        .scalar_one()
     )
 
 
 def _rename_constraint(source: str, target: str) -> None:
-    """兼容已执行过修复的数据库，并拒绝静默跳过未知状态。"""
+    """安全处理迁移重放或已人工规范化约束名称的数据库。"""
 
     if _constraint_exists(target):
         if _constraint_exists(source):
