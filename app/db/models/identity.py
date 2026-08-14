@@ -369,15 +369,15 @@ class UserMemoryConfirmation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         CheckConstraint(
             "status IN ('pending', 'accepted', 'declined', 'expired')",
-            name="user_memory_confirmation_status_valid",
+            name="status_valid",
         ),
         CheckConstraint(
             "proposal_hash ~ '^[0-9a-f]{64}$'",
-            name="user_memory_confirmation_hash_valid",
+            name="proposal_hash_valid",
         ),
         CheckConstraint(
             "jsonb_typeof(proposals) = 'array' AND jsonb_array_length(proposals) BETWEEN 1 AND 5",
-            name="user_memory_confirmation_proposals_valid",
+            name="proposals_valid",
         ),
         Index("ix_user_memory_confirmations_user_expires", "user_id", "expires_at"),
         {"schema": IDENTITY_SCHEMA},
