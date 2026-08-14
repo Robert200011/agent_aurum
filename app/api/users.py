@@ -2,19 +2,32 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Response, status
+from uuid import UUID
 
-from app.api.dependencies import AccessContextDependency, UserSettingsServiceDependency
+from fastapi import APIRouter, Header, Query, Response, status
+
+from app.api.dependencies import (
+    AccessContextDependency,
+    MemoryServiceDependency,
+    UserSettingsServiceDependency,
+)
 from app.api.schemas.auth import UserResponse
 from app.api.schemas.users import (
     FinancialProfileCreate,
     FinancialProfileResponse,
     FinancialProfileUpdate,
+    MemoryCreate,
+    MemoryListResponse,
+    MemoryResponse,
+    MemorySettingsResponse,
+    MemorySettingsUpdate,
+    MemoryUpdate,
     PreferenceResponse,
     PreferenceUpdate,
     ProfileResponse,
     ProfileUpdate,
 )
+from app.db.models.identity import MemoryCategory, MemoryStatus
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -96,4 +109,89 @@ async def update_financial_profile(
 @router.delete("/me/financial-profile", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_financial_profile(service: UserSettingsServiceDependency) -> Response:
     await service.delete_financial_profile()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/me/memory-settings", response_model=MemorySettingsResponse)
+async def get_memory_settings(service: MemoryServiceDependency) -> MemorySettingsResponse:
+    return MemorySettingsResponse.model_validate(await service.get_settings())
+
+
+@router.patch("/me/memory-settings", response_model=MemorySettingsResponse)
+async def update_memory_settings(
+    payload: MemorySettingsUpdate,
+    service: MemoryServiceDependency,
+) -> MemorySettingsResponse:
+    settings = await service.update_settings(
+        values=payload.model_dump(exclude_unset=True),
+        fields_set=payload.model_fields_set,
+    )
+    return MemorySettingsResponse.model_validate(settings)
+
+
+@router.get("/me/memories", response_model=MemoryListResponse)
+async def list_memories(
+    service: MemoryServiceDependency,
+    category: MemoryCategory | None = None,
+    memory_status: MemoryStatus | None = Query(default=None, alias="status"),
+    search: str | None = Query(default=None, min_length=1, max_length=100),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+) -> MemoryListResponse:
+    result = await service.list_memories(
+        category=category,
+        status=memory_status,
+        search=search,
+        page=page,
+        page_size=page_size,
+    )
+    return MemoryListResponse(
+        items=[MemoryResponse.model_validate(item) for item in result.items],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )
+
+
+@router.post(
+    "/me/memories",
+    response_model=MemoryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_memory(
+    payload: MemoryCreate,
+    service: MemoryServiceDependency,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+) -> MemoryResponse:
+    memory = await service.create_memory(
+        category=payload.category,
+        title=payload.title,
+        content=payload.content,
+        idempotency_key=idempotency_key,
+    )
+    return MemoryResponse.model_validate(memory)
+
+
+@router.get("/me/memories/{memory_id}", response_model=MemoryResponse)
+async def get_memory(memory_id: UUID, service: MemoryServiceDependency) -> MemoryResponse:
+    return MemoryResponse.model_validate(await service.get_memory(memory_id))
+
+
+@router.patch("/me/memories/{memory_id}", response_model=MemoryResponse)
+async def update_memory(
+    memory_id: UUID,
+    payload: MemoryUpdate,
+    service: MemoryServiceDependency,
+) -> MemoryResponse:
+    memory = await service.update_memory(
+        memory_id,
+        values=payload.model_dump(exclude_unset=True),
+        fields_set=payload.model_fields_set,
+    )
+    return MemoryResponse.model_validate(memory)
+
+
+@router.delete("/me/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_memory(memory_id: UUID, service: MemoryServiceDependency) -> Response:
+    await service.delete_memory(memory_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -25,6 +25,10 @@ from app.api.schemas.chat import (
     ConversationListResponse,
     ConversationResponse,
     ConversationUpdate,
+    MemoryConfirmationResolve,
+    MemoryConfirmationResolveResponse,
+    MemoryConfirmationResponse,
+    MemorySavedResponse,
     MessageCitationResponse,
     MessageEvidenceResponse,
     MessageResponse,
@@ -45,15 +49,37 @@ from app.observability.tracing import current_trace_id
 from app.services.chat import (
     ChatStreamCompleted,
     ChatStreamDelta,
+    ChatStreamMemoryConfirmation,
+    ChatStreamMemorySaved,
     ChatStreamStarted,
     ChatStreamStatus,
     PersistedAnswer,
 )
 from app.services.chat_runs import BufferedChatEvent, ChatRunError
+from app.services.memory_commands import MemorySaveResult
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+@router.post(
+    "/memory-confirmations/{confirmation_id}",
+    response_model=MemoryConfirmationResolveResponse,
+)
+async def resolve_memory_confirmation(
+    confirmation_id: UUID,
+    payload: MemoryConfirmationResolve,
+    service: ChatServiceDependency,
+) -> MemoryConfirmationResolveResponse:
+    result = await service.resolve_memory_confirmation(
+        confirmation_id,
+        accept=payload.accept,
+    )
+    return MemoryConfirmationResolveResponse(
+        status="accepted" if payload.accept else "declined",
+        results=[_memory_saved_response(item) for item in result.save_results],
+    )
 
 
 @router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
@@ -380,6 +406,23 @@ async def _coordinated_event_stream(
             elif isinstance(event, ChatStreamDelta):
                 payload = StreamDeltaResponse(delta=event.text)
                 event_name = "delta"
+            elif isinstance(event, ChatStreamMemorySaved):
+                payload = _memory_saved_response(event.result)
+                event_name = "memory_saved"
+            elif isinstance(event, ChatStreamMemoryConfirmation):
+                payload = MemoryConfirmationResponse(
+                    confirmation_id=event.confirmation_id,
+                    expires_at=event.expires_at,
+                    items=[
+                        {
+                            "category": item["category"],
+                            "title": item["title"],
+                            "content": item["content"],
+                        }
+                        for item in event.items
+                    ],
+                )
+                event_name = "memory_confirmation"
             elif isinstance(event, ChatStreamCompleted):
                 payload = _structured_answer_response(event.answer)
                 event_name = "complete"
@@ -426,6 +469,16 @@ def _structured_answer_response(persisted: PersistedAnswer) -> StructuredAnswerR
         evidence=[_evidence_response(item) for item in persisted.evidence],
         data_as_of=persisted.data_as_of,
         risk_notice=persisted.risk_notice,
+    )
+
+
+def _memory_saved_response(result: MemorySaveResult) -> MemorySavedResponse:
+    return MemorySavedResponse(
+        memory_id=result.memory_id,
+        category=result.category,
+        title=result.title,
+        result=result.result.value,
+        reason=result.reason,
     )
 
 

@@ -19,10 +19,11 @@ import type {
   EmploymentStatus as ApiEmploymentStatus,
   PersonalFinancialProfile,
   PersonalFinancialProfileInput,
+  MemoryCategory,
+  UserMemory,
 } from "@/types/api";
 
 type EmploymentStatus = "" | ApiEmploymentStatus;
-type MemoryCategory = "goal" | "preference" | "constraint" | "personal";
 
 interface FinancialProfileDraft {
   birthDate: string;
@@ -32,14 +33,6 @@ interface FinancialProfileDraft {
   occupation: string;
   annualIncome: string;
   annualExpenseBudget: string;
-}
-
-interface MemoryDraft {
-  id: string;
-  category: MemoryCategory;
-  title: string;
-  content: string;
-  updatedAt: string;
 }
 
 const emit = defineEmits<{ back: [] }>();
@@ -65,35 +58,19 @@ const memoryListOpen = ref(false);
 const memoryEditorOpen = ref(false);
 const memoryEnabled = ref(true);
 const memoryEnabledDraft = ref(true);
+const memoryLoading = ref(true);
+const memoryLoadFailed = ref(false);
+const memorySaving = ref(false);
+const memoryPage = ref(1);
+const memoryPageSize = 20;
+const memoryTotal = ref(0);
 const editingMemoryId = ref<string | null>(null);
-const memoryForm = reactive<Omit<MemoryDraft, "id" | "updatedAt">>({
+const memoryForm = reactive<{ category: MemoryCategory; title: string; content: string }>({
   category: "goal",
   title: "",
   content: "",
 });
-const memories = ref<MemoryDraft[]>([
-  {
-    id: "demo-goal",
-    category: "goal",
-    title: "优先建立应急储备",
-    content: "希望先建立覆盖 6 个月必要开支的应急资金，再考虑提高长期投资比例。",
-    updatedAt: "刚刚",
-  },
-  {
-    id: "demo-preference",
-    category: "preference",
-    title: "偏好稳健、清晰的建议",
-    content: "讨论投资时优先说明风险、流动性和数据口径，不给出确定性买卖结论。",
-    updatedAt: "今天",
-  },
-  {
-    id: "demo-constraint",
-    category: "constraint",
-    title: "保留日常现金流",
-    content: "制定预算时需要为日常生活与短期计划保留足够的可用现金。",
-    updatedAt: "今天",
-  },
-]);
+const memories = ref<UserMemory[]>([]);
 
 const employmentLabels: Record<EmploymentStatus, string> = {
   "": "待完善",
@@ -109,6 +86,10 @@ const categoryLabels: Record<MemoryCategory, string> = {
   constraint: "财务约束",
   personal: "个人信息",
 };
+const sourceLabels = {
+  manual_ui: "手动维护",
+  explicit_chat: "聊天保存",
+} as const;
 
 const latestMemory = computed(() => memories.value[0] ?? null);
 const age = computed(() => {
@@ -156,6 +137,18 @@ function displayMoney(value: string): string {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount < 0) return "待完善";
   return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(amount)} 元`;
+}
+
+function displayTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "未知时间";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
 }
 
 function openProfileEditor(): void {
@@ -249,10 +242,45 @@ function openMemorySettings(): void {
   memorySettingsOpen.value = true;
 }
 
-function saveMemorySettings(): void {
-  memoryEnabled.value = memoryEnabledDraft.value;
-  memorySettingsOpen.value = false;
-  message.success(memoryEnabled.value ? "记忆功能预览已开启" : "记忆功能预览已关闭");
+async function loadMemoryData(page = memoryPage.value): Promise<void> {
+  memoryLoading.value = true;
+  memoryLoadFailed.value = false;
+  try {
+    const [settings, list] = await Promise.all([
+      settingsApi.memorySettings(),
+      settingsApi.memories(page, memoryPageSize),
+    ]);
+    memoryEnabled.value = settings.memory_enabled;
+    memories.value = list.items;
+    memoryPage.value = list.page;
+    memoryTotal.value = list.total;
+  } catch (error) {
+    memoryLoadFailed.value = true;
+    message.error(apiErrorMessage(error, "记忆数据加载失败"));
+  } finally {
+    memoryLoading.value = false;
+  }
+}
+
+async function changeMemoryPage(page: number): Promise<void> {
+  await loadMemoryData(page);
+}
+
+async function saveMemorySettings(): Promise<void> {
+  if (memorySaving.value) return;
+  memorySaving.value = true;
+  try {
+    const saved = await settingsApi.updateMemorySettings({
+      memory_enabled: memoryEnabledDraft.value,
+    });
+    memoryEnabled.value = saved.memory_enabled;
+    memorySettingsOpen.value = false;
+    message.success(memoryEnabled.value ? "记忆功能已开启" : "记忆功能已关闭");
+  } catch (error) {
+    message.error(apiErrorMessage(error, "记忆设置保存失败"));
+  } finally {
+    memorySaving.value = false;
+  }
 }
 
 function openNewMemory(): void {
@@ -261,7 +289,7 @@ function openNewMemory(): void {
   memoryEditorOpen.value = true;
 }
 
-function openMemoryEditor(memory: MemoryDraft): void {
+function openMemoryEditor(memory: UserMemory): void {
   editingMemoryId.value = memory.id;
   Object.assign(memoryForm, {
     category: memory.category,
@@ -271,43 +299,70 @@ function openMemoryEditor(memory: MemoryDraft): void {
   memoryEditorOpen.value = true;
 }
 
-function saveMemoryPreview(): void {
+async function saveMemory(): Promise<void> {
+  if (memorySaving.value) return;
   const title = memoryForm.title.trim();
   const content = memoryForm.content.trim();
   if (!title || !content) {
     message.warning("请填写记忆标题和内容");
     return;
   }
-  const existing = memories.value.find((item) => item.id === editingMemoryId.value);
-  if (existing) {
-    Object.assign(existing, { ...memoryForm, title, content, updatedAt: "刚刚" });
-  } else {
-    memories.value.unshift({
-      id: `preview-${Date.now()}`,
-      ...memoryForm,
-      title,
-      content,
-      updatedAt: "刚刚",
-    });
+  memorySaving.value = true;
+  try {
+    const payload = { ...memoryForm, title, content };
+    const saved = editingMemoryId.value
+      ? await settingsApi.updateMemory(editingMemoryId.value, payload)
+      : await settingsApi.createMemory(payload, crypto.randomUUID());
+    const existingIndex = memories.value.findIndex((item) => item.id === saved.id);
+    if (existingIndex >= 0) memories.value.splice(existingIndex, 1, saved);
+    else memories.value.unshift(saved);
+    memoryEditorOpen.value = false;
+    message.success("记忆已保存");
+  } catch (error) {
+    message.error(apiErrorMessage(error, "记忆保存失败"));
+  } finally {
+    memorySaving.value = false;
   }
-  memoryEditorOpen.value = false;
-  message.success("记忆预览已更新，本阶段尚未同步到后端");
 }
 
-function deleteMemory(memory: MemoryDraft): void {
+async function toggleMemoryStatus(memory: UserMemory): Promise<void> {
+  if (memorySaving.value) return;
+  memorySaving.value = true;
+  try {
+    const saved = await settingsApi.updateMemory(memory.id, {
+      status: memory.status === "active" ? "disabled" : "active",
+    });
+    const index = memories.value.findIndex((item) => item.id === saved.id);
+    if (index >= 0) memories.value.splice(index, 1, saved);
+    message.success(saved.status === "active" ? "记忆已启用" : "记忆已停用");
+  } catch (error) {
+    message.error(apiErrorMessage(error, "记忆状态更新失败"));
+  } finally {
+    memorySaving.value = false;
+  }
+}
+
+function deleteMemory(memory: UserMemory): void {
   Modal.confirm({
     title: "删除这条记忆？",
-    content: "当前仅删除本次页面会话中的演示数据。",
+    content: "删除后这条记忆将无法恢复，也不会再用于后续回答。",
     okText: "删除",
     cancelText: "取消",
     okType: "danger",
-    onOk() {
-      memories.value = memories.value.filter((item) => item.id !== memory.id);
+    async onOk() {
+      try {
+        await settingsApi.deleteMemory(memory.id);
+        memories.value = memories.value.filter((item) => item.id !== memory.id);
+        message.success("记忆已删除");
+      } catch (error) {
+        message.error(apiErrorMessage(error, "记忆删除失败"));
+        throw error;
+      }
     },
   });
 }
 
-onMounted(loadFinancialProfile);
+onMounted(() => Promise.all([loadFinancialProfile(), loadMemoryData()]));
 </script>
 
 <template>
@@ -325,11 +380,11 @@ onMounted(loadFinancialProfile);
 
     <div class="profile-scroll">
       <a-alert
-        type="warning"
+        type="info"
         show-icon
         class="preview-alert"
-        message="记忆功能仍为界面预览"
-        description="个人财务档案现已保存到后端数据库；下方记忆内容仍只在本次页面会话中演示，尚未用于 Agent 回答。"
+        message="个人档案与长期记忆已持久化"
+        description="本阶段支持真实的记忆新增、编辑、停用和删除；跨会话自动召回将在后续阶段接入 Agent。"
       />
 
       <section class="memory-card" :class="{ 'is-disabled': !memoryEnabled }">
@@ -348,10 +403,17 @@ onMounted(loadFinancialProfile);
           </button>
         </div>
 
-        <button type="button" class="memory-preview" @click="memoryListOpen = true">
+        <button
+          type="button"
+          class="memory-preview"
+          :disabled="memoryLoading || memoryLoadFailed"
+          @click="memoryListOpen = true"
+        >
           <span class="memory-status-dot" :class="{ active: memoryEnabled }" />
           <span class="memory-copy">
-            <small>{{ memoryEnabled ? `已开启 · ${memories.length} 条记忆` : "记忆功能已关闭" }}</small>
+            <small v-if="memoryLoading">正在加载已保存的记忆…</small>
+            <small v-else-if="memoryLoadFailed">记忆加载失败</small>
+            <small v-else>{{ memoryEnabled ? `已开启 · ${memoryTotal} 条记忆` : "记忆功能已关闭" }}</small>
             <strong>{{ latestMemory?.title ?? "尚未保存记忆" }}</strong>
             <span>{{ latestMemory?.content ?? "后续可在这里查看 Agent 能调用的长期记忆。" }}</span>
           </span>
@@ -447,18 +509,13 @@ onMounted(loadFinancialProfile);
       <div class="memory-settings">
         <div>
           <strong>开启记忆功能</strong>
-          <span>未来开启后，Agent 会按当前问题检索相关记忆并生成更有针对性的回答。</span>
+          <span>关闭后保留已有数据，并停止后续聊天保存与回答召回。</span>
         </div>
         <div class="switch-row">
           <span>{{ memoryEnabledDraft ? "开" : "关" }}</span>
           <a-switch v-model:checked="memoryEnabledDraft" />
         </div>
-        <a-alert
-          type="warning"
-          show-icon
-          message="此开关目前仅控制界面预览"
-          description="后端接入后，关闭状态将同时停止记忆召回和新记忆写入。"
-        />
+        <a-alert type="info" show-icon message="已有记忆不会因关闭而删除" />
       </div>
     </a-modal>
 
@@ -532,15 +589,34 @@ onMounted(loadFinancialProfile);
         message="记忆功能已关闭"
         description="已有内容仍可查看和管理，但未来不会参与回答。"
       />
-      <div v-if="memories.length" class="memory-list">
-        <article v-for="memory in memories" :key="memory.id" class="memory-item">
+      <div v-if="memoryLoading" class="profile-state">
+        <a-spin size="small" />
+        <span>正在加载记忆…</span>
+      </div>
+      <div v-else-if="memoryLoadFailed" class="profile-state error">
+        <span>记忆加载失败，请检查网络后重试。</span>
+        <a-button size="small" @click="loadMemoryData">重新加载</a-button>
+      </div>
+      <div v-else-if="memories.length" class="memory-list">
+        <article
+          v-for="memory in memories"
+          :key="memory.id"
+          class="memory-item"
+          :class="{ 'is-disabled': memory.status === 'disabled' }"
+        >
           <div class="memory-item-heading">
-            <span>{{ categoryLabels[memory.category] }}</span>
-            <small><ClockCircleOutlined /> {{ memory.updatedAt }}</small>
+            <span>
+              {{ categoryLabels[memory.category] }} · {{ sourceLabels[memory.source_type] }}
+              <template v-if="memory.status === 'disabled'"> · 已停用</template>
+            </span>
+            <small><ClockCircleOutlined /> {{ displayTimestamp(memory.updated_at) }}</small>
           </div>
           <strong>{{ memory.title }}</strong>
           <p>{{ memory.content }}</p>
           <div class="memory-actions">
+            <a-button type="text" size="small" @click="toggleMemoryStatus(memory)">
+              {{ memory.status === "active" ? "停用" : "启用" }}
+            </a-button>
             <a-button type="text" size="small" @click="openMemoryEditor(memory)">
               <EditOutlined />编辑
             </a-button>
@@ -549,6 +625,15 @@ onMounted(loadFinancialProfile);
             </a-button>
           </div>
         </article>
+        <a-pagination
+          v-if="memoryTotal > memoryPageSize"
+          :current="memoryPage"
+          :page-size="memoryPageSize"
+          :total="memoryTotal"
+          :show-size-changer="false"
+          size="small"
+          @change="changeMemoryPage"
+        />
       </div>
       <a-empty v-else description="暂无记忆">
         <a-button type="primary" :disabled="!memoryEnabled" @click="openNewMemory">
@@ -562,9 +647,12 @@ onMounted(loadFinancialProfile);
       centered
       :title="editingMemoryId ? '编辑记忆' : '新增记忆'"
       :width="480"
-      ok-text="保存预览"
+      ok-text="保存"
       cancel-text="取消"
-      @ok="saveMemoryPreview"
+      :confirm-loading="memorySaving"
+      :mask-closable="!memorySaving"
+      :keyboard="!memorySaving"
+      @ok="saveMemory"
     >
       <a-form layout="vertical">
         <a-form-item label="记忆类型" required>
@@ -581,7 +669,7 @@ onMounted(loadFinancialProfile);
         <a-form-item label="内容" required>
           <a-textarea
             v-model:value="memoryForm.content"
-            :maxlength="500"
+            :maxlength="1000"
             :auto-size="{ minRows: 4, maxRows: 8 }"
             placeholder="填写希望 Agent 在后续回答中考虑的信息"
           />
@@ -946,6 +1034,10 @@ onMounted(loadFinancialProfile);
   border: 1px solid #e8e8eb;
   border-radius: 13px;
   background: #fff;
+}
+
+.memory-item.is-disabled {
+  opacity: 0.65;
 }
 
 .memory-item-heading,

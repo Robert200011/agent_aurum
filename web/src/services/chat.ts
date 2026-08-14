@@ -6,6 +6,9 @@ import type {
   ChatStreamError,
   ChatStreamStarted,
   ChatStreamStatus,
+  MemoryConfirmationEvent,
+  MemoryConfirmationResolution,
+  MemorySavedEvent,
   Conversation,
   ConversationDetail,
   ConversationList,
@@ -28,6 +31,8 @@ interface ChatStreamHandlers {
   onStart?: (event: ChatStreamStarted) => void
   onStatus?: (event: ChatStreamStatus) => void
   onDelta: (delta: string) => void
+  onMemorySaved?: (event: MemorySavedEvent) => void
+  onMemoryConfirmation?: (event: MemoryConfirmationEvent) => void
   onComplete?: (answer: StructuredAnswer) => void
 }
 
@@ -69,6 +74,10 @@ async function consumeChatStream(
       handlers.onStatus?.(payload as ChatStreamStatus)
     } else if (event.event === 'delta') {
       handlers.onDelta((payload as ChatStreamDelta).delta)
+    } else if (event.event === 'memory_saved') {
+      handlers.onMemorySaved?.(payload as MemorySavedEvent)
+    } else if (event.event === 'memory_confirmation') {
+      handlers.onMemoryConfirmation?.(payload as MemoryConfirmationEvent)
     } else if (event.event === 'complete') {
       completed = payload as StructuredAnswer
       handlers.onComplete?.(completed)
@@ -197,5 +206,15 @@ export const chatApi = {
 
   async cancelRun(conversationId: string, runId: string): Promise<void> {
     await http.post(`/conversations/${conversationId}/runs/${runId}/cancel`)
+  },
+  async resolveMemoryConfirmation(
+    confirmationId: string,
+    accept: boolean,
+  ): Promise<MemoryConfirmationResolution> {
+    const response = await http.post<MemoryConfirmationResolution>(
+      `/conversations/memory-confirmations/${confirmationId}`,
+      { accept },
+    )
+    return response.data
   },
 }

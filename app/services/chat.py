@@ -35,6 +35,7 @@ from app.db.models.chat import (
     MessageCitation,
     MessageEvidence,
 )
+from app.db.models.identity import MemoryConfirmationStatus
 from app.db.repositories.chat import ChatRepository
 from app.db.session import set_tenant_context
 from app.errors import (
@@ -44,6 +45,12 @@ from app.errors import (
     NotFoundError,
 )
 from app.services.answering import RagAnswerService
+from app.services.memory_commands import (
+    MemoryCommandResult,
+    MemoryCommandService,
+    MemorySaveResult,
+    memory_feedback_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +121,29 @@ class ChatStreamCompleted:
     answer: PersistedAnswer
 
 
+@dataclass(frozen=True, slots=True)
+class ChatStreamMemorySaved:
+    """一条由服务端实际落库或判定重复的记忆结果。"""
+
+    result: MemorySaveResult
+
+
+@dataclass(frozen=True, slots=True)
+class ChatStreamMemoryConfirmation:
+    """需要用户明确选择后才会写入的持久化提案。"""
+
+    confirmation_id: UUID
+    expires_at: datetime
+    items: tuple[dict[str, str], ...]
+
+
 type ChatAnswerStreamEvent = (
-    ChatStreamStarted | ChatStreamStatus | ChatStreamDelta | ChatStreamCompleted
+    ChatStreamStarted
+    | ChatStreamStatus
+    | ChatStreamDelta
+    | ChatStreamMemorySaved
+    | ChatStreamMemoryConfirmation
+    | ChatStreamCompleted
 )
 
 
@@ -124,6 +152,7 @@ class StreamingRun:
     conversation_id: UUID
     thread_id: UUID
     question: str
+    user_message_id: UUID
     message_id: UUID
     run_id: UUID
     started_at: datetime
@@ -139,11 +168,13 @@ class ChatService:
         session: AsyncSession,
         user_id: UUID,
         answer_service: RagAnswerService,
+        memory_command_service: MemoryCommandService | None = None,
         history_message_limit: int = 8,
     ) -> None:
         self._session = session
         self._user_id = user_id
         self._answer_service = answer_service
+        self._memory_command_service = memory_command_service
         self._history_message_limit = history_message_limit
         self._repository = ChatRepository(session)
 
@@ -166,6 +197,16 @@ class ChatService:
         )
         await self._session.commit()
         return conversation
+
+    async def resolve_memory_confirmation(
+        self, confirmation_id: UUID, *, accept: bool
+    ) -> MemoryCommandResult:
+        if self._memory_command_service is None:
+            raise BusinessRuleError("memory decisions are disabled")
+        return await self._memory_command_service.resolve_confirmation(
+            confirmation_id=confirmation_id,
+            accept=accept,
+        )
 
     async def list_conversations(
         self,
@@ -399,6 +440,14 @@ class ChatService:
         await self._session.commit()
 
         try:
+            memory_result = (
+                await self._memory_command_service.process_message(
+                    source_message_id=user_message.id,
+                    current_user_message=normalized_question,
+                )
+                if self._memory_command_service is not None
+                else MemoryCommandResult()
+            )
             result = await self._answer_service.answer(
                 question=normalized_question,
                 thread_id=conversation.id,
@@ -408,7 +457,8 @@ class ChatService:
             assistant = await self._required_message(assistant_message.id, for_update=True)
             persisted_run = await self._required_run(run.id, for_update=True)
             completed_at = datetime.now(UTC)
-            assistant.content = result.answer
+            feedback = memory_feedback_text(memory_result)
+            assistant.content = f"{feedback}\n\n{result.answer}" if feedback else result.answer
             assistant.status = MessageStatus.COMPLETED.value
             assistant.latency_ms = result.latency_ms
             if result.completion is not None:
@@ -466,6 +516,12 @@ class ChatService:
                 "capability_call_count": result.capability_call_count,
                 "risk_policy": (result.plan.risk_policy if result.plan is not None else "standard"),
                 "risk_notice": _risk_notice(result),
+                "memory_result_count": len(memory_result.save_results),
+                "memory_confirmation_id": (
+                    str(memory_result.confirmation.id)
+                    if memory_result.confirmation is not None
+                    else None
+                ),
             }
             await self._session.commit()
             return PersistedAnswer(
@@ -606,6 +662,7 @@ class ChatService:
             conversation_id=conversation.id,
             thread_id=conversation.id,
             question=user_message.content,
+            user_message_id=user_message.id,
             message_id=assistant.id,
             run_id=run.id,
             started_at=started_at,
@@ -622,8 +679,30 @@ class ChatService:
         generation_started = False
         finalizing_started = False
         last_stage: str = "understanding"
+        memory_result = MemoryCommandResult()
         try:
             yield ChatStreamStatus("understanding")
+            if self._memory_command_service is not None:
+                memory_result = await self._memory_command_service.process_message(
+                    source_message_id=streaming_run.user_message_id,
+                    current_user_message=streaming_run.question,
+                )
+                for item in memory_result.save_results:
+                    yield ChatStreamMemorySaved(item)
+                if (
+                    memory_result.confirmation is not None
+                    and memory_result.confirmation.status
+                    == MemoryConfirmationStatus.PENDING
+                ):
+                    confirmation = memory_result.confirmation
+                    yield ChatStreamMemoryConfirmation(
+                        confirmation_id=confirmation.id,
+                        expires_at=confirmation.expires_at,
+                        items=tuple(confirmation.proposals),
+                    )
+                feedback = memory_feedback_text(memory_result)
+                if feedback:
+                    yield ChatStreamDelta(f"{feedback}\n\n")
             history = await self._conversation_history(
                 conversation_id=streaming_run.conversation_id,
                 before=streaming_run.history_before,
@@ -657,6 +736,7 @@ class ChatService:
                 persisted = await self._persist_streamed_answer(
                     streaming_run=streaming_run,
                     result=event.result,
+                    memory_result=memory_result,
                 )
                 completed = True
                 yield ChatStreamCompleted(persisted)
@@ -748,6 +828,7 @@ class ChatService:
             conversation_id=conversation.id,
             thread_id=conversation.id,
             question=normalized_question,
+            user_message_id=user_message.id,
             message_id=assistant_message.id,
             run_id=run.id,
             started_at=started_at,
@@ -759,6 +840,7 @@ class ChatService:
         *,
         streaming_run: StreamingRun,
         result: RagAnswerResult,
+        memory_result: MemoryCommandResult,
     ) -> PersistedAnswer:
         await self._prepare()
         assistant = await self._required_message(
@@ -767,7 +849,8 @@ class ChatService:
         )
         run = await self._required_run(streaming_run.run_id, for_update=True)
         completed_at = datetime.now(UTC)
-        assistant.content = result.answer
+        feedback = memory_feedback_text(memory_result)
+        assistant.content = f"{feedback}\n\n{result.answer}" if feedback else result.answer
         assistant.status = MessageStatus.COMPLETED.value
         assistant.latency_ms = result.latency_ms
         if result.completion is not None:
@@ -826,6 +909,12 @@ class ChatService:
             "capability_call_count": result.capability_call_count,
             "risk_policy": (result.plan.risk_policy if result.plan is not None else "standard"),
             "risk_notice": _risk_notice(result),
+            "memory_result_count": len(memory_result.save_results),
+            "memory_confirmation_id": (
+                str(memory_result.confirmation.id)
+                if memory_result.confirmation is not None
+                else None
+            ),
         }
         await self._session.commit()
         return PersistedAnswer(

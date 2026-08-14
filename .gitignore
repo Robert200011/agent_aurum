@@ -65,6 +65,11 @@ playwright-report/
 !/tests/unit/test_user_settings_service.py
 !/tests/unit/test_personal_financial_profile_service.py
 !/tests/unit/test_personal_financial_profile_schemas.py
+!/tests/unit/test_memory_service.py
+!/tests/unit/test_memory_decision.py
+!/tests/unit/test_memory_commands.py
 !/tests/integration/
 /tests/integration/*
 !/tests/integration/test_user_settings_isolation.py
+!/tests/integration/test_memory_isolation.py
+!/tests/integration/test_memory_command_persistence.py
