@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.chat.types import AgentRunStatus, ConversationStatus, MessageRole, MessageStatus
+from app.db.models.identity import MemoryCategory
 
 
 class PageResponse(BaseModel):
@@ -270,6 +271,35 @@ class StreamErrorResponse(BaseModel):
     code: str
     message: str
     request_id: str | None = None
+
+
+class MemorySavedResponse(BaseModel):
+    memory_id: UUID | None = None
+    category: MemoryCategory
+    title: str
+    result: Literal["saved", "exists", "rejected"]
+    reason: str | None = None
+
+
+class MemoryConfirmationItemResponse(BaseModel):
+    category: MemoryCategory
+    title: str
+    content: str
+
+
+class MemoryConfirmationResponse(BaseModel):
+    confirmation_id: UUID
+    expires_at: datetime
+    items: list[MemoryConfirmationItemResponse] = Field(min_length=1, max_length=5)
+
+
+class MemoryConfirmationResolve(BaseModel):
+    accept: bool
+
+
+class MemoryConfirmationResolveResponse(BaseModel):
+    status: Literal["accepted", "declined"]
+    results: list[MemorySavedResponse] = Field(default_factory=list)
 
 
 class RunCancellationResponse(BaseModel):

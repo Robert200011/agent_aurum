@@ -11,7 +11,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.schemas.finance import CurrencyCode, NonNegativeMoney
-from app.db.models.identity import EmploymentStatus
+from app.db.models.identity import (
+    EmploymentStatus,
+    MemoryCategory,
+    MemorySourceType,
+    MemoryStatus,
+)
 
 
 class ProfileUpdate(BaseModel):
@@ -156,3 +161,86 @@ class FinancialProfileResponse(BaseModel):
     currency: str
     created_at: datetime
     updated_at: datetime
+
+
+class MemorySettingsUpdate(BaseModel):
+    memory_enabled: bool | None = None
+    chat_save_enabled: bool | None = None
+    answer_recall_enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> MemorySettingsUpdate:
+        if not self.model_fields_set:
+            raise ValueError("at least one memory setting must be provided")
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("memory settings cannot be null")
+        return self
+
+
+class MemorySettingsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    memory_enabled: bool
+    chat_save_enabled: bool
+    answer_recall_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoryCreate(BaseModel):
+    category: MemoryCategory
+    title: str = Field(min_length=1, max_length=80)
+    content: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("title", "content")
+    @classmethod
+    def normalize_required_memory_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("memory text cannot be blank")
+        return normalized
+
+
+class MemoryUpdate(BaseModel):
+    category: MemoryCategory | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=80)
+    content: str | None = Field(default=None, min_length=1, max_length=1000)
+    status: MemoryStatus | None = None
+
+    @field_validator("title", "content")
+    @classmethod
+    def normalize_optional_memory_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("memory text cannot be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_change(self) -> MemoryUpdate:
+        if not self.model_fields_set:
+            raise ValueError("at least one memory field must be provided")
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("memory fields cannot be null")
+        return self
+
+
+class MemoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    category: MemoryCategory
+    title: str
+    content: str
+    status: MemoryStatus
+    source_type: MemorySourceType
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoryListResponse(BaseModel):
+    items: list[MemoryResponse]
+    total: int
+    page: int
+    page_size: int

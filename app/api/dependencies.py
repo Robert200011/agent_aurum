@@ -20,6 +20,7 @@ from app.db.repositories.identity import (
 )
 from app.db.session import get_db_session, set_tenant_context
 from app.errors import AuthenticationError
+from app.memory.decision import MemoryDecisionProvider
 from app.observability.context import set_context, user_identifier_hash
 from app.providers.identity import SecurityStore
 from app.providers.model_provider import ChatModelProvider, RerankerProvider
@@ -34,6 +35,8 @@ from app.services.auth import AuthService
 from app.services.chat import ChatService
 from app.services.chat_runs import ChatRunCoordinator
 from app.services.finance import FinanceService
+from app.services.memory import MemoryService
+from app.services.memory_commands import MemoryCommandService
 from app.services.rag import PersonalKnowledgeService
 from app.services.retrieval import RagRetrievalService
 from app.services.user_settings import UserSettingsService
@@ -179,6 +182,21 @@ UserSettingsServiceDependency = Annotated[
 ]
 
 
+def get_memory_service(
+    session: SessionDependency,
+    context: AccessContextDependency,
+    settings: SettingsDependency,
+) -> MemoryService:
+    return MemoryService(
+        session=session,
+        user_id=context.user.id,
+        max_items=settings.memory_max_items_per_user,
+    )
+
+
+MemoryServiceDependency = Annotated[MemoryService, Depends(get_memory_service)]
+
+
 async def get_personal_knowledge_service(
     session: SessionDependency,
     context: AccessContextDependency,
@@ -282,6 +300,7 @@ def get_chat_service(
     session: SessionDependency,
     context: AccessContextDependency,
     answer_service: RagAnswerServiceDependency,
+    chat_provider: ChatModelProviderDependency,
     settings: SettingsDependency,
 ) -> ChatService:
     return ChatService(
@@ -289,6 +308,21 @@ def get_chat_service(
         user_id=context.user.id,
         answer_service=answer_service,
         history_message_limit=settings.capability_agent_history_messages,
+        memory_command_service=(
+            MemoryCommandService(
+                session=session,
+                user_id=context.user.id,
+                decision_provider=MemoryDecisionProvider(
+                    chat_provider,
+                    timeout_seconds=settings.memory_decision_timeout_seconds,
+                    max_retries=settings.memory_decision_max_retries,
+                ),
+                max_items=settings.memory_max_items_per_user,
+                confirmation_ttl_seconds=settings.memory_confirmation_ttl_seconds,
+            )
+            if settings.memory_enabled and settings.memory_decision_enabled
+            else None
+        ),
     )
 
 

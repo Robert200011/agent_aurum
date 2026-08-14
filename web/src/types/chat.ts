@@ -142,3 +142,28 @@ export interface ChatStreamError {
   message: string
   request_id: string | null
 }
+
+export interface MemorySavedEvent {
+  memory_id: string | null
+  category: 'goal' | 'preference' | 'constraint' | 'personal'
+  title: string
+  result: 'saved' | 'exists' | 'rejected'
+  reason: string | null
+}
+
+export interface MemoryConfirmationItem {
+  category: 'goal' | 'preference' | 'constraint' | 'personal'
+  title: string
+  content: string
+}
+
+export interface MemoryConfirmationEvent {
+  confirmation_id: string
+  expires_at: string
+  items: MemoryConfirmationItem[]
+}
+
+export interface MemoryConfirmationResolution {
+  status: 'accepted' | 'declined'
+  results: MemorySavedEvent[]
+}

@@ -195,6 +195,50 @@ class AgentRun(UUIDPrimaryKeyMixin, Base):
     )
 
 
+class AgentRunMemory(UUIDPrimaryKeyMixin, Base):
+    """一次回答实际调用的记忆标识与脱敏排序信息。"""
+
+    __tablename__ = "agent_run_memories"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_run_id", "user_id"],
+            [f"{CHAT_SCHEMA}.agent_runs.id", f"{CHAT_SCHEMA}.agent_runs.user_id"],
+            name="fk_agent_run_memories_run_user",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["memory_id", "user_id"],
+            [f"{IDENTITY_SCHEMA}.user_memories.id", f"{IDENTITY_SCHEMA}.user_memories.user_id"],
+            name="fk_agent_run_memories_memory_user",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("agent_run_id", "memory_id", name="agent_run_memory_identity"),
+        CheckConstraint("rank > 0", name="agent_run_memory_rank_positive"),
+        CheckConstraint(
+            "relevance_score IS NULL OR relevance_score BETWEEN -1.0 AND 1.0",
+            name="agent_run_memory_relevance_score_valid",
+        ),
+        CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$'", name="agent_run_memory_content_hash_valid"
+        ),
+        Index("ix_agent_run_memories_run_rank", "agent_run_id", "rank", unique=True),
+        {"schema": CHAT_SCHEMA},
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_run_id: Mapped[UUID] = mapped_column(nullable=False)
+    memory_id: Mapped[UUID] = mapped_column(nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    relevance_score: Mapped[float | None] = mapped_column(Float)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    memory_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class AgentToolCall(UUIDPrimaryKeyMixin, Base):
     """一次只读 Agent 工具调用的脱敏审计记录。"""
 

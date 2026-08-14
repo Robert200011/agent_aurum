@@ -16,6 +16,7 @@ from app.agents.tools.finance import FinanceToolExecutor
 from app.config import Settings
 from app.errors import ApplicationError
 from app.governance.usage import collect_model_tokens
+from app.memory.decision import MemoryDecisionProvider
 from app.providers.model_provider import ChatModelProvider, RerankerProvider
 from app.providers.quota_store import ChatQuotaLease, RedisQuotaStore
 from app.providers.retrieval_cache import RedisRetrievalCache
@@ -28,6 +29,7 @@ from app.services.chat import (
     StreamingRun,
 )
 from app.services.finance import FinanceService
+from app.services.memory_commands import MemoryCommandService
 from app.services.retrieval import RagRetrievalService
 
 logger = logging.getLogger(__name__)
@@ -231,6 +233,28 @@ class ChatRunCoordinator:
                             answer_service=answering,
                             history_message_limit=(
                                 self._settings.capability_agent_history_messages
+                            ),
+                            memory_command_service=(
+                                MemoryCommandService(
+                                    session=session,
+                                    user_id=user_id,
+                                    decision_provider=MemoryDecisionProvider(
+                                        self._chat_provider,
+                                        timeout_seconds=(
+                                            self._settings.memory_decision_timeout_seconds
+                                        ),
+                                        max_retries=(
+                                            self._settings.memory_decision_max_retries
+                                        ),
+                                    ),
+                                    max_items=self._settings.memory_max_items_per_user,
+                                    confirmation_ttl_seconds=(
+                                        self._settings.memory_confirmation_ttl_seconds
+                                    ),
+                                )
+                                if self._settings.memory_enabled
+                                and self._settings.memory_decision_enabled
+                                else None
                             ),
                         )
                         async for event in service.execute_streaming_run(run):

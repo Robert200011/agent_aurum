@@ -17,6 +17,9 @@ export type EmploymentStatus =
   | "student"
   | "retired"
   | "other";
+export type MemoryCategory = "goal" | "preference" | "constraint" | "personal";
+export type MemoryStatus = "active" | "disabled";
+export type MemorySourceType = "manual_ui" | "explicit_chat";
 
 export interface PageResponse {
   page: number;
@@ -83,6 +86,48 @@ export interface PersonalFinancialProfileInput {
   annual_income: string | null;
   annual_expense_budget: string | null;
   currency: string;
+}
+
+export interface MemorySettings {
+  memory_enabled: boolean;
+  chat_save_enabled: boolean;
+  answer_recall_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemorySettingsUpdate {
+  memory_enabled?: boolean;
+  chat_save_enabled?: boolean;
+  answer_recall_enabled?: boolean;
+}
+
+export interface UserMemory {
+  id: string;
+  category: MemoryCategory;
+  title: string;
+  content: string;
+  status: MemoryStatus;
+  source_type: MemorySourceType;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserMemoryInput {
+  category: MemoryCategory;
+  title: string;
+  content: string;
+}
+
+export interface UserMemoryUpdate {
+  category?: MemoryCategory;
+  title?: string;
+  content?: string;
+  status?: MemoryStatus;
+}
+
+export interface UserMemoryList extends PageResponse {
+  items: UserMemory[];
 }
 
 export interface AuthTokenResponse {

@@ -32,6 +32,8 @@ import type {
   ConversationDetail,
   MessageCitation,
   MessageEvidence,
+  MemoryConfirmationEvent,
+  MemorySavedEvent,
 } from '@/types/chat'
 import { citationLocation } from '@/utils/chat'
 
@@ -62,6 +64,8 @@ const generationStage = ref<ChatGenerationStage>('understanding')
 const streamMode = ref<'new' | 'regenerate' | 'resume'>('new')
 const stopping = ref(false)
 const errorText = ref('')
+const pendingMemoryConfirmation = ref<MemoryConfirmationEvent | null>(null)
+const resolvingMemoryConfirmation = ref(false)
 const messageScroller = ref<HTMLElement | null>(null)
 let streamAbortController: AbortController | null = null
 let scrollFrame: number | null = null
@@ -324,6 +328,8 @@ type StreamRequest = (
     onStart: (event: { message_id: string; run_id: string }) => void
     onStatus: (event: { stage: ChatGenerationStage }) => void
     onDelta: (delta: string) => void
+    onMemorySaved: (event: MemorySavedEvent) => void
+    onMemoryConfirmation: (event: MemoryConfirmationEvent) => void
     onComplete: (answer: {
       answer: string
       citations: MessageCitation[]
@@ -364,6 +370,14 @@ async function runGeneration(
           streamingAnswer.value += delta
           scheduleScrollToBottom()
         },
+        onMemorySaved(event) {
+          if (event.result === 'saved') message.success(`已记住：${event.title}`)
+          else if (event.result === 'exists') message.info(`记忆已存在：${event.title}`)
+          else message.warning(`未保存：${event.title}`)
+        },
+        onMemoryConfirmation(event) {
+          pendingMemoryConfirmation.value = event
+        },
         onComplete(answer) {
           streamingAnswer.value = answer.answer
           streamingCitations.value = answer.citations
@@ -402,6 +416,28 @@ async function runGeneration(
       message.warning('回答状态已更新，但会话列表刷新失败')
     }
     await scrollToBottom()
+  }
+}
+
+async function resolveMemoryConfirmation(accept: boolean): Promise<void> {
+  const confirmation = pendingMemoryConfirmation.value
+  if (!confirmation || resolvingMemoryConfirmation.value) return
+  resolvingMemoryConfirmation.value = true
+  try {
+    const result = await chatApi.resolveMemoryConfirmation(
+      confirmation.confirmation_id,
+      accept,
+    )
+    pendingMemoryConfirmation.value = null
+    if (result.status === 'accepted') {
+      message.success(`已保存 ${result.results.filter((item) => item.result === 'saved').length} 条记忆`)
+    } else {
+      message.info('本次内容未保存为长期记忆')
+    }
+  } catch (error) {
+    message.error(apiErrorMessage(error, '记忆确认失败'))
+  } finally {
+    resolvingMemoryConfirmation.value = false
   }
 }
 
@@ -941,6 +977,38 @@ onMounted(loadWorkspace)
           </div>
 
           <footer class="composer">
+            <a-alert
+              v-if="pendingMemoryConfirmation"
+              type="info"
+              show-icon
+              class="memory-confirmation-alert"
+              message="是否保存为长期记忆？"
+            >
+              <template #description>
+                <ul>
+                  <li v-for="item in pendingMemoryConfirmation.items" :key="item.title">
+                    <strong>{{ item.title }}</strong>：{{ item.content }}
+                  </li>
+                </ul>
+                <a-space>
+                  <a-button
+                    type="primary"
+                    size="small"
+                    :loading="resolvingMemoryConfirmation"
+                    @click="resolveMemoryConfirmation(true)"
+                  >
+                    保存到记忆
+                  </a-button>
+                  <a-button
+                    size="small"
+                    :disabled="resolvingMemoryConfirmation"
+                    @click="resolveMemoryConfirmation(false)"
+                  >
+                    仅本次使用
+                  </a-button>
+                </a-space>
+              </template>
+            </a-alert>
             <a-alert
               v-if="errorText"
               type="error"

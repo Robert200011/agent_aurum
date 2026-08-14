@@ -2,6 +2,7 @@
 
 from app.db.models.chat import (
     AgentRun,
+    AgentRunMemory,
     AgentToolCall,
     Conversation,
     Message,
@@ -20,9 +21,17 @@ from app.db.models.finance import (
 from app.db.models.identity import (
     AuditLog,
     EmploymentStatus,
+    MemoryCategory,
+    MemoryConfirmationStatus,
+    MemoryEmbeddingStatus,
+    MemorySourceType,
+    MemoryStatus,
     PersonalFinancialProfile,
     RefreshToken,
     User,
+    UserMemory,
+    UserMemoryConfirmation,
+    UserMemorySettings,
     UserPreference,
     UserProfile,
 )
@@ -39,6 +48,7 @@ from app.db.models.rag import (
 
 __all__ = [
     "AgentRun",
+    "AgentRunMemory",
     "AgentToolCall",
     "AuditLog",
     "Budget",
@@ -56,6 +66,11 @@ __all__ = [
     "InvestmentTransaction",
     "KnowledgeBase",
     "MarketPriceSnapshot",
+    "MemoryCategory",
+    "MemoryConfirmationStatus",
+    "MemoryEmbeddingStatus",
+    "MemorySourceType",
+    "MemoryStatus",
     "Message",
     "MessageCitation",
     "MessageEvidence",
@@ -64,6 +79,9 @@ __all__ = [
     "RefreshToken",
     "RetrievalLog",
     "User",
+    "UserMemory",
+    "UserMemoryConfirmation",
+    "UserMemorySettings",
     "UserPreference",
     "UserProfile",
 ]
