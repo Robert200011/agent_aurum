@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.identity import (
     MemoryCategory,
+    MemoryEmbeddingStatus,
     MemoryStatus,
     UserMemory,
     UserMemoryConfirmation,
@@ -113,6 +116,139 @@ class MemoryRepository:
             .limit(page_size)
         )
         return list((await self._session.scalars(statement)).all()), total
+
+    async def list_embedding_candidates(
+        self,
+        user_id: UUID,
+        *,
+        embedding_model: str,
+        limit: int,
+    ) -> list[UserMemory]:
+        statement = (
+            select(UserMemory)
+            .where(
+                UserMemory.user_id == user_id,
+                UserMemory.status == MemoryStatus.ACTIVE,
+                or_(
+                    UserMemory.embedding.is_(None),
+                    UserMemory.embedding_model != embedding_model,
+                    UserMemory.embedding_model.is_(None),
+                    UserMemory.embedding_status != MemoryEmbeddingStatus.READY,
+                ),
+            )
+            .order_by(UserMemory.updated_at, UserMemory.id)
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def set_embedding_result(
+        self,
+        *,
+        user_id: UUID,
+        memory_id: UUID,
+        embedding: Sequence[float] | None,
+        embedding_model: str | None,
+        status: MemoryEmbeddingStatus,
+    ) -> None:
+        # Embedding 生命周期不是用户内容编辑，不能污染用于排序和审计的 updated_at。
+        await self._session.execute(
+            update(UserMemory)
+            .where(UserMemory.user_id == user_id, UserMemory.id == memory_id)
+            .values(
+                embedding=list(embedding) if embedding is not None else None,
+                embedding_model=embedding_model,
+                embedding_status=status,
+                updated_at=UserMemory.updated_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+    async def search_by_vector(
+        self,
+        user_id: UUID,
+        *,
+        vector: Sequence[float],
+        embedding_model: str,
+        category: MemoryCategory | None,
+        limit: int,
+    ) -> list[tuple[UserMemory, float]]:
+        filters = [
+            UserMemory.user_id == user_id,
+            UserMemory.status == MemoryStatus.ACTIVE,
+            UserMemory.embedding.is_not(None),
+            UserMemory.embedding_model == embedding_model,
+            UserMemory.embedding_status == MemoryEmbeddingStatus.READY,
+        ]
+        if category is not None:
+            filters.append(UserMemory.category == category)
+        distance = UserMemory.embedding.cosine_distance(list(vector)).label("distance")
+        statement = (
+            select(UserMemory, distance)
+            .where(*filters)
+            .order_by(distance, UserMemory.updated_at.desc(), UserMemory.id)
+            .limit(limit)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [
+            (memory, max(-1.0, min(1.0, 1.0 - float(distance_value))))
+            for memory, distance_value in rows
+        ]
+
+    async def search_by_text(
+        self,
+        user_id: UUID,
+        *,
+        query: str,
+        category: MemoryCategory | None,
+        limit: int,
+    ) -> list[tuple[UserMemory, float]]:
+        normalized_query = query.strip()
+        if not normalized_query:
+            return []
+        filters = [
+            UserMemory.user_id == user_id,
+            UserMemory.status == MemoryStatus.ACTIVE,
+        ]
+        if category is not None:
+            filters.append(UserMemory.category == category)
+        similarity = func.greatest(
+            func.word_similarity(normalized_query, UserMemory.title),
+            func.word_similarity(normalized_query, UserMemory.content),
+        ).label("similarity")
+        statement = (
+            select(UserMemory, similarity)
+            .where(*filters, similarity > 0)
+            .order_by(similarity.desc(), UserMemory.updated_at.desc(), UserMemory.id)
+            .limit(limit)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [
+            (memory, max(0.0, min(1.0, float(score))))
+            for memory, score in rows
+        ]
+
+    async def record_usage(
+        self,
+        user_id: UUID,
+        *,
+        memory_ids: Sequence[UUID],
+        used_at: datetime,
+    ) -> None:
+        if not memory_ids:
+            return
+        await self._session.execute(
+            update(UserMemory)
+            .where(
+                UserMemory.user_id == user_id,
+                UserMemory.id.in_(memory_ids),
+            )
+            .values(
+                use_count=UserMemory.use_count + 1,
+                last_used_at=used_at,
+                updated_at=UserMemory.updated_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     async def add_settings(self, settings: UserMemorySettings) -> UserMemorySettings:
         self._session.add(settings)

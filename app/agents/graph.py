@@ -41,6 +41,7 @@ from app.rag.citations.structured import (
     StructuredCitationResult,
     structure_citations,
 )
+from app.services.memory_retrieval import MemoryRetrievalService
 from app.services.retrieval import RagRetrievalService
 
 RAG_GRAPH_VERSION = "finance-capability-agent-v2"
@@ -55,6 +56,9 @@ ANSWER_REPAIR_PROMPT += """
 ANSWER_REPAIR_PROMPT += """
 流水的用途、来源、分类和描述必须逐字使用受控财务数据中的 description 或 category；
 不得改写成其他商户、商品或消费用途。"""
+ANSWER_REPAIR_PROMPT += """
+长期记忆和个人财务档案仅可作为稳定用户背景；不得把其中内容冒充当前余额、流水、预算执行、
+持仓或行情。记忆与档案冲突时明确指出并请用户确认。"""
 CompiledRagAnswerGraph = CompiledStateGraph[
     RagAnswerState,
     None,
@@ -72,6 +76,7 @@ def build_rag_answer_graph(
     finance_tools: FinanceToolExecutor | None = None,
     capability_agent_max_steps: int = 3,
     capability_agent_max_tool_calls: int = 6,
+    memory_service: MemoryRetrievalService | None = None,
     checkpointer: BaseCheckpointSaver[str] | None = None,
 ) -> CompiledRagAnswerGraph:
     """编译知识、财务与混合问题共用的受控 P5.5 回答图。"""
@@ -95,12 +100,14 @@ def build_rag_answer_graph(
             context_source_max_characters=context_source_max_characters,
             max_steps=capability_agent_max_steps,
             max_tool_calls=capability_agent_max_tool_calls,
+            memory_service=memory_service,
         )
         write_stage(state, "analyzing")
         return {
             "plan": outcome.plan,
             "retrieval": outcome.retrieval,
             "context": outcome.context,
+            "memory_retrieval": outcome.memory_retrieval,
             "finance_results": outcome.finance_results,
             "completion": outcome.completion,
             "answer": outcome.answer,
@@ -120,6 +127,7 @@ def build_rag_answer_graph(
             answer=risk_checked_answer,
             finance_results=state["finance_results"],
             context=state["context"],
+            memory_context=state["memory_retrieval"].context,
         )
         validate_safe_model_output(risk_checked_answer)
         return structure_citations(
@@ -147,6 +155,7 @@ def build_rag_answer_graph(
                 question=state["question"],
                 context=state["context"],
                 finance_results=state["finance_results"],
+                memory_context=state["memory_retrieval"].context,
                 history=state["history"],
             )
             repair_messages.extend(

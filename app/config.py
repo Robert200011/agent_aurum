@@ -95,11 +95,12 @@ class Settings(BaseSettings):
     embedding_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
     embedding_batch_size: int = Field(default=16, ge=1, le=64)
     memory_enabled: bool = True
+    memory_rollout_percentage: int = Field(default=100, ge=0, le=100)
     memory_max_items_per_user: int = Field(default=200, ge=1, le=10_000)
     memory_max_items_per_command: int = Field(default=5, ge=1, le=5)
     memory_retrieval_limit: int = Field(default=5, ge=1, le=20)
     memory_context_max_characters: int = Field(default=4_000, ge=500, le=50_000)
-    memory_item_max_characters: int = Field(default=1_000, ge=100, le=1_000)
+    memory_item_max_characters: int = Field(default=800, ge=100, le=1_000)
     memory_embedding_enabled: bool = True
     memory_decision_enabled: bool = True
     memory_decision_timeout_seconds: int = Field(default=20, ge=1, le=120)

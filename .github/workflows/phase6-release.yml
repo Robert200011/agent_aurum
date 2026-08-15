@@ -33,6 +33,7 @@ jobs:
       AURUM_ENVIRONMENT: test
       AURUM_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
       AURUM_MIGRATION_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
+      AURUM_RAG_INTEGRATION_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
       AURUM_REDIS_URL: redis://127.0.0.1:6379/0
       AURUM_JWT_SECRET_KEY: ci-only-jwt-secret-at-least-32-bytes-long
       AURUM_LANGGRAPH_AES_KEY: 0123456789abcdef0123456789abcdef
@@ -48,7 +49,16 @@ jobs:
       - run: mypy app
       - run: alembic upgrade head
       - run: alembic check
+      - run: >-
+          python -m pytest -q
+          tests/unit/test_memory_decision.py
+          tests/unit/test_memory_commands.py
+          tests/unit/test_memory_retrieval.py
+          tests/unit/test_memory_service.py
+          tests/integration/test_memory_isolation.py
+          tests/integration/test_memory_command_persistence.py
       - run: python scripts/run_phase6_evaluation.py --skip-fault-pytest --output phase6-gate.json
+      - run: python scripts/run_memory_evaluation.py --output memory-gate.json
       - run: pip-audit .
       - run: pip freeze > python-dependencies.txt
       - uses: actions/upload-artifact@v4
@@ -56,6 +66,7 @@ jobs:
           name: backend-evidence
           path: |
             phase6-gate.json
+            memory-gate.json
             python-dependencies.txt
 
   frontend:
@@ -103,4 +114,3 @@ jobs:
         with:
           name: image-sboms
           path: "*-sbom.cdx.json"
-

@@ -196,6 +196,7 @@ class MessageResponse(BaseModel):
     created_at: datetime
     citations: list[MessageCitationResponse] = Field(default_factory=list)
     evidence: list[MessageEvidenceResponse] = Field(default_factory=list)
+    memory_count: int = Field(default=0, ge=0)
     data_as_of: datetime | None = None
     risk_notice: str | None = None
 
@@ -235,6 +236,7 @@ class StructuredAnswerResponse(BaseModel):
     answer: str = Field(min_length=1)
     citations: list[MessageCitationResponse] = Field(default_factory=list)
     evidence: list[MessageEvidenceResponse] = Field(default_factory=list)
+    memory_count: int = Field(default=0, ge=0)
     data_as_of: datetime | None = None
     risk_notice: str | None = None
 

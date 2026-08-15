@@ -30,7 +30,8 @@ Provider 证据文件：
 
 ```powershell
 Copy-Item evals\load\candidate-evidence.example.json .test-results\candidate-evidence.json
-# 用测试环境的真实模型元数据更新，并仅在冒烟实际通过后设置 provider_smoke_passed=true：
+# 用测试环境的真实模型元数据更新；仅在对应冒烟通过后设置 provider_smoke_passed=true，
+# 完成长期记忆保存—新会话召回—删除—不再召回后设置 memory_smoke_passed=true：
 .\.venv\Scripts\python.exe scripts\run_phase6_evaluation.py --mode candidate `
   --candidate-evidence .test-results\candidate-evidence.json `
   --output .test-results\phase6-candidate-gate.json
@@ -51,3 +52,16 @@ Copy-Item evals\load\candidate-evidence.example.json .test-results\candidate-evi
 ```
 
 所有报告只记录统计值、版本和测试标识，不记录 Token、问题正文、文档正文或响应全文。
+
+## M5 长期记忆发布门禁
+
+长期记忆门禁只做确定性高价值检查：提案证据与敏感内容拒绝、模型输出契约、受控上下文、
+稳定灰度分桶和上下文装配性能，不枚举自然语言句式：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_memory_evaluation.py `
+  --output .test-results\memory-gate.json
+```
+
+跨用户 RLS 隔离和完整保存/召回链路仍由 PostgreSQL 集成验收覆盖；真实 Provider 的判断质量
+必须在候选环境冒烟确认，离线门禁不伪装成模型效果评测。

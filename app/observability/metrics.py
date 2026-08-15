@@ -127,6 +127,42 @@ QUOTA_STORE_ERRORS = Counter(
     "Quota-store operations that could not be completed.",
     ("operation",),
 )
+MEMORY_DECISIONS = Counter(
+    "aurum_memory_decisions_total",
+    "Model-proposed memory decisions by bounded reason.",
+    ("decision", "reason"),
+)
+MEMORY_SAVE_RESULTS = Counter(
+    "aurum_memory_save_results_total",
+    "Memory save outcomes without user content.",
+    ("outcome",),
+)
+MEMORY_CONFIRMATIONS = Counter(
+    "aurum_memory_confirmations_total",
+    "Memory confirmation lifecycle outcomes.",
+    ("outcome",),
+)
+MEMORY_RETRIEVAL_REQUESTS = Counter(
+    "aurum_memory_retrieval_requests_total",
+    "Memory retrieval outcomes by bounded mode.",
+    ("mode", "outcome"),
+)
+MEMORY_RETRIEVAL_DURATION = Histogram(
+    "aurum_memory_retrieval_duration_seconds",
+    "Memory retrieval duration by bounded mode.",
+    ("mode",),
+)
+MEMORY_RETRIEVAL_RESULTS = Histogram(
+    "aurum_memory_retrieval_results",
+    "Number of memories included in controlled context.",
+    ("mode",),
+    buckets=(0, 1, 2, 3, 5),
+)
+MEMORY_EMBEDDINGS = Counter(
+    "aurum_memory_embeddings_total",
+    "Memory embedding outcomes.",
+    ("outcome",),
+)
 
 
 def metrics_payload() -> bytes:

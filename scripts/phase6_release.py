@@ -75,6 +75,7 @@ def create_manifest(
         "phase6-rag-regression.json",
         "phase6-prompt-injection.json",
         "phase6-fault-scenarios.json",
+        "memory-release-gate.json",
     ):
         path = ROOT / "evals" / name
         datasets[name] = sha256_file(path)
@@ -235,6 +236,16 @@ def collect_metrics(prometheus_url: str) -> dict[str, float]:
             'max(aurum_database_pool_connections{state="checked_out"}) '
             '/ clamp_min(max(aurum_database_pool_connections{state="size"}), 1)',
         ),
+        "memory_embedding_error_rate": _prometheus_value(
+            prometheus_url,
+            'sum(rate(aurum_memory_embeddings_total{outcome="error"}[5m])) '
+            "/ clamp_min(sum(rate(aurum_memory_embeddings_total[5m])), 0.001)",
+        ),
+        "memory_retrieval_p95_seconds": _prometheus_value(
+            prometheus_url,
+            "histogram_quantile(0.95, sum by (le) "
+            '(rate(aurum_memory_retrieval_duration_seconds_bucket{mode=~"dense|text"}[5m])))',
+        ),
     }
 
 
@@ -246,6 +257,8 @@ def decide(observation: dict[str, Any], metrics: dict[str, Any]) -> dict[str, An
         "model_error_rate": 0.01,
         "queue_depth": 20.0,
         "database_pool_ratio": 0.9,
+        "memory_embedding_error_rate": 0.05,
+        "memory_retrieval_p95_seconds": 1.0,
     }
     checks = {
         "http_error_rate": float(observation.get("error_rate", 1)) < thresholds["error_rate"],
@@ -257,6 +270,14 @@ def decide(observation: dict[str, Any], metrics: dict[str, Any]) -> dict[str, An
         "queue": float(metrics.get("queue_depth", float("inf"))) <= thresholds["queue_depth"],
         "database_pool": float(metrics.get("database_pool_ratio", float("inf")))
         < thresholds["database_pool_ratio"],
+        "memory_embeddings": float(
+            metrics.get("memory_embedding_error_rate", float("inf"))
+        )
+        < thresholds["memory_embedding_error_rate"],
+        "memory_retrieval_p95": float(
+            metrics.get("memory_retrieval_p95_seconds", float("inf"))
+        )
+        <= thresholds["memory_retrieval_p95_seconds"],
     }
     return {"accepted": all(checks.values()), "checks": checks, "thresholds": thresholds}
 

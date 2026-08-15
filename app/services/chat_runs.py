@@ -17,6 +17,7 @@ from app.config import Settings
 from app.errors import ApplicationError
 from app.governance.usage import collect_model_tokens
 from app.memory.decision import MemoryDecisionProvider
+from app.memory.rollout import memory_rollout_enabled
 from app.providers.model_provider import ChatModelProvider, RerankerProvider
 from app.providers.quota_store import ChatQuotaLease, RedisQuotaStore
 from app.providers.retrieval_cache import RedisRetrievalCache
@@ -30,6 +31,7 @@ from app.services.chat import (
 )
 from app.services.finance import FinanceService
 from app.services.memory_commands import MemoryCommandService
+from app.services.memory_retrieval import MemoryRetrievalService
 from app.services.retrieval import RagRetrievalService
 
 logger = logging.getLogger(__name__)
@@ -190,6 +192,11 @@ class ChatRunCoordinator:
             with collect_model_tokens() as token_counter:
                 try:
                     async with self._session_factory() as session:
+                        memory_enabled = memory_rollout_enabled(
+                            user_id,
+                            feature_enabled=self._settings.memory_enabled,
+                            percentage=self._settings.memory_rollout_percentage,
+                        )
                         retrieval = RagRetrievalService(
                             session=session,
                             actor_user_id=user_id,
@@ -201,6 +208,19 @@ class ChatRunCoordinator:
                             rrf_k=self._settings.rag_rrf_k,
                             cache=self._retrieval_cache,
                         )
+                        memory_retrieval = MemoryRetrievalService(
+                            session=session,
+                            actor_user_id=user_id,
+                            embedding_provider=DashScopeEmbeddingProvider(self._settings),
+                            retrieval_limit=self._settings.memory_retrieval_limit,
+                            context_max_characters=(
+                                self._settings.memory_context_max_characters
+                            ),
+                            item_max_characters=self._settings.memory_item_max_characters,
+                            max_items_per_user=self._settings.memory_max_items_per_user,
+                            enabled=memory_enabled,
+                            embedding_enabled=self._settings.memory_embedding_enabled,
+                        )
                         answering = RagAnswerService(
                             retrieval_service=retrieval,
                             chat_provider=self._chat_provider,
@@ -210,6 +230,7 @@ class ChatRunCoordinator:
                             context_source_max_characters=(
                                 self._settings.rag_context_source_max_characters
                             ),
+                            memory_service=memory_retrieval if memory_enabled else None,
                             capability_agent_max_steps=(
                                 self._settings.capability_agent_max_steps
                             ),
@@ -252,7 +273,7 @@ class ChatRunCoordinator:
                                         self._settings.memory_confirmation_ttl_seconds
                                     ),
                                 )
-                                if self._settings.memory_enabled
+                                if memory_enabled
                                 and self._settings.memory_decision_enabled
                                 else None
                             ),

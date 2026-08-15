@@ -38,6 +38,7 @@ _CANDIDATE_FIELDS = {
     "reranker_provider",
     "reranker_model",
     "provider_smoke_passed",
+    "memory_smoke_passed",
 }
 
 
@@ -72,7 +73,11 @@ def run_gate(
     accepted = all(bool(result["accepted"]) for result in suites.values())
     accepted = accepted and bool(fault_pytest["accepted"])
     if mode == "candidate":
-        accepted = accepted and bool(candidate_evidence["provider_smoke_passed"])
+        accepted = (
+            accepted
+            and bool(candidate_evidence["provider_smoke_passed"])
+            and bool(candidate_evidence["memory_smoke_passed"])
+        )
     paths = (phase5_path, rag_path, security_path, faults_path)
     return {
         "schema_version": "p6.3-gate-report-v1",
@@ -126,7 +131,11 @@ def _run_fault_checks(dataset: dict[str, Any]) -> dict[str, Any]:
 
 def _candidate_evidence(mode: str, path: Path | None) -> dict[str, Any]:
     if mode == "pr":
-        return {"required": False, "provider_smoke_passed": False}
+        return {
+            "required": False,
+            "provider_smoke_passed": False,
+            "memory_smoke_passed": False,
+        }
     if path is None:
         raise ValueError("candidate mode requires --candidate-evidence")
     evidence = _load_json(path)
@@ -136,12 +145,13 @@ def _candidate_evidence(mode: str, path: Path | None) -> dict[str, Any]:
         raise ValueError(
             f"candidate evidence fields invalid; missing={missing}, unknown={unknown}"
         )
-    if not isinstance(evidence["provider_smoke_passed"], bool):
-        raise ValueError("provider_smoke_passed must be boolean")
+    boolean_fields = {"provider_smoke_passed", "memory_smoke_passed"}
+    if any(not isinstance(evidence[field], bool) for field in boolean_fields):
+        raise ValueError("candidate smoke fields must be boolean")
     if any(
         not isinstance(value, str) or not value.strip()
         for key, value in evidence.items()
-        if key != "provider_smoke_passed"
+        if key not in boolean_fields
     ):
         raise ValueError("candidate model metadata must be non-empty strings")
     return evidence

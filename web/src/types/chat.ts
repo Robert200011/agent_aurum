@@ -89,6 +89,7 @@ export interface ChatMessage {
   created_at: string
   citations: MessageCitation[]
   evidence: MessageEvidence[]
+  memory_count: number
   data_as_of: string | null
   risk_notice: string | null
 }
@@ -120,6 +121,7 @@ export interface StructuredAnswer {
   answer: string
   citations: MessageCitation[]
   evidence: MessageEvidence[]
+  memory_count: number
   data_as_of: string | null
   risk_notice: string | null
 }
