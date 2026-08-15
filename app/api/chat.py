@@ -467,6 +467,7 @@ def _structured_answer_response(persisted: PersistedAnswer) -> StructuredAnswerR
         answer=persisted.message.content,
         citations=[_citation_response(citation) for citation in persisted.citations],
         evidence=[_evidence_response(item) for item in persisted.evidence],
+        memory_count=_run_detail_count(persisted.run, "memory_retrieval_count"),
         data_as_of=persisted.data_as_of,
         risk_notice=persisted.risk_notice,
     )
@@ -515,6 +516,11 @@ def _message_response(
         update={
             "citations": [_citation_response(citation) for citation in citations],
             "evidence": [_evidence_response(item) for item in evidence],
+            "memory_count": (
+                _run_detail_count(run, "memory_retrieval_count")
+                if run is not None
+                else 0
+            ),
             "data_as_of": (
                 _run_detail_datetime(run, "data_as_of") if run is not None else None
             ),
@@ -561,6 +567,11 @@ def _run_detail_datetime(run: AgentRun, key: str) -> datetime | None:
 def _run_detail_text(run: AgentRun, key: str) -> str | None:
     value = run.detail.get(key)
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _run_detail_count(run: AgentRun, key: str) -> int:
+    value = run.detail.get(key)
+    return value if isinstance(value, int) and value >= 0 else 0
 
 
 def _request_id(request: Request) -> str | None:

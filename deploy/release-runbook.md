@@ -13,6 +13,8 @@ Redis、Grafana 和 MinIO Console 不绑定宿主机端口，PostgreSQL、MinIO 
 4. 为 MinIO 配置含 `minio` DNS SAN 的服务端证书和受信 CA，确认主备两个备份位置可写、
    备份加密密钥可用，并确认应用域名、对象域名和证书解析正确。
 5. CI 必须通过后端/前端测试、迁移检查、阶段六门禁、依赖审计、SBOM 和镜像漏洞扫描。
+6. `AURUM_MIGRATION_DATABASE_URL` 使用迁移角色；`AURUM_DATABASE_URL` 和 RLS 集成测试连接必须使用
+   `NOSUPERUSER NOBYPASSRLS` 的应用角色。禁止用 PostgreSQL 超级用户验证租户隔离，因为超级用户始终绕过 RLS。
 
 先验证渲染后的 Compose 配置：
 
@@ -35,6 +37,7 @@ docker compose --env-file C:\Aurum\production.env `
   -EvidenceDirectory C:\Aurum\release-evidence `
   -BackupDirectory D:\AurumBackups\primary `
   -BackupReplicaDirectory E:\AurumBackups\replica `
+  -CandidateEvidence .test-results\candidate-evidence.json `
   -StartStack -ApproveCutover
 ```
 
@@ -58,9 +61,37 @@ Gateway 的 30 秒优雅窗口排空。
 每次发布保留 Manifest、质量门禁、HTTP 观测、Prometheus 指标、决策、备份 sidecar 和回滚
 观测。Manifest 记录 Git、镜像、迁移、Graph、Prompt、数据集、配置、备份和操作人。以下任一
 情况停止发布：错误率达到 1%、P95 超过 1000ms、模型错误率达到 1%、队列深度超过 20、
-数据库连接池比例达到 90%、槽位不一致、备份/迁移/观测失败或出现数据隔离异常。
+数据库连接池比例达到 90%、记忆 Embedding 错误率达到 5%、记忆检索 P95 超过 1 秒、槽位
+不一致、备份/迁移/观测失败，或出现跨用户泄漏、静默误保存、旧财务事实覆盖实时工具结果。
 
-## 5. 本地演练
+候选环境以 `AURUM_MEMORY_RETRIEVAL_LIMIT=5`、上下文 4000 字符为首版阈值。验收记录同时保存
+`aurum_model_tokens_total{mode="tools"}` 的样本增量、`aurum_memory_embeddings_total` 的成功/失败
+数量和所用模型版本，用于估算单次决策 Token 与 Embedding 成本；这些统计不包含用户正文。
+
+## 5. 长期记忆灰度与回滚
+
+生产环境默认 `AURUM_MEMORY_ROLLOUT_PERCENTAGE=0`。候选门禁和人工保存—跨会话召回—删除后
+不再召回的冒烟通过后，按 5% → 25% → 100% 调整；同一用户使用稳定分桶，扩容时已有灰度
+用户不会随机换桶。每档观察记忆向量错误率、检索 P95、API/模型错误率后再扩大。
+
+异常时先把比例改为 `0`，或设置 `AURUM_MEMORY_ENABLED=false` 并重建 API 容器；这只停止聊天
+保存和召回，已有数据仍保留。若候选版本整体异常，再执行蓝绿回滚。发布脚本不会自动执行
+Alembic `downgrade`，记忆表变更继续遵循可前滚的 Expand-Migrate-Contract。
+
+使用应用角色数据库连接验证 RLS 和持久化（测试库，不使用生产数据）：
+
+```powershell
+$env:AURUM_RAG_INTEGRATION_DATABASE_URL="postgresql+asyncpg://<app-role>@<test-host>/<test-db>"
+.\.venv\Scripts\python.exe -m pytest -q `
+  tests/integration/test_memory_isolation.py `
+  tests/integration/test_memory_command_persistence.py
+```
+
+候选证据需记录测试标识和统计结果，不记录用户消息、记忆正文或模型完整响应。
+其中 `provider_smoke_passed` 代表真实 Provider 基础冒烟，`memory_smoke_passed` 仅在人工完成
+保存—新会话召回—删除—不再召回后设为 `true`；生产发布脚本缺少该证据时会拒绝切流。
+
+## 6. 本地演练
 
 本地演练使用独立 Compose 项目和独立数据卷，不修改开发环境数据：
 

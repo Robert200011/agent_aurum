@@ -45,6 +45,27 @@ groups:
         annotations:
           summary: Aurum database connection pool is saturated
 
+      - alert: AurumMemoryEmbeddingFailures
+        expr: |
+          sum(rate(aurum_memory_embeddings_total{outcome="error"}[5m]))
+          / clamp_min(sum(rate(aurum_memory_embeddings_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aurum memory embedding error rate is above 5%
+
+      - alert: AurumMemoryRetrievalSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(aurum_memory_retrieval_duration_seconds_bucket{mode=~"dense|text"}[5m])))
+          > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aurum memory retrieval P95 is above one second
+
       # P6.4 will publish this timestamp; the rule is versioned now so backup
       # alerting becomes active as soon as the backup job starts reporting it.
       - alert: AurumBackupOverdue

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.agents.state import ControlledRagContext
 from app.agents.tools.finance import FinanceToolResult
+from app.memory.retrieval import ControlledMemoryContext
 
 _NUMBER_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![A-Za-z0-9_])"
@@ -44,6 +46,7 @@ def validate_finance_answer(
     answer: str,
     finance_results: tuple[FinanceToolResult, ...],
     context: ControlledRagContext,
+    memory_context: ControlledMemoryContext | None = None,
 ) -> None:
     """拒绝伪造标识、未执行工具和受控证据之外的数字。"""
 
@@ -69,6 +72,7 @@ def validate_finance_answer(
     knowledge_numbers: set[Decimal] = set()
     for source in context.sources:
         _collect_numbers(source.included_content, knowledge_numbers)
+    memory_numbers = _memory_numbers(memory_context)
 
     candidate = _ORDERED_LIST_PATTERN.sub("", answer)
     for match in _NUMBER_PATTERN.finditer(candidate):
@@ -77,7 +81,30 @@ def validate_finance_answer(
             continue
         if number in knowledge_numbers and _segment_has_source_marker(candidate, match.start()):
             continue
+        if number in memory_numbers:
+            continue
         raise FinanceGroundingValidationError("finance_number_untrusted")
+
+
+def _memory_numbers(context: ControlledMemoryContext | None) -> set[Decimal]:
+    """只接受记忆正文和档案值，排除检索更新时间等内部元数据。"""
+
+    numbers: set[Decimal] = set()
+    if context is None:
+        return numbers
+    try:
+        payload = json.loads(context.serialized)
+    except (TypeError, json.JSONDecodeError):
+        return numbers
+    if not isinstance(payload, dict):
+        return numbers
+    _collect_numbers(payload.get("financial_profile"), numbers)
+    memories = payload.get("memories")
+    if isinstance(memories, list):
+        for memory in memories:
+            if isinstance(memory, dict):
+                _collect_numbers(memory.get("content"), numbers)
+    return numbers
 
 
 def _collect_numbers(value: Any, numbers: set[Decimal]) -> None:

@@ -14,6 +14,7 @@ param(
     [string]$BackupEvidence,
     [string]$BackupDirectory,
     [string]$BackupReplicaDirectory,
+    [string]$CandidateEvidence,
     [switch]$ApproveCutover,
     [switch]$StartStack
 )
@@ -129,7 +130,7 @@ try {
         "-m", "scripts.phase6_release", "manifest", "--release-id", $releaseId,
         "--mode", $Mode, "--operator", $Operator, "--candidate-slot", $CandidateSlot,
         "--api-image", $ApiImage, "--web-image", $WebImage,
-        "--migration-revision", "20260802_0012", "--backup-evidence", $BackupEvidence,
+        "--migration-revision", "20260814_0022", "--backup-evidence", $BackupEvidence,
         "--output", $manifestPath
     )
     & $python @manifestArguments
@@ -141,9 +142,27 @@ try {
         "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/api/v1/health/ready')"
     )
 
-    & $python scripts/run_phase6_evaluation.py --output `
+    $qualityArguments = @(
+        "scripts/run_phase6_evaluation.py", "--output",
         (Join-Path $evidencePath "$releaseId-quality-gate.json")
+    )
+    if ($Mode -eq "production") {
+        if (-not $CandidateEvidence) {
+            throw "Production release requires -CandidateEvidence"
+        }
+        $candidateEvidencePath = [IO.Path]::GetFullPath(
+            (Join-Path $repositoryRoot $CandidateEvidence)
+        )
+        $qualityArguments += @(
+            "--mode", "candidate", "--candidate-evidence", $candidateEvidencePath
+        )
+    }
+    & $python @qualityArguments
     if ($LASTEXITCODE -ne 0) { throw "Phase 6 quality gate rejected the candidate" }
+
+    & $python scripts/run_memory_evaluation.py --output `
+        (Join-Path $evidencePath "$releaseId-memory-gate.json")
+    if ($LASTEXITCODE -ne 0) { throw "Memory release gate rejected the candidate" }
 
     if ($Mode -eq "production" -and -not $ApproveCutover) {
         Write-Output "Candidate is ready; production cutover requires -ApproveCutover."

@@ -29,6 +29,7 @@ from app.chat.types import (
 )
 from app.db.models.chat import (
     AgentRun,
+    AgentRunMemory,
     AgentToolCall,
     Conversation,
     Message,
@@ -37,6 +38,7 @@ from app.db.models.chat import (
 )
 from app.db.models.identity import MemoryConfirmationStatus
 from app.db.repositories.chat import ChatRepository
+from app.db.repositories.memory import MemoryRepository
 from app.db.session import set_tenant_context
 from app.errors import (
     ApplicationError,
@@ -484,6 +486,11 @@ class ChatService:
                 message_id=assistant.id,
                 results=result.finance_results,
             )
+            await self._persist_memory_usage(
+                run_id=persisted_run.id,
+                result=result,
+                used_at=completed_at,
+            )
             persisted_run.status = AgentRunStatus.COMPLETED.value
             persisted_run.latency_ms = result.latency_ms
             persisted_run.completed_at = completed_at
@@ -522,6 +529,16 @@ class ChatService:
                     if memory_result.confirmation is not None
                     else None
                 ),
+                "memory_retrieval_count": len(result.memory_retrieval.items),
+                "memory_retrieval_source": (
+                    "text_fallback"
+                    if result.memory_retrieval.degraded_to_text
+                    else "dense"
+                    if result.memory_retrieval.embedding_model
+                    or result.memory_retrieval.financial_profile is not None
+                    else "not_requested"
+                ),
+                "memory_embedding_model": result.memory_retrieval.embedding_model,
             }
             await self._session.commit()
             return PersistedAnswer(
@@ -876,6 +893,11 @@ class ChatService:
             message_id=assistant.id,
             results=result.finance_results,
         )
+        await self._persist_memory_usage(
+            run_id=run.id,
+            result=result,
+            used_at=completed_at,
+        )
         run.status = AgentRunStatus.COMPLETED.value
         run.latency_ms = result.latency_ms
         run.completed_at = completed_at
@@ -915,6 +937,16 @@ class ChatService:
                 if memory_result.confirmation is not None
                 else None
             ),
+            "memory_retrieval_count": len(result.memory_retrieval.items),
+            "memory_retrieval_source": (
+                "text_fallback"
+                if result.memory_retrieval.degraded_to_text
+                else "dense"
+                if result.memory_retrieval.embedding_model
+                or result.memory_retrieval.financial_profile is not None
+                else "not_requested"
+            ),
+            "memory_embedding_model": result.memory_retrieval.embedding_model,
         }
         await self._session.commit()
         return PersistedAnswer(
@@ -924,6 +956,38 @@ class ChatService:
             evidence=evidence,
             data_as_of=result.data_as_of,
             risk_notice=_risk_notice(result),
+        )
+
+    async def _persist_memory_usage(
+        self,
+        *,
+        run_id: UUID,
+        result: RagAnswerResult,
+        used_at: datetime,
+    ) -> None:
+        """只记录被最终上下文采用的记忆 ID 和脱敏排序信息。"""
+
+        items = result.memory_retrieval.items
+        if not items:
+            return
+        await self._repository.add_all(
+            [
+                AgentRunMemory(
+                    user_id=self._user_id,
+                    agent_run_id=run_id,
+                    memory_id=item.memory_id,
+                    rank=rank,
+                    relevance_score=item.score,
+                    content_hash=item.content_hash,
+                    memory_updated_at=item.updated_at,
+                )
+                for rank, item in enumerate(items, start=1)
+            ]
+        )
+        await MemoryRepository(self._session).record_usage(
+            self._user_id,
+            memory_ids=[item.memory_id for item in items],
+            used_at=used_at,
         )
 
     async def _persist_finance_evidence(

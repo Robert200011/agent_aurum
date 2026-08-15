@@ -29,6 +29,11 @@ from app.errors import BusinessRuleError, ConflictError, NotFoundError
 from app.memory.contracts import MemoryDecisionKind, MemoryProposal
 from app.memory.decision import MemoryDecisionProvider
 from app.memory.safety import contains_prohibited_memory_input, validate_memory_proposal
+from app.observability.metrics import (
+    MEMORY_CONFIRMATIONS,
+    MEMORY_DECISIONS,
+    MEMORY_SAVE_RESULTS,
+)
 from app.services.memory import normalized_content_hash
 
 _PROPOSAL_LIST = TypeAdapter(list[MemoryProposal])
@@ -80,6 +85,15 @@ class MemoryCommandService:
     async def process_message(
         self, *, source_message_id: UUID, current_user_message: str
     ) -> MemoryCommandResult:
+        result = await self._process_message(
+            source_message_id=source_message_id,
+            current_user_message=current_user_message,
+        )
+        return _observed_command_result(result)
+
+    async def _process_message(
+        self, *, source_message_id: UUID, current_user_message: str
+    ) -> MemoryCommandResult:
         await set_tenant_context(self._session, self._user_id)
         replay = await self._replay_for_message(source_message_id)
         if replay is not None:
@@ -96,6 +110,10 @@ class MemoryCommandService:
                 )
             )
         decision = await self._decision_provider.decide(current_user_message)
+        MEMORY_DECISIONS.labels(
+            decision=decision.decision.value,
+            reason=decision.reason_code.value,
+        ).inc()
         if decision.decision == MemoryDecisionKind.IGNORE:
             return MemoryCommandResult()
 
@@ -141,6 +159,15 @@ class MemoryCommandService:
     async def resolve_confirmation(
         self, *, confirmation_id: UUID, accept: bool
     ) -> MemoryCommandResult:
+        result = await self._resolve_confirmation(
+            confirmation_id=confirmation_id,
+            accept=accept,
+        )
+        return _observed_command_result(result)
+
+    async def _resolve_confirmation(
+        self, *, confirmation_id: UUID, accept: bool
+    ) -> MemoryCommandResult:
         await set_tenant_context(self._session, self._user_id)
         confirmation = await self._repository.get_confirmation(
             self._user_id, confirmation_id, for_update=True
@@ -156,6 +183,7 @@ class MemoryCommandService:
             confirmation.status = MemoryConfirmationStatus.EXPIRED
             confirmation.resolved_at = now
             await self._session.commit()
+            MEMORY_CONFIRMATIONS.labels(outcome="expired").inc()
             raise ConflictError("memory confirmation has expired")
         proposals = _PROPOSAL_LIST.validate_python(confirmation.proposals)
         if _proposal_hash(proposals) != confirmation.proposal_hash:
@@ -164,6 +192,7 @@ class MemoryCommandService:
             confirmation.status = MemoryConfirmationStatus.DECLINED
             confirmation.resolved_at = now
             await self._session.commit()
+            MEMORY_CONFIRMATIONS.labels(outcome="declined").inc()
             return MemoryCommandResult()
         settings = await self._settings(for_update=True)
         if not settings.memory_enabled or not settings.chat_save_enabled:
@@ -176,6 +205,7 @@ class MemoryCommandService:
         confirmation.status = MemoryConfirmationStatus.ACCEPTED
         confirmation.resolved_at = now
         await self._session.commit()
+        MEMORY_CONFIRMATIONS.labels(outcome="accepted").inc()
         return MemoryCommandResult(save_results=saved, confirmation=confirmation)
 
     async def _settings(self, *, for_update: bool = False) -> UserMemorySettings:
@@ -212,6 +242,7 @@ class MemoryCommandService:
             detail={"proposal_count": len(proposals)},
         )
         await self._session.commit()
+        MEMORY_CONFIRMATIONS.labels(outcome="created").inc()
         return confirmation
 
     async def _save_proposals(
@@ -340,6 +371,12 @@ def _memory_result(result: MemorySaveResultKind, memory: UserMemory) -> MemorySa
         title=memory.title,
         memory_id=memory.id,
     )
+
+
+def _observed_command_result(result: MemoryCommandResult) -> MemoryCommandResult:
+    for item in result.save_results:
+        MEMORY_SAVE_RESULTS.labels(outcome=item.result.value).inc()
+    return result
 
 
 def memory_feedback_text(result: MemoryCommandResult) -> str:

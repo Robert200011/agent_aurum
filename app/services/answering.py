@@ -24,6 +24,7 @@ from app.agents.state import (
 )
 from app.agents.tools.finance import FinanceToolExecutor
 from app.providers.model_provider import ChatModelProvider
+from app.services.memory_retrieval import MemoryRetrievalService
 from app.services.retrieval import RagRetrievalService
 
 
@@ -41,6 +42,7 @@ class RagAnswerService:
         finance_tools: FinanceToolExecutor | None = None,
         capability_agent_max_steps: int = 3,
         capability_agent_max_tool_calls: int = 6,
+        memory_service: MemoryRetrievalService | None = None,
         finance_timezone: str = "Asia/Shanghai",
         checkpointer: BaseCheckpointSaver[str] | None = None,
     ) -> None:
@@ -59,6 +61,7 @@ class RagAnswerService:
             finance_tools=finance_tools,
             capability_agent_max_steps=capability_agent_max_steps,
             capability_agent_max_tool_calls=capability_agent_max_tool_calls,
+            memory_service=memory_service,
             checkpointer=checkpointer,
         )
 
@@ -94,6 +97,7 @@ class RagAnswerService:
             citations=output["citations"],
             retrieval=retrieval,
             context=output["context"],
+            memory_retrieval=output["memory_retrieval"],
             completion=output["completion"],
             latency_ms=latency_ms,
             checkpoint_id=await self._latest_checkpoint_id(config),
@@ -157,6 +161,7 @@ class RagAnswerService:
                 citations=output["citations"],
                 retrieval=retrieval,
                 context=output["context"],
+                memory_retrieval=output["memory_retrieval"],
                 completion=output["completion"],
                 latency_ms=max(0, round((perf_counter() - started) * 1000)),
                 checkpoint_id=await self._latest_checkpoint_id(config),

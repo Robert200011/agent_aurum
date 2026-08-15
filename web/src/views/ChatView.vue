@@ -56,6 +56,7 @@ const pendingQuestion = ref('')
 const streamingAnswer = ref('')
 const streamingCitations = ref<MessageCitation[]>([])
 const streamingEvidence = ref<MessageEvidence[]>([])
+const streamingMemoryCount = ref(0)
 const streamingDataAsOf = ref<string | null>(null)
 const streamingRiskNotice = ref<string | null>(null)
 const streamingMessageId = ref<string | null>(null)
@@ -334,6 +335,7 @@ type StreamRequest = (
       answer: string
       citations: MessageCitation[]
       evidence: MessageEvidence[]
+      memory_count: number
       data_as_of: string | null
       risk_notice: string | null
     }) => void
@@ -348,6 +350,7 @@ async function runGeneration(
   streamingAnswer.value = ''
   streamingCitations.value = []
   streamingEvidence.value = []
+  streamingMemoryCount.value = 0
   streamingDataAsOf.value = null
   streamingRiskNotice.value = null
   generationStage.value = 'understanding'
@@ -382,6 +385,7 @@ async function runGeneration(
           streamingAnswer.value = answer.answer
           streamingCitations.value = answer.citations
           streamingEvidence.value = answer.evidence
+          streamingMemoryCount.value = answer.memory_count
           streamingDataAsOf.value = answer.data_as_of
           streamingRiskNotice.value = answer.risk_notice
           scheduleScrollToBottom()
@@ -402,6 +406,7 @@ async function runGeneration(
     streamingAnswer.value = ''
     streamingCitations.value = []
     streamingEvidence.value = []
+    streamingMemoryCount.value = 0
     streamingDataAsOf.value = null
     streamingRiskNotice.value = null
     streamingMessageId.value = null
@@ -467,6 +472,7 @@ async function regenerateAnswer(chatMessage: ChatMessage): Promise<void> {
   chatMessage.content = ''
   chatMessage.citations = []
   chatMessage.evidence = []
+  chatMessage.memory_count = 0
   chatMessage.data_as_of = null
   chatMessage.risk_notice = null
   chatMessage.status = 'streaming'
@@ -789,7 +795,10 @@ onMounted(loadWorkspace)
                     :risk-notice="streamingRiskNotice"
                   />
                   <div v-if="streamingAnswer" class="answer-section-label">
-                    分析建议
+                    <span>分析建议</span>
+                    <small v-if="streamingMemoryCount">
+                      已参考 {{ streamingMemoryCount }} 条长期记忆
+                    </small>
                   </div>
                   <AnswerContent
                     v-if="streamingAnswer"
@@ -843,7 +852,10 @@ onMounted(loadWorkspace)
                   "
                   class="answer-section-label"
                 >
-                  分析建议
+                  <span>分析建议</span>
+                  <small v-if="chatMessage.memory_count">
+                    已参考 {{ chatMessage.memory_count }} 条长期记忆
+                  </small>
                 </div>
                 <AnswerContent
                   v-if="
@@ -931,7 +943,12 @@ onMounted(loadWorkspace)
                       :data-as-of="streamingDataAsOf"
                       :risk-notice="streamingRiskNotice"
                     />
-                    <div class="answer-section-label">分析建议</div>
+                    <div class="answer-section-label">
+                      <span>分析建议</span>
+                      <small v-if="streamingMemoryCount">
+                        已参考 {{ streamingMemoryCount }} 条长期记忆
+                      </small>
+                    </div>
                     <AnswerContent
                       :answer="displayAnswer(streamingAnswer, streamingRiskNotice)"
                       :citation-ids="
@@ -1473,11 +1490,26 @@ onMounted(loadWorkspace)
 }
 
 .answer-section-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
   margin: 4px 0 7px;
   color: var(--ink-500);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.08em;
+}
+
+.answer-section-label small {
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: var(--mint-700);
+  background: var(--mint-100);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0;
 }
 
 .message-actions {

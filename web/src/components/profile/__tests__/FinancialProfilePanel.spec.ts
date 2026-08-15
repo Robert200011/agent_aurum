@@ -110,7 +110,7 @@ describe("FinancialProfilePanel", () => {
     const wrapper = mountPanel();
     await flushPromises();
 
-    expect(wrapper.text()).toContain("个人档案与长期记忆已持久化");
+    expect(wrapper.text()).toContain("个人档案与长期记忆已接入 Agent");
     expect(wrapper.text()).toContain("建立应急储备");
     expect(settingsApi.financialProfile).toHaveBeenCalledOnce();
     expect(settingsApi.memorySettings).toHaveBeenCalledOnce();
@@ -126,7 +126,11 @@ describe("FinancialProfilePanel", () => {
     setup.memoryEnabledDraft = false;
     await setup.saveMemorySettings();
 
-    expect(settingsApi.updateMemorySettings).toHaveBeenCalledWith({ memory_enabled: false });
+    expect(settingsApi.updateMemorySettings).toHaveBeenCalledWith({
+      memory_enabled: false,
+      chat_save_enabled: true,
+      answer_recall_enabled: true,
+    });
     expect(setup.memoryEnabled).toBe(false);
   });
 
@@ -136,6 +140,12 @@ describe("FinancialProfilePanel", () => {
     const setup = stateOf(wrapper);
     const created = { ...memory, id: "new-memory", title: "计划明年进修", content: "预留进修费用。" };
     vi.mocked(settingsApi.createMemory).mockResolvedValue(created);
+    vi.mocked(settingsApi.memories).mockResolvedValueOnce({
+      items: [created, memory],
+      total: 2,
+      page: 1,
+      page_size: 20,
+    });
 
     setup.openNewMemory();
     setup.memoryForm.title = created.title;
@@ -154,6 +164,12 @@ describe("FinancialProfilePanel", () => {
     await flushPromises();
     const setup = stateOf(wrapper);
     vi.mocked(settingsApi.updateMemory).mockResolvedValue({ ...memory, status: "disabled" });
+    vi.mocked(settingsApi.memories).mockResolvedValueOnce({
+      items: [{ ...memory, status: "disabled" }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
 
     await setup.toggleMemoryStatus(memory);
 

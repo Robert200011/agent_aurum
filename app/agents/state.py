@@ -9,6 +9,7 @@ from uuid import UUID
 
 from app.agents.contracts import AgentQuestionPlan
 from app.agents.tools.finance import FinanceToolResult
+from app.memory.retrieval import MemoryRetrievalResult
 from app.providers.model_provider import ChatCompletionResult
 from app.rag.citations.structured import TrustedCitation
 from app.services.retrieval import KnowledgeRetrievalResult, RetrievedChunk
@@ -42,6 +43,7 @@ class RagAnswerResult:
     citations: tuple[TrustedCitation, ...]
     retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
+    memory_retrieval: MemoryRetrievalResult
     completion: ChatCompletionResult | None
     latency_ms: int
     checkpoint_id: str | None = None
@@ -99,6 +101,7 @@ class RagAnswerOutput(TypedDict):
 
     retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
+    memory_retrieval: MemoryRetrievalResult
     completion: ChatCompletionResult | None
     answer: str
     citations: tuple[TrustedCitation, ...]
@@ -121,6 +124,7 @@ class RagAnswerState(TypedDict, total=False):
     finance_results: tuple[FinanceToolResult, ...]
     retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
+    memory_retrieval: MemoryRetrievalResult
     completion: ChatCompletionResult | None
     answer: str
     citations: tuple[TrustedCitation, ...]
@@ -133,6 +137,7 @@ class RagAnswerUpdate(TypedDict, total=False):
 
     retrieval: KnowledgeRetrievalResult
     context: ControlledRagContext
+    memory_retrieval: MemoryRetrievalResult
     completion: ChatCompletionResult | None
     answer: str
     citations: tuple[TrustedCitation, ...]

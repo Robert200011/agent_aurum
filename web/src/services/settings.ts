@@ -4,8 +4,10 @@ import { http } from "@/services/http";
 import type {
   PersonalFinancialProfile,
   PersonalFinancialProfileInput,
+  MemoryCategory,
   MemorySettings,
   MemorySettingsUpdate,
+  MemoryStatus,
   UserMemory,
   UserMemoryInput,
   UserMemoryList,
@@ -79,9 +81,13 @@ export const settingsApi = {
     );
     return response.data;
   },
-  async memories(page = 1, pageSize = 50): Promise<UserMemoryList> {
+  async memories(
+    page = 1,
+    pageSize = 50,
+    filters: { category?: MemoryCategory; status?: MemoryStatus; search?: string } = {},
+  ): Promise<UserMemoryList> {
     const response = await http.get<UserMemoryList>("/users/me/memories", {
-      params: { page, page_size: pageSize },
+      params: { page, page_size: pageSize, ...filters },
     });
     return response.data;
   },

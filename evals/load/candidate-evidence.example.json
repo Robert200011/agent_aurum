@@ -6,5 +6,6 @@
   "embedding_model": "replace-with-versioned-embedding-name",
   "reranker_provider": "dashscope",
   "reranker_model": "replace-with-versioned-reranker-name",
-  "provider_smoke_passed": false
+  "provider_smoke_passed": false,
+  "memory_smoke_passed": false
 }

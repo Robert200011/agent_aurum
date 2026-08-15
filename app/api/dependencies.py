@@ -21,6 +21,7 @@ from app.db.repositories.identity import (
 from app.db.session import get_db_session, set_tenant_context
 from app.errors import AuthenticationError
 from app.memory.decision import MemoryDecisionProvider
+from app.memory.rollout import memory_rollout_enabled
 from app.observability.context import set_context, user_identifier_hash
 from app.providers.identity import SecurityStore
 from app.providers.model_provider import ChatModelProvider, RerankerProvider
@@ -37,6 +38,7 @@ from app.services.chat_runs import ChatRunCoordinator
 from app.services.finance import FinanceService
 from app.services.memory import MemoryService
 from app.services.memory_commands import MemoryCommandService
+from app.services.memory_retrieval import MemoryRetrievalService
 from app.services.rag import PersonalKnowledgeService
 from app.services.retrieval import RagRetrievalService
 from app.services.user_settings import UserSettingsService
@@ -263,8 +265,38 @@ PersonalRetrievalServiceDependency = Annotated[
 ]
 
 
+def get_memory_retrieval_service(
+    session: SessionDependency,
+    context: AccessContextDependency,
+    settings: SettingsDependency,
+) -> MemoryRetrievalService:
+    rollout_enabled = memory_rollout_enabled(
+        context.user.id,
+        feature_enabled=settings.memory_enabled,
+        percentage=settings.memory_rollout_percentage,
+    )
+    return MemoryRetrievalService(
+        session=session,
+        actor_user_id=context.user.id,
+        embedding_provider=DashScopeEmbeddingProvider(settings),
+        retrieval_limit=settings.memory_retrieval_limit,
+        context_max_characters=settings.memory_context_max_characters,
+        item_max_characters=settings.memory_item_max_characters,
+        max_items_per_user=settings.memory_max_items_per_user,
+        enabled=rollout_enabled,
+        embedding_enabled=settings.memory_embedding_enabled,
+    )
+
+
+MemoryRetrievalServiceDependency = Annotated[
+    MemoryRetrievalService,
+    Depends(get_memory_retrieval_service),
+]
+
+
 def get_rag_answer_service(
     retrieval_service: PersonalRetrievalServiceDependency,
+    memory_service: MemoryRetrievalServiceDependency,
     chat_provider: ChatModelProviderDependency,
     finance_service: FinanceServiceDependency,
     checkpointer: CheckpointSaverDependency,
@@ -279,6 +311,7 @@ def get_rag_answer_service(
         retrieval_limit=settings.rag_retrieval_limit,
         context_max_characters=settings.rag_context_max_characters,
         context_source_max_characters=settings.rag_context_source_max_characters,
+        memory_service=memory_service if memory_service.enabled else None,
         capability_agent_max_steps=settings.capability_agent_max_steps,
         capability_agent_max_tool_calls=settings.capability_agent_max_tool_calls,
         finance_timezone=settings.finance_timezone,
@@ -320,7 +353,12 @@ def get_chat_service(
                 max_items=settings.memory_max_items_per_user,
                 confirmation_ttl_seconds=settings.memory_confirmation_ttl_seconds,
             )
-            if settings.memory_enabled and settings.memory_decision_enabled
+            if memory_rollout_enabled(
+                context.user.id,
+                feature_enabled=settings.memory_enabled,
+                percentage=settings.memory_rollout_percentage,
+            )
+            and settings.memory_decision_enabled
             else None
         ),
     )
