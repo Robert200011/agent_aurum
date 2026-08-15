@@ -46,7 +46,7 @@ from app.errors import (
     ConflictError,
     NotFoundError,
 )
-from app.services.answering import RagAnswerService
+from app.services.answering import RagAnswerService, build_memory_command_answer
 from app.services.memory_commands import (
     MemoryCommandResult,
     MemoryCommandService,
@@ -450,17 +450,24 @@ class ChatService:
                 if self._memory_command_service is not None
                 else MemoryCommandResult()
             )
-            result = await self._answer_service.answer(
-                question=normalized_question,
-                thread_id=conversation.id,
-                history=history,
+            feedback = memory_feedback_text(memory_result)
+            result = (
+                build_memory_command_answer(
+                    owner_user_id=self._user_id,
+                    question=normalized_question,
+                )
+                if feedback
+                else await self._answer_service.answer(
+                    question=normalized_question,
+                    thread_id=conversation.id,
+                    history=history,
+                )
             )
             await self._prepare()
             assistant = await self._required_message(assistant_message.id, for_update=True)
             persisted_run = await self._required_run(run.id, for_update=True)
             completed_at = datetime.now(UTC)
-            feedback = memory_feedback_text(memory_result)
-            assistant.content = f"{feedback}\n\n{result.answer}" if feedback else result.answer
+            assistant.content = _combined_answer(feedback, result.answer)
             assistant.status = MessageStatus.COMPLETED.value
             assistant.latency_ms = result.latency_ms
             if result.completion is not None:
@@ -719,7 +726,19 @@ class ChatService:
                     )
                 feedback = memory_feedback_text(memory_result)
                 if feedback:
-                    yield ChatStreamDelta(f"{feedback}\n\n")
+                    yield ChatStreamDelta(feedback)
+                    yield ChatStreamStatus("finalizing")
+                    persisted = await self._persist_streamed_answer(
+                        streaming_run=streaming_run,
+                        result=build_memory_command_answer(
+                            owner_user_id=self._user_id,
+                            question=streaming_run.question,
+                        ),
+                        memory_result=memory_result,
+                    )
+                    completed = True
+                    yield ChatStreamCompleted(persisted)
+                    return
             history = await self._conversation_history(
                 conversation_id=streaming_run.conversation_id,
                 before=streaming_run.history_before,
@@ -867,7 +886,7 @@ class ChatService:
         run = await self._required_run(streaming_run.run_id, for_update=True)
         completed_at = datetime.now(UTC)
         feedback = memory_feedback_text(memory_result)
-        assistant.content = f"{feedback}\n\n{result.answer}" if feedback else result.answer
+        assistant.content = _combined_answer(feedback, result.answer)
         assistant.status = MessageStatus.COMPLETED.value
         assistant.latency_ms = result.latency_ms
         if result.completion is not None:
@@ -1189,6 +1208,11 @@ def _automatic_title(question: str) -> str:
     return compact[:MAX_AUTOMATIC_TITLE_LENGTH] or DEFAULT_CONVERSATION_TITLE
 
 
+def _combined_answer(feedback: str, answer: str) -> str:
+    parts = [part.strip() for part in (feedback, answer) if part.strip()]
+    return "\n\n".join(parts)
+
+
 def _detail_datetime(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
@@ -1204,7 +1228,11 @@ def _detail_text(value: object) -> str | None:
 
 
 def _planner_mode(result: RagAnswerResult) -> str:
-    return "capability_agent_v2" if result.plan is not None else "unavailable"
+    if result.plan is None:
+        return "unavailable"
+    if result.plan.route_reason == "memory_command_service":
+        return "memory_command"
+    return "capability_agent_v2"
 
 
 def _risk_notice(result: RagAnswerResult) -> str | None:

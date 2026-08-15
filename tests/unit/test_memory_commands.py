@@ -8,6 +8,8 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.contracts import MemoryDecision, MemoryProposal
+from app.services.answering import build_memory_command_answer
+from app.services.chat import _combined_answer
 from app.services.memory_commands import MemoryCommandService, MemorySaveResultKind
 
 
@@ -38,6 +40,21 @@ def proposal() -> MemoryProposal:
         title="偏好低波动",
         content="投资分析优先考虑低波动方案。",
         evidence="我偏好低波动方案",
+    )
+
+
+def test_memory_command_answer_does_not_imitate_read_only_agent() -> None:
+    result = build_memory_command_answer(
+        owner_user_id=uuid4(),
+        question="请记住：今年年底更换电脑",
+    )
+
+    assert result.answer == ""
+    assert result.completion is None
+    assert result.plan is not None
+    assert result.plan.route_reason == "memory_command_service"
+    assert _combined_answer("记忆处理结果：\n- 已记住：更换电脑计划", result.answer) == (
+        "记忆处理结果：\n- 已记住：更换电脑计划"
     )
 
 

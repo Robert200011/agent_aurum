@@ -12,7 +12,9 @@ from zoneinfo import ZoneInfo
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from app.agents.contracts import AgentQuestionPlan
 from app.agents.graph import build_rag_answer_graph
+from app.agents.policies.rag_prompt import build_controlled_context
 from app.agents.state import (
     RagAnswerCompleted,
     RagAnswerDelta,
@@ -23,9 +25,10 @@ from app.agents.state import (
     RagAnswerStreamEvent,
 )
 from app.agents.tools.finance import FinanceToolExecutor
+from app.memory.retrieval import empty_memory_retrieval
 from app.providers.model_provider import ChatModelProvider
 from app.services.memory_retrieval import MemoryRetrievalService
-from app.services.retrieval import RagRetrievalService
+from app.services.retrieval import KnowledgeRetrievalResult, RagRetrievalService
 
 
 class RagAnswerService:
@@ -182,6 +185,43 @@ class RagAnswerService:
         configurable = snapshot.config.get("configurable", {})
         checkpoint_id = configurable.get("checkpoint_id")
         return checkpoint_id if isinstance(checkpoint_id, str) else None
+
+
+def build_memory_command_answer(*, owner_user_id: UUID, question: str) -> RagAnswerResult:
+    """为已由记忆命令服务处理的消息构造无需再次调用模型的空回答结果。"""
+
+    normalized_question = question.strip()
+    retrieval = KnowledgeRetrievalResult(
+        owner_user_id=owner_user_id,
+        knowledge_base_ids=(),
+        query=normalized_question,
+        embedding_model="",
+        latency_ms=0,
+        items=[],
+    )
+    return RagAnswerResult(
+        owner_user_id=owner_user_id,
+        question=normalized_question,
+        answer="",
+        citations=(),
+        retrieval=retrieval,
+        context=build_controlled_context(
+            [],
+            max_characters=500,
+            max_source_characters=100,
+        ),
+        memory_retrieval=empty_memory_retrieval(
+            owner_user_id=owner_user_id,
+            query=normalized_question,
+        ),
+        completion=None,
+        latency_ms=0,
+        plan=AgentQuestionPlan(
+            intent="direct",
+            needs_knowledge=False,
+            route_reason="memory_command_service",
+        ),
+    )
 
 
 def _graph_config(thread_id: UUID) -> RunnableConfig:

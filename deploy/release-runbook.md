@@ -64,7 +64,8 @@ Gateway 的 30 秒优雅窗口排空。
 数据库连接池比例达到 90%、记忆 Embedding 错误率达到 5%、记忆检索 P95 超过 1 秒、槽位
 不一致、备份/迁移/观测失败，或出现跨用户泄漏、静默误保存、旧财务事实覆盖实时工具结果。
 
-候选环境以 `AURUM_MEMORY_RETRIEVAL_LIMIT=5`、上下文 4000 字符为首版阈值。验收记录同时保存
+候选环境以 `AURUM_MEMORY_RETRIEVAL_LIMIT=5`、`AURUM_MEMORY_RETRIEVAL_MIN_SCORE=0.45`、
+上下文 4000 字符为首版阈值。“查看全部记忆”走列表模式，不受相关性阈值过滤。验收记录同时保存
 `aurum_model_tokens_total{mode="tools"}` 的样本增量、`aurum_memory_embeddings_total` 的成功/失败
 数量和所用模型版本，用于估算单次决策 Token 与 Embedding 成本；这些统计不包含用户正文。
 
