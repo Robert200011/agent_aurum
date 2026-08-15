@@ -31,9 +31,9 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 20
     env:
       AURUM_ENVIRONMENT: test
-      AURUM_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
+      AURUM_DATABASE_URL: postgresql+asyncpg://aurum_app:ci-app-password@127.0.0.1:5432/aurum
       AURUM_MIGRATION_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
-      AURUM_RAG_INTEGRATION_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
+      AURUM_RAG_INTEGRATION_DATABASE_URL: postgresql+asyncpg://aurum_app:ci-app-password@127.0.0.1:5432/aurum
       AURUM_REDIS_URL: redis://127.0.0.1:6379/0
       AURUM_JWT_SECRET_KEY: ci-only-jwt-secret-at-least-32-bytes-long
       AURUM_LANGGRAPH_AES_KEY: 0123456789abcdef0123456789abcdef
@@ -49,6 +49,47 @@ jobs:
       - run: mypy app
       - run: alembic upgrade head
       - run: alembic check
+      - name: Provision non-superuser application role
+        run: |
+          python - <<'PY'
+          import asyncio
+
+          import asyncpg
+
+
+          async def provision() -> None:
+              connection = await asyncpg.connect(
+                  host="127.0.0.1",
+                  port=5432,
+                  database="aurum",
+                  user="aurum",
+                  password="ci-postgres-password",
+              )
+              try:
+                  await connection.execute(
+                      """
+                      CREATE ROLE aurum_app LOGIN PASSWORD 'ci-app-password'
+                          NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
+                          NOREPLICATION NOBYPASSRLS;
+                      GRANT CONNECT ON DATABASE aurum TO aurum_app;
+                      GRANT USAGE ON SCHEMA identity, chat, finance, rag, audit TO aurum_app;
+                      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES
+                          IN SCHEMA identity, chat, finance, rag, audit TO aurum_app;
+                      GRANT USAGE, SELECT ON ALL SEQUENCES
+                          IN SCHEMA identity, chat, finance, rag, audit TO aurum_app;
+                      """
+                  )
+                  bypasses_rls = await connection.fetchval(
+                      "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'aurum_app'"
+                  )
+                  if bypasses_rls is not False:
+                      raise RuntimeError("CI application role must not bypass row-level security")
+              finally:
+                  await connection.close()
+
+
+          asyncio.run(provision())
+          PY
       - run: >-
           python -m pytest -q
           tests/unit/test_memory_decision.py

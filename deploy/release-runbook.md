@@ -13,6 +13,8 @@ Redis、Grafana 和 MinIO Console 不绑定宿主机端口，PostgreSQL、MinIO 
 4. 为 MinIO 配置含 `minio` DNS SAN 的服务端证书和受信 CA，确认主备两个备份位置可写、
    备份加密密钥可用，并确认应用域名、对象域名和证书解析正确。
 5. CI 必须通过后端/前端测试、迁移检查、阶段六门禁、依赖审计、SBOM 和镜像漏洞扫描。
+6. `AURUM_MIGRATION_DATABASE_URL` 使用迁移角色；`AURUM_DATABASE_URL` 和 RLS 集成测试连接必须使用
+   `NOSUPERUSER NOBYPASSRLS` 的应用角色。禁止用 PostgreSQL 超级用户验证租户隔离，因为超级用户始终绕过 RLS。
 
 先验证渲染后的 Compose 配置：
 
