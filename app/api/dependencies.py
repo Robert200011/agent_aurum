@@ -280,6 +280,7 @@ def get_memory_retrieval_service(
         actor_user_id=context.user.id,
         embedding_provider=DashScopeEmbeddingProvider(settings),
         retrieval_limit=settings.memory_retrieval_limit,
+        retrieval_min_score=settings.memory_retrieval_min_score,
         context_max_characters=settings.memory_context_max_characters,
         item_max_characters=settings.memory_item_max_characters,
         max_items_per_user=settings.memory_max_items_per_user,

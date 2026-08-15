@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.identity import (
     MemoryCategory,
     MemoryEmbeddingStatus,
+    MemoryStatus,
     PersonalFinancialProfile,
     UserMemory,
 )
@@ -49,6 +50,7 @@ class MemoryRetrievalService:
         actor_user_id: UUID,
         embedding_provider: MemoryEmbeddingProvider,
         retrieval_limit: int,
+        retrieval_min_score: float,
         context_max_characters: int,
         item_max_characters: int,
         max_items_per_user: int,
@@ -59,6 +61,7 @@ class MemoryRetrievalService:
         self._actor_user_id = actor_user_id
         self._embedding_provider = embedding_provider
         self._retrieval_limit = retrieval_limit
+        self._retrieval_min_score = retrieval_min_score
         self._context_max_characters = context_max_characters
         self._item_max_characters = min(item_max_characters, 800)
         self._max_items_per_user = max_items_per_user
@@ -81,6 +84,7 @@ class MemoryRetrievalService:
         query: str,
         category: MemoryCategory | None = None,
         limit: int | None = None,
+        list_all: bool = False,
     ) -> MemoryRetrievalResult:
         normalized_query = query.strip()
         effective_limit = min(limit or self._retrieval_limit, self._retrieval_limit)
@@ -104,10 +108,21 @@ class MemoryRetrievalService:
             )
 
         profile = await self._settings_repository.get_financial_profile(self._actor_user_id)
-        profile_snapshot = _financial_profile_snapshot(profile)
+        profile_snapshot = None if list_all else _financial_profile_snapshot(profile)
         degraded_to_text = not self._embedding_enabled
         hits: list[tuple[UserMemory, float]]
-        if self._embedding_enabled:
+        if list_all:
+            memories, _ = await self._repository.list_memories(
+                self._actor_user_id,
+                category=category,
+                status=MemoryStatus.ACTIVE,
+                search=None,
+                page=1,
+                page_size=effective_limit,
+            )
+            hits = [(memory, 1.0) for memory in memories]
+            degraded_to_text = False
+        elif self._embedding_enabled:
             try:
                 await self._refresh_embeddings()
                 query_vector = await self._embedding_provider.embed_query(normalized_query)
@@ -138,6 +153,9 @@ class MemoryRetrievalService:
                 limit=effective_limit,
             )
 
+        if not list_all:
+            hits = [item for item in hits if item[1] >= self._retrieval_min_score]
+
         retrieved = tuple(
             RetrievedMemory(
                 memory_id=memory.id,
@@ -147,7 +165,9 @@ class MemoryRetrievalService:
                 content_hash=memory.content_hash,
                 updated_at=memory.updated_at,
                 score=score,
-                retrieval_source="text" if degraded_to_text else "dense",
+                retrieval_source=(
+                    "all" if list_all else "text" if degraded_to_text else "dense"
+                ),
             )
             for memory, score in hits
         )
@@ -160,7 +180,7 @@ class MemoryRetrievalService:
         included_ids = set(context.memory_ids)
         included = tuple(item for item in retrieved if item.memory_id in included_ids)
         elapsed = max(0.0, perf_counter() - started)
-        mode = "text" if degraded_to_text else "dense"
+        mode = "all" if list_all else "text" if degraded_to_text else "dense"
         MEMORY_RETRIEVAL_REQUESTS.labels(
             mode=mode,
             outcome="hit" if included else "empty",
@@ -171,7 +191,9 @@ class MemoryRetrievalService:
             owner_user_id=self._actor_user_id,
             query=normalized_query,
             embedding_model=(
-                self._embedding_provider.model_name if not degraded_to_text else ""
+                self._embedding_provider.model_name
+                if not list_all and not degraded_to_text
+                else ""
             ),
             latency_ms=round(elapsed * 1000),
             items=included,

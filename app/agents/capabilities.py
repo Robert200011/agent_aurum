@@ -225,14 +225,22 @@ class MemorySearchCapabilityInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    query: str = Field(min_length=1, max_length=2_000)
+    mode: Literal["relevant", "all"] = "relevant"
+    query: str | None = Field(default=None, min_length=1, max_length=2_000)
     category: MemoryCategory | None = None
     limit: int = Field(default=5, ge=1, le=20)
 
     @field_validator("query")
     @classmethod
-    def normalize_query(cls, value: str) -> str:
-        return value.strip()
+    def normalize_query(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value is not None else None
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> MemorySearchCapabilityInput:
+        if self.mode == "relevant" and self.query is None:
+            raise ValueError("relevant memory search requires query")
+        return self
 
 
 class DirectResponseCapabilityInput(BaseModel):
@@ -591,8 +599,10 @@ _KNOWLEDGE_CAPABILITY = CapabilitySpec(
 _MEMORY_CAPABILITY = CapabilitySpec(
     MEMORY_SEARCH_CAPABILITY,
     (
-        "检索当前用户主动保存的长期目标、偏好、约束和个人背景，并同时返回其主动维护的稳定财务档案。"
-        "仅在这些稳定背景有助于理解或个性化回答时调用；当前余额、流水、预算执行、持仓和行情仍必须调用财务能力。"
+        "读取当前用户主动保存的长期目标、未来计划、偏好、约束和个人背景；"
+        "relevant 模式还会返回稳定财务档案。"
+        "询问相关个人背景时使用 relevant 和语义查询；询问已保存哪些记忆时使用 all，不要改查知识库。"
+        "当前余额、流水、预算执行、持仓和行情仍必须调用财务能力。"
     ),
     MemorySearchCapabilityInput,
     "memory",

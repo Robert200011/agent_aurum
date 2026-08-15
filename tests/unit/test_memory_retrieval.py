@@ -74,6 +74,25 @@ def test_memory_capability_has_no_user_scope_parameter() -> None:
     assert registry.spec(MEMORY_SEARCH_CAPABILITY).side_effect == "none"
 
 
+def test_memory_capability_supports_relevant_and_all_modes() -> None:
+    registry = CapabilityRegistry.read_only_default(
+        finance_enabled=False,
+        knowledge_enabled=False,
+        memory_enabled=True,
+    )
+
+    relevant = registry.validate(
+        MEMORY_SEARCH_CAPABILITY,
+        {"mode": "relevant", "query": "我的年底计划"},
+    )
+    all_memories = registry.validate(MEMORY_SEARCH_CAPABILITY, {"mode": "all"})
+
+    assert relevant.mode == "relevant"
+    assert relevant.query == "我的年底计划"
+    assert all_memories.mode == "all"
+    assert all_memories.query is None
+
+
 class _EmptyKnowledge:
     actor_user_id = uuid4()
 
@@ -107,8 +126,9 @@ class _MemoryService:
         query: str,
         category: MemoryCategory | None = None,
         limit: int | None = None,
+        list_all: bool = False,
     ) -> MemoryRetrievalResult:
-        del category, limit
+        del category, limit, list_all
         self.queries.append(query)
         item = _memory(content="我希望三年内准备好购房首付")
         context = build_controlled_memory_context(

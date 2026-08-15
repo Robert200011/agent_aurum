@@ -213,6 +213,9 @@ class ChatRunCoordinator:
                             actor_user_id=user_id,
                             embedding_provider=DashScopeEmbeddingProvider(self._settings),
                             retrieval_limit=self._settings.memory_retrieval_limit,
+                            retrieval_min_score=(
+                                self._settings.memory_retrieval_min_score
+                            ),
                             context_max_characters=(
                                 self._settings.memory_context_max_characters
                             ),
