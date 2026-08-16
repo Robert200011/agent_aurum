@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import {
-  ArrowDownOutlined,
   ArrowRightOutlined,
-  ArrowUpOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SyncOutlined,
+  TagOutlined,
 } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
 import dayjs from "dayjs";
@@ -28,6 +28,7 @@ interface CalendarDay {
   day: number;
   amount: number;
   hasTransactions: boolean;
+  isFuture: boolean;
 }
 
 const settings = useSettingsStore();
@@ -37,6 +38,8 @@ const range = ref<[string, string]>(currentMonthRange());
 const summary = ref<FinanceSummary | null>(null);
 const accounts = ref<Account[]>([]);
 const monthTransactions = ref<Transaction[]>([]);
+const dayDetailsOpen = ref(false);
+const selectedDate = ref<string | null>(null);
 
 const selectedAccounts = computed(() =>
   activeAccountsForCurrency(accounts.value, currency.value),
@@ -47,6 +50,23 @@ const recentTransactions = computed(() =>
       right.transaction_date.localeCompare(left.transaction_date),
     )
     .slice(0, 5),
+);
+const monthNetAmount = computed(() => toNumber(summary.value?.net_cash_flow));
+const selectedTransactions = computed(() => {
+  if (!selectedDate.value) return [];
+  return monthTransactions.value.filter(
+    (transaction) =>
+      formatDate(transaction.transaction_date) === selectedDate.value,
+  );
+});
+const selectedDayAmount = computed(() =>
+  selectedTransactions.value.reduce(
+    (total, transaction) => total + transactionSignedAmount(transaction),
+    0,
+  ),
+);
+const selectedDateLabel = computed(() =>
+  selectedDate.value ? dayjs(selectedDate.value).format("M月D日") : "",
 );
 
 const calendarDays = computed<CalendarDay[]>(() => {
@@ -71,17 +91,38 @@ const calendarDays = computed<CalendarDay[]>(() => {
       day: index + 1,
       amount: totals.get(date) ?? 0,
       hasTransactions: datesWithTransactions.has(date),
+      isFuture: dayjs(date).isAfter(dayjs(), "day"),
     };
   });
 });
 
 function formatCalendarAmount(day: CalendarDay): string {
-  if (!day.hasTransactions) return "—";
+  if (day.isFuture) return "—";
+  if (!day.hasTransactions) return "0";
   const sign = day.amount > 0 ? "+" : "";
   const amount = new Intl.NumberFormat("zh-CN", {
     maximumFractionDigits: 2,
   }).format(day.amount);
   return `${sign}${amount}`;
+}
+
+function transactionSignedAmount(transaction: Transaction): number {
+  const amount = toNumber(transaction.amount);
+  return transaction.transaction_type === "income" ? amount : -amount;
+}
+
+function formatSignedMoney(
+  amount: number,
+  amountCurrency = currency.value,
+): string {
+  if (amount === 0) return formatMoney(0, amountCurrency);
+  return `${amount > 0 ? "+" : "-"}${formatMoney(Math.abs(amount), amountCurrency)}`;
+}
+
+function openDayDetails(day: CalendarDay): void {
+  if (day.isFuture) return;
+  selectedDate.value = day.date;
+  dayDetailsOpen.value = true;
 }
 
 async function loadDashboard(): Promise<void> {
@@ -164,26 +205,31 @@ onMounted(loadDashboard);
 
           <div class="monthly-content">
             <section class="calendar-section" aria-label="本月每日收支">
-              <div class="month-totals">
-                <div>
-                  <span>本月收入</span>
-                  <strong class="money-positive sensitive-amount">{{
-                    formatMoney(summary?.income, currency)
-                  }}</strong>
-                </div>
-                <div>
-                  <span>本月支出</span>
-                  <strong class="money-negative sensitive-amount">{{
-                    formatMoney(summary?.expense, currency)
-                  }}</strong>
-                </div>
+              <div class="month-net">
+                <strong
+                  class="sensitive-amount"
+                  :class="{
+                    'money-positive': monthNetAmount > 0,
+                    'money-negative': monthNetAmount < 0,
+                  }"
+                >
+                  {{ formatSignedMoney(monthNetAmount) }}
+                </strong>
               </div>
 
               <div class="calendar-grid">
-                <div
+                <button
                   v-for="day in calendarDays"
                   :key="day.date"
+                  type="button"
                   class="calendar-day"
+                  :class="{
+                    'is-selected': selectedDate === day.date,
+                    'is-future': day.isFuture,
+                  }"
+                  :disabled="day.isFuture"
+                  :aria-label="`${day.date}，${formatCalendarAmount(day)}`"
+                  @click="openDayDetails(day)"
                 >
                   <span>{{ day.day }}</span>
                   <strong
@@ -195,7 +241,7 @@ onMounted(loadDashboard);
                   >
                     {{ formatCalendarAmount(day) }}
                   </strong>
-                </div>
+                </button>
               </div>
             </section>
 
@@ -214,24 +260,17 @@ onMounted(loadDashboard);
                 <template #renderItem="{ item }">
                   <a-list-item>
                     <div class="transaction-row">
-                      <div
-                        class="transaction-icon"
-                        :class="
-                          item.transaction_type === 'income'
-                            ? 'is-income'
-                            : 'is-expense'
-                        "
-                      >
-                        <ArrowDownOutlined
-                          v-if="item.transaction_type === 'income'"
-                        />
-                        <ArrowUpOutlined v-else />
+                      <div class="transaction-icon">
+                        <TagOutlined />
                       </div>
                       <div class="transaction-copy">
                         <strong>{{ item.category }}</strong>
-                        <span>{{ item.description || "无备注" }} ·
-                          {{ formatDate(item.transaction_date) }}</span>
+                        <span>
+                          {{ item.description || "无备注" }} ·
+                          {{ formatDate(item.transaction_date) }}
+                        </span>
                       </div>
+                      <SyncOutlined class="transaction-source-icon" />
                       <b
                         class="sensitive-amount"
                         :class="
@@ -255,6 +294,68 @@ onMounted(loadDashboard);
         </a-card>
       </main>
     </a-skeleton>
+
+    <a-modal
+      v-model:open="dayDetailsOpen"
+      centered
+      :width="900"
+      :footer="null"
+      root-class-name="day-details-root"
+      wrap-class-name="day-details-modal"
+    >
+      <template #title>
+        <span class="day-details-title">DETAILS</span>
+      </template>
+
+      <section class="day-details-content" aria-live="polite">
+        <div class="day-details-summary">
+          <span>{{ selectedDateLabel }}</span>
+          <strong
+            class="sensitive-amount"
+            :class="{
+              'money-positive': selectedDayAmount > 0,
+              'money-negative': selectedDayAmount < 0,
+            }"
+          >
+            {{ formatSignedMoney(selectedDayAmount) }}
+          </strong>
+        </div>
+
+        <div v-if="selectedTransactions.length" class="day-transaction-list">
+          <div
+            v-for="transaction in selectedTransactions"
+            :key="transaction.id"
+            class="day-transaction-row"
+          >
+            <TagOutlined class="day-transaction-tag" />
+            <div class="day-transaction-copy">
+              <strong>{{ transaction.category }}</strong>
+              <span>
+                {{ transaction.description || "无备注" }} ·
+                {{ selectedDateLabel }}
+              </span>
+            </div>
+            <SyncOutlined class="day-transaction-source" />
+            <b
+              class="sensitive-amount"
+              :class="
+                transaction.transaction_type === 'income'
+                  ? 'money-positive'
+                  : 'money-negative'
+              "
+            >
+              {{
+                formatSignedMoney(
+                  transactionSignedAmount(transaction),
+                  transaction.currency,
+                )
+              }}
+            </b>
+          </div>
+        </div>
+        <a-empty v-else :image="undefined" description="当日暂无交易" />
+      </section>
+    </a-modal>
   </div>
 </template>
 
@@ -283,7 +384,7 @@ onMounted(loadDashboard);
 
 .overview-column {
   display: grid;
-  width: min(100%, 1060px);
+  width: 100%;
   gap: 14px;
 }
 
@@ -375,8 +476,9 @@ onMounted(loadDashboard);
 
 .monthly-content {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
-  gap: 22px;
+  grid-template-columns: minmax(520px, 1.05fr) minmax(420px, 0.95fr);
+  align-items: start;
+  gap: 24px;
 }
 
 .calendar-section,
@@ -384,25 +486,30 @@ onMounted(loadDashboard);
   min-width: 0;
 }
 
-.month-totals {
+.month-net {
   display: flex;
-  gap: 28px;
-  margin-bottom: 14px;
+  align-items: center;
+  min-height: 34px;
+  margin-bottom: 12px;
 }
 
-.month-totals > div {
-  display: grid;
-  gap: 2px;
-}
-
-.month-totals span {
-  color: var(--ink-500);
-  font-size: 10px;
-}
-
-.month-totals strong {
-  font-size: 21px;
+.month-net strong {
+  color: var(--ink-950);
+  font-size: 26px;
   font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+.month-net strong.money-positive,
+.calendar-day > strong.money-positive,
+.day-details-summary > strong.money-positive {
+  color: #087f5b;
+}
+
+.month-net strong.money-negative,
+.calendar-day > strong.money-negative,
+.day-details-summary > strong.money-negative {
+  color: var(--danger);
 }
 
 .calendar-grid {
@@ -415,23 +522,47 @@ onMounted(loadDashboard);
   display: grid;
   align-content: space-between;
   min-width: 0;
-  min-height: 52px;
-  padding: 6px;
+  min-height: 58px;
+  padding: 7px;
   border: 1px solid #e8e8ea;
   border-radius: 8px;
   background: #fafafa;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.calendar-day:not(:disabled):hover,
+.calendar-day.is-selected {
+  border-color: #b5165d;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px #b5165d;
+}
+
+.calendar-day.is-future {
+  background: #f8f8f7;
+  cursor: default;
+}
+
+.calendar-day.is-future > span,
+.calendar-day.is-future > strong {
+  color: #b0b0b5;
 }
 
 .calendar-day > span {
-  color: #99999f;
-  font-size: 10px;
+  color: #34343a;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .calendar-day > strong {
   overflow: hidden;
-  color: #b0b0b5;
-  font-size: 9px;
-  font-weight: 500;
+  color: #242428;
+  font-size: 12px;
+  font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -441,8 +572,8 @@ onMounted(loadDashboard);
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 31px;
-  margin-bottom: 4px;
+  min-height: 34px;
+  margin-bottom: 12px;
 }
 
 .recent-heading a {
@@ -452,7 +583,7 @@ onMounted(loadDashboard);
 }
 
 .transaction-list :deep(.ant-list-item) {
-  padding: 10px 0;
+  padding: 12px 0;
 }
 
 .transaction-row {
@@ -464,21 +595,12 @@ onMounted(loadDashboard);
 
 .transaction-icon {
   display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  border-radius: 8px;
+  width: 18px;
+  height: 24px;
+  flex: 0 0 18px;
+  color: #c59111;
+  font-size: 16px;
   place-items: center;
-}
-
-.transaction-icon.is-income {
-  color: #4f6ff5;
-  background: #eef1ff;
-}
-
-.transaction-icon.is-expense {
-  color: #c24141;
-  background: #fbecec;
 }
 
 .transaction-copy {
@@ -490,7 +612,7 @@ onMounted(loadDashboard);
 .transaction-copy strong {
   overflow: hidden;
   color: var(--ink-900);
-  font-size: 11px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -498,14 +620,144 @@ onMounted(loadDashboard);
 .transaction-copy span {
   overflow: hidden;
   color: var(--ink-500);
-  font-size: 9px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .transaction-row > b {
   flex: 0 0 auto;
+  min-width: 86px;
+  font-size: 12px;
+  text-align: right;
+}
+
+.transaction-source-icon {
+  flex: 0 0 auto;
+  color: var(--ink-800);
+  font-size: 14px;
+}
+
+.day-details-title {
+  color: #67676f;
   font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.22em;
+}
+
+.day-details-content {
+  padding: 26px 16px 8px;
+}
+
+.day-details-summary {
+  display: grid;
+  justify-items: center;
+  margin-bottom: 38px;
+}
+
+.day-details-summary > span {
+  color: #a0a0a7;
+  font-size: 14px;
+}
+
+.day-details-summary > strong {
+  color: var(--ink-950);
+  font-size: 31px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+.day-transaction-list {
+  display: grid;
+}
+
+.day-transaction-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 22px auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 8px 0;
+  border-bottom: 1px solid #eeeeef;
+}
+
+.day-transaction-row:last-child {
+  border-bottom: 0;
+}
+
+.day-transaction-tag {
+  color: #c59111;
+  font-size: 18px;
+}
+
+.day-transaction-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.day-transaction-copy strong {
+  overflow: hidden;
+  color: var(--ink-950);
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-transaction-copy span {
+  overflow: hidden;
+  color: var(--ink-500);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-transaction-source {
+  color: var(--ink-900);
+  font-size: 17px;
+}
+
+.day-transaction-row > b {
+  min-width: 100px;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: right;
+}
+
+:global(.day-details-modal .ant-modal) {
+  max-width: calc(100vw - 32px);
+}
+
+:global(.day-details-modal .ant-modal-content) {
+  overflow: hidden;
+  padding: 0;
+  border-radius: 30px;
+  box-shadow: 0 24px 70px rgb(18 18 20 / 22%);
+}
+
+:global(.day-details-modal .ant-modal-header) {
+  min-height: 74px;
+  margin: 0;
+  padding: 27px 24px 20px;
+  border-bottom: 1px solid #ececee;
+}
+
+:global(.day-details-modal .ant-modal-body) {
+  min-height: 250px;
+  padding: 0 24px 30px;
+}
+
+:global(.day-details-modal .ant-modal-close) {
+  top: 19px;
+  right: 20px;
+  width: 38px;
+  height: 38px;
+  color: #6d6d75;
+  font-size: 18px;
+}
+
+:global(.day-details-root .ant-modal-mask) {
+  background: rgb(23 23 25 / 48%);
 }
 
 @media (max-width: 1100px) {
@@ -539,12 +791,8 @@ onMounted(loadDashboard);
     gap: 3px;
   }
 
-  .month-totals {
-    gap: 18px;
-  }
-
-  .month-totals strong {
-    font-size: 18px;
+  .month-net strong {
+    font-size: 22px;
   }
 
   .calendar-day {
@@ -553,7 +801,19 @@ onMounted(loadDashboard);
   }
 
   .calendar-day > strong {
-    font-size: 8px;
+    font-size: 10px;
+  }
+
+  .day-details-content {
+    padding-inline: 0;
+  }
+
+  .day-transaction-row {
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+  }
+
+  .day-transaction-source {
+    display: none;
   }
 }
 </style>

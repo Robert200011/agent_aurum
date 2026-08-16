@@ -295,16 +295,18 @@ MemoryRetrievalServiceDependency = Annotated[
 ]
 
 
-def get_rag_answer_service(
+async def get_rag_answer_service(
     retrieval_service: PersonalRetrievalServiceDependency,
     memory_service: MemoryRetrievalServiceDependency,
     chat_provider: ChatModelProviderDependency,
     finance_service: FinanceServiceDependency,
+    user_settings_service: UserSettingsServiceDependency,
     checkpointer: CheckpointSaverDependency,
     settings: SettingsDependency,
 ) -> RagAnswerService:
     """Build the authenticated user's routed answer workflow."""
 
+    preferences = await user_settings_service.get_preferences()
     return RagAnswerService(
         retrieval_service=retrieval_service,
         chat_provider=chat_provider,
@@ -315,7 +317,8 @@ def get_rag_answer_service(
         memory_service=memory_service if memory_service.enabled else None,
         capability_agent_max_steps=settings.capability_agent_max_steps,
         capability_agent_max_tool_calls=settings.capability_agent_max_tool_calls,
-        finance_timezone=settings.finance_timezone,
+        finance_base_currency=preferences.base_currency,
+        finance_timezone=preferences.timezone,
         finance_tools=FinanceToolExecutor(
             finance_service,
             market_stale_after_hours=settings.finance_market_stale_after_hours,

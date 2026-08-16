@@ -94,11 +94,17 @@ describe("SettingsDrawer", () => {
     vi.mocked(settingsApi.preferences).mockResolvedValue(preferences);
   });
 
-  it("shows current account information in the profile panel", () => {
+  it("keeps the menu compact until a settings module is selected", async () => {
     const wrapper = mountDrawer();
 
     expect(wrapper.text()).toContain("user_test");
     expect(wrapper.text()).toContain("user@example.com");
+    expect(wrapper.get("#settings-panel-profile").isVisible()).toBe(false);
+
+    await wrapper
+      .get('[aria-controls="settings-panel-profile"]')
+      .trigger("click");
+
     expect(wrapper.get("#settings-panel-profile").isVisible()).toBe(true);
   });
 

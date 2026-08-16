@@ -98,7 +98,7 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
 
 function openSettings(): void {
   agentOpen.value = false;
-  settingsOpen.value = true;
+  settingsOpen.value = !settingsOpen.value;
 }
 
 async function openChangePassword(): Promise<void> {
@@ -315,7 +315,7 @@ onBeforeUnmount(() => {
             type="button"
             aria-label="打开设置中心"
             :aria-expanded="settingsOpen"
-            aria-controls="aurum-settings-drawer"
+            aria-controls="aurum-settings-menu"
             title="设置中心"
             @click="openSettings"
           >
@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
     </transition>
 
     <SettingsDrawer
-      id="aurum-settings-drawer"
+      id="aurum-settings-menu"
       v-model:open="settingsOpen"
       :user="auth.user"
       :logging-out="loggingOut"

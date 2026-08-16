@@ -314,12 +314,18 @@ class CapabilityRegistry:
         name: str,
         arguments: dict[str, Any],
         today: date,
+        default_target_currency: str | None = None,
     ) -> FinanceToolRequest:
         spec = self.spec(name)
         if spec.domain != "finance":
             raise ValueError("capability is not a finance capability")
         validated = spec.input_model.model_validate(arguments)
-        return _finance_request(name=name, validated=validated, today=today)
+        return _finance_request(
+            name=name,
+            validated=validated,
+            today=today,
+            default_target_currency=default_target_currency,
+        )
 
 
 def resolve_time_range(value: SemanticRangeInput, *, today: date) -> tuple[date, date]:
@@ -360,6 +366,7 @@ def _finance_request(
     name: str,
     validated: BaseModel,
     today: date,
+    default_target_currency: str | None,
 ) -> FinanceToolRequest:
     if isinstance(validated, FinanceSummaryCapabilityInput) and not isinstance(
         validated,
@@ -374,12 +381,14 @@ def _finance_request(
             arguments=FinanceSummaryInput(
                 start_date=start,
                 end_date=end,
-                target_currency=validated.currency,
+                target_currency=validated.currency or default_target_currency,
             )
         )
     if isinstance(validated, AccountBalancesCapabilityInput):
         return AccountBalancesRequest(
-            arguments=AccountBalancesInput(target_currency=validated.currency)
+            arguments=AccountBalancesInput(
+                target_currency=validated.currency or default_target_currency
+            )
         )
     if isinstance(validated, TransactionSearchCapabilityInput):
         start, end = resolve_time_range(validated, today=today)
@@ -422,7 +431,7 @@ def _finance_request(
             arguments=IncomeExpenseReportInput(
                 start_date=start,
                 end_date=end,
-                target_currency=validated.currency,
+                target_currency=validated.currency or default_target_currency,
                 comparison_start_date=comparison_start,
                 comparison_end_date=comparison_end,
             )
@@ -434,7 +443,7 @@ def _finance_request(
                 start_date=start,
                 end_date=end,
                 as_of_date=today,
-                target_currency=validated.currency,
+                target_currency=validated.currency or default_target_currency,
                 category=validated.category,
                 history_period_count=validated.history_period_count,
             )
@@ -445,7 +454,7 @@ def _finance_request(
             arguments=BudgetStatusInput(
                 start_date=start,
                 end_date=end,
-                target_currency=validated.currency,
+                target_currency=validated.currency or default_target_currency,
                 category=validated.category,
             )
         )
@@ -455,14 +464,14 @@ def _finance_request(
             arguments=ExpenseAnomalyInput(
                 start_date=start,
                 end_date=end,
-                target_currency=validated.currency,
+                target_currency=validated.currency or default_target_currency,
                 history_window_count=validated.history_window_count,
             )
         )
     if isinstance(validated, PortfolioSummaryCapabilityInput):
         return PortfolioSummaryRequest(
             arguments=PortfolioSummaryInput(
-                target_currency=validated.currency,
+                target_currency=validated.currency or default_target_currency,
                 holding_limit=validated.holding_limit,
             )
         )

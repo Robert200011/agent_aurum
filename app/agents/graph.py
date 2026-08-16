@@ -77,6 +77,8 @@ def build_rag_answer_graph(
     capability_agent_max_steps: int = 3,
     capability_agent_max_tool_calls: int = 6,
     memory_service: MemoryRetrievalService | None = None,
+    finance_base_currency: str = "CNY",
+    finance_timezone: str = "Asia/Shanghai",
     checkpointer: BaseCheckpointSaver[str] | None = None,
 ) -> CompiledRagAnswerGraph:
     """编译知识、财务与混合问题共用的受控 P5.5 回答图。"""
@@ -101,6 +103,8 @@ def build_rag_answer_graph(
             max_steps=capability_agent_max_steps,
             max_tool_calls=capability_agent_max_tool_calls,
             memory_service=memory_service,
+            finance_base_currency=finance_base_currency,
+            finance_timezone=finance_timezone,
         )
         write_stage(state, "analyzing")
         return {

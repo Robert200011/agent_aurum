@@ -46,6 +46,7 @@ class RagAnswerService:
         capability_agent_max_steps: int = 3,
         capability_agent_max_tool_calls: int = 6,
         memory_service: MemoryRetrievalService | None = None,
+        finance_base_currency: str = "CNY",
         finance_timezone: str = "Asia/Shanghai",
         checkpointer: BaseCheckpointSaver[str] | None = None,
     ) -> None:
@@ -65,6 +66,8 @@ class RagAnswerService:
             capability_agent_max_steps=capability_agent_max_steps,
             capability_agent_max_tool_calls=capability_agent_max_tool_calls,
             memory_service=memory_service,
+            finance_base_currency=finance_base_currency,
+            finance_timezone=finance_timezone,
             checkpointer=checkpointer,
         )
 
@@ -234,7 +237,7 @@ def _graph_config(thread_id: UUID) -> RunnableConfig:
 
 
 def _current_date(timezone_name: str, *, at: datetime | None = None) -> date:
-    """仅使用服务端配置的 IANA 时区解析相对日期。"""
+    """使用当前用户的 IANA 时区解析相对日期。"""
 
     current_time = at or datetime.now(UTC)
     if current_time.tzinfo is None:
