@@ -76,10 +76,17 @@ test.beforeEach(async ({ page }) => {
 
 test('设置中心桌面端展开和注销二次确认', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: '打开设置中心' }).click()
+  const settingsTrigger = page.getByRole('button', { name: '打开设置中心' })
+  const triggerBox = await settingsTrigger.boundingBox()
+  await settingsTrigger.click()
 
   await expect(page.getByRole('heading', { name: '设置中心' })).toBeVisible()
   await expect(page.getByLabel('当前账户').getByText('阶段六用户')).toBeVisible()
+  const menuBox = await page.locator('.settings-drawer').boundingBox()
+  expect(triggerBox).not.toBeNull()
+  expect(menuBox).not.toBeNull()
+  expect(menuBox?.y).toBeGreaterThanOrEqual((triggerBox?.y ?? 0) + (triggerBox?.height ?? 0))
+  await expect(page.locator('.ant-drawer-mask')).toHaveCount(0)
 
   await page.getByRole('button', { name: /财务账户/ }).click()
   const accountsPanel = page.getByRole('region', { name: /财务账户/ })
@@ -117,4 +124,43 @@ test('设置中心在 320px 移动视口内保持可操作', async ({ page }) =>
   expect(drawerBox?.width).toBeLessThanOrEqual(320)
   await expect(accountsPanel.getByRole('button', { name: '保存默认账户' })).toBeVisible()
   await expect(accountsPanel.getByRole('button', { name: '管理全部账户' })).toBeVisible()
+})
+
+test('没有财务账户时仍可保存财务偏好和显示偏好', async ({ page }) => {
+  const preferenceUpdates: Record<string, unknown>[] = []
+  await page.route('**/api/v1/finance/accounts**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: { items: [], page: 1, page_size: 200, total: 0 },
+    })
+  })
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname === '/api/v1/users/me/preferences'
+    ) {
+      preferenceUpdates.push(request.postDataJSON() as Record<string, unknown>)
+    }
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开设置中心' }).click()
+  await page.getByRole('button', { name: /财务偏好/ }).click()
+  await expect(page.getByRole('region', { name: /财务偏好/ })).toBeVisible()
+  await page.getByRole('button', { name: '保存财务偏好' }).click()
+
+  await page.getByRole('button', { name: /显示偏好/ }).click()
+  await page.getByRole('button', { name: '保存显示偏好' }).click()
+
+  await expect.poll(() => preferenceUpdates.length).toBe(2)
+  expect(preferenceUpdates[0]).toMatchObject({
+    base_currency: 'CNY',
+    timezone: 'Asia/Shanghai',
+  })
+  expect(preferenceUpdates[1]).toMatchObject({
+    font_size: 'medium',
+    layout_density: 'comfortable',
+    hide_sensitive_amounts: false,
+  })
 })

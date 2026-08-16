@@ -69,6 +69,10 @@ Gateway 的 30 秒优雅窗口排空。
 `aurum_model_tokens_total{mode="tools"}` 的样本增量、`aurum_memory_embeddings_total` 的成功/失败
 数量和所用模型版本，用于估算单次决策 Token 与 Embedding 成本；这些统计不包含用户正文。
 
+财务 Agent 的相对日期和默认换算币种读取当前用户的 `timezone` 与 `base_currency` 偏好；
+`AURUM_FINANCE_TIMEZONE` 仅作为未注入用户偏好时的内部默认值，不覆盖已保存的用户配置。候选环境需至少验证一次
+跨 UTC 日期边界的“今天/本月至今”查询，以及模型未指定币种时按用户基准币种返回汇总。
+
 ## 5. 长期记忆灰度与回滚
 
 生产环境默认 `AURUM_MEMORY_ROLLOUT_PERCENTAGE=0`。候选门禁和人工保存—跨会话召回—删除后

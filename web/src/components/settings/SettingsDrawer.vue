@@ -14,7 +14,14 @@ import {
   UserOutlined,
 } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
-import { computed, reactive, ref, watch } from "vue";
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 
 import { apiErrorMessage } from "@/services/http";
 import { financeApi } from "@/services/finance";
@@ -33,6 +40,7 @@ type SettingsPanel =
   | "about";
 
 const props = defineProps<{
+  id?: string;
   open: boolean;
   user: User | null;
   loggingOut?: boolean;
@@ -48,7 +56,8 @@ const emit = defineEmits<{
 }>();
 
 const settings = useSettingsStore();
-const activePanel = ref<SettingsPanel | null>("profile");
+const activePanel = ref<SettingsPanel | null>(null);
+const settingsPanel = ref<HTMLElement | null>(null);
 const appVersion = import.meta.env.VITE_APP_VERSION || "0.1.0";
 const profileForm = reactive({ displayName: "" });
 const accounts = ref<Account[]>([]);
@@ -191,29 +200,54 @@ function togglePanel(panel: SettingsPanel): void {
 function close(): void {
   emit("update:open", false);
 }
+
+function handleDocumentPointerDown(event: PointerEvent): void {
+  if (!props.open || !(event.target instanceof Element)) return;
+  if (
+    settingsPanel.value?.contains(event.target) ||
+    event.target.closest(
+      ".settings-trigger, .ant-select-dropdown, .ant-modal-root",
+    )
+  ) {
+    return;
+  }
+  close();
+}
+
+function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (props.open && event.key === "Escape") close();
+}
+
+onMounted(() => {
+  document.addEventListener("pointerdown", handleDocumentPointerDown);
+  document.addEventListener("keydown", handleDocumentKeydown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", handleDocumentPointerDown);
+  document.removeEventListener("keydown", handleDocumentKeydown);
+});
 </script>
 
 <template>
-  <a-drawer
-    :open="open"
-    placement="right"
-    width="min(560px, 100vw)"
-    :closable="false"
-    :body-style="{ padding: 0 }"
+  <aside
+    v-if="open"
+    :id="id"
+    ref="settingsPanel"
     class="settings-drawer"
-    @close="close"
+    role="dialog"
+    aria-modal="false"
+    aria-labelledby="settings-title"
   >
-    <template #title>
-      <div class="settings-titlebar">
-        <div>
-          <span>ACCOUNT &amp; PREFERENCES</span>
-          <h2>设置中心</h2>
-        </div>
-        <button type="button" aria-label="关闭设置中心" @click="close">
-          <CloseOutlined />
-        </button>
+    <header class="settings-titlebar">
+      <div>
+        <span>ACCOUNT &amp; PREFERENCES</span>
+        <h2 id="settings-title">设置中心</h2>
       </div>
-    </template>
+      <button type="button" aria-label="关闭设置中心" @click="close">
+        <CloseOutlined />
+      </button>
+    </header>
 
     <div
       class="settings-content"
@@ -291,7 +325,6 @@ function close(): void {
             <a-form
               layout="vertical"
               class="settings-form"
-              @finish="saveProfile"
             >
               <a-form-item label="显示昵称">
                 <a-input
@@ -320,9 +353,10 @@ function close(): void {
               </dl>
               <a-button
                 type="primary"
-                html-type="submit"
+                html-type="button"
                 block
                 :loading="settings.savingProfile"
+                @click="saveProfile"
               >
                 保存个人档案
               </a-button>
@@ -418,7 +452,6 @@ function close(): void {
               </a-alert>
               <a-empty
                 v-else-if="!accounts.length && !accountsLoading"
-                :image="null"
                 description="暂无有效账户"
               />
               <a-radio-group
@@ -560,7 +593,6 @@ function close(): void {
             <a-form
               layout="vertical"
               class="settings-form"
-              @finish="saveFinancePreferences"
             >
               <a-form-item label="基准币种">
                 <a-select v-model:value="preferenceForm.baseCurrency">
@@ -587,9 +619,10 @@ function close(): void {
               </a-form-item>
               <a-button
                 type="primary"
-                html-type="submit"
+                html-type="button"
                 block
                 :loading="settings.savingPreferences"
+                @click="saveFinancePreferences"
               >
                 保存财务偏好
               </a-button>
@@ -629,7 +662,6 @@ function close(): void {
             <a-form
               layout="vertical"
               class="settings-form"
-              @finish="saveAppearancePreferences"
             >
               <a-form-item label="字号">
                 <a-radio-group
@@ -660,9 +692,10 @@ function close(): void {
               </div>
               <a-button
                 type="primary"
-                html-type="submit"
+                html-type="button"
                 block
                 :loading="settings.savingPreferences"
+                @click="saveAppearancePreferences"
               >
                 保存显示偏好
               </a-button>
@@ -755,15 +788,36 @@ function close(): void {
         <RightOutlined />
       </button>
     </div>
-  </a-drawer>
+  </aside>
 </template>
 
 <style scoped>
+.settings-drawer {
+  position: fixed;
+  top: 58px;
+  right: 18px;
+  z-index: 40;
+  display: flex;
+  overflow: hidden;
+  width: min(372px, calc(100vw - 24px));
+  max-height: calc(100vh - 70px);
+  border: 1px solid #e4e4e7;
+  border-radius: 16px;
+  background: #fafafa;
+  box-shadow: 0 18px 50px rgb(24 24 27 / 14%);
+  flex-direction: column;
+}
+
 .settings-titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  min-height: 58px;
+  padding: 10px 12px 10px 15px;
+  border-bottom: 1px solid #ececee;
+  background: #ffffff;
+  flex: 0 0 auto;
 }
 
 .settings-titlebar > div {
@@ -781,13 +835,13 @@ function close(): void {
 .settings-titlebar h2 {
   margin: 0;
   color: #171719;
-  font-size: 20px;
+  font-size: 17px;
 }
 
 .settings-titlebar button {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -810,13 +864,15 @@ function close(): void {
 }
 
 .settings-content {
-  min-height: 100%;
-  padding: 22px 22px 32px;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 14px 14px 18px;
   background: #fafafa;
+  overscroll-behavior: contain;
 }
 
 .settings-feedback:not(:empty) {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .settings-loading-status {
@@ -833,9 +889,9 @@ function close(): void {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 26px;
-  padding: 16px;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 11px 12px;
   border: 1px solid #e8e8eb;
   border-radius: 14px;
   background: #ffffff;
@@ -878,11 +934,11 @@ function close(): void {
 }
 
 .settings-group {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .settings-group h3 {
-  margin: 0 0 9px 4px;
+  margin: 0 0 7px 3px;
   color: #888890;
   font-size: 9px;
   font-weight: 750;
@@ -911,12 +967,12 @@ function close(): void {
 
 .settings-item-trigger {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 11px;
+  gap: 9px;
   width: 100%;
-  min-height: 72px;
-  padding: 12px 16px;
+  min-height: 54px;
+  padding: 8px 12px;
   border: 0;
   color: #26262a;
   background: #ffffff;
@@ -930,30 +986,30 @@ function close(): void {
 
 .settings-item-icon {
   display: grid;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   color: #626269;
   background: #f3f3f4;
-  font-size: 16px;
+  font-size: 14px;
   place-items: center;
 }
 
 .settings-item-copy {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 2px;
 }
 
 .settings-item-copy strong {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .settings-item-copy small {
   overflow: hidden;
   color: #8a8a92;
-  font-size: 11px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -969,7 +1025,7 @@ function close(): void {
 }
 
 .settings-panel {
-  padding: 2px 16px 18px 61px;
+  padding: 2px 12px 14px 51px;
   border-top: 1px solid #eeeeef;
   background: #ffffff;
 }
@@ -1189,8 +1245,8 @@ function close(): void {
   align-items: center;
   gap: 11px;
   width: 100%;
-  min-height: 58px;
-  padding: 0 17px;
+  min-height: 48px;
+  padding: 0 13px;
   border: 1px solid #ffd9d7;
   border-radius: 12px;
   color: #d94545;
@@ -1218,8 +1274,16 @@ function close(): void {
 }
 
 @media (max-width: 520px) {
+  .settings-drawer {
+    top: 58px;
+    right: 8px;
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 66px);
+    border-radius: 14px;
+  }
+
   .settings-content {
-    padding: 16px 14px 24px;
+    padding: 12px 10px 16px;
   }
 
   .settings-titlebar h2 {
@@ -1227,14 +1291,14 @@ function close(): void {
   }
 
   .account-summary {
-    margin-bottom: 20px;
-    padding: 13px;
+    margin-bottom: 14px;
+    padding: 11px;
   }
 
   .settings-item-trigger {
-    grid-template-columns: 32px minmax(0, 1fr) auto;
-    min-height: 68px;
-    padding: 11px 12px;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    min-height: 54px;
+    padding: 8px 10px;
   }
 
   .settings-panel {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -9,11 +10,41 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.capabilities import CapabilityRegistry
+from app.agents.tools.finance import FinanceSummaryInput
 from app.db.models.finance import FinancialAccount
 from app.db.models.identity import UserPreference, UserProfile
 from app.errors import BusinessRuleError
+from app.services.answering import _current_date
 from app.services.finance import FinanceService
 from app.services.user_settings import UserSettingsService
+
+
+def test_finance_preferences_drive_agent_date_and_default_currency() -> None:
+    registry = CapabilityRegistry.read_only_default(
+        finance_enabled=True,
+        knowledge_enabled=False,
+    )
+    request = registry.finance_request(
+        name="get_finance_summary",
+        arguments={},
+        today=date(2026, 8, 9),
+        default_target_currency="USD",
+    )
+    explicit_request = registry.finance_request(
+        name="get_finance_summary",
+        arguments={"currency": "EUR"},
+        today=date(2026, 8, 9),
+        default_target_currency="USD",
+    )
+    arguments = cast(FinanceSummaryInput, request.arguments)
+    explicit_arguments = cast(FinanceSummaryInput, explicit_request.arguments)
+    observed_at = datetime(2026, 8, 15, 23, 30, tzinfo=UTC)
+
+    assert arguments.target_currency == "USD"
+    assert explicit_arguments.target_currency == "EUR"
+    assert _current_date("Asia/Shanghai", at=observed_at) == date(2026, 8, 16)
+    assert _current_date("America/New_York", at=observed_at) == date(2026, 8, 15)
 
 
 class FakeSession:

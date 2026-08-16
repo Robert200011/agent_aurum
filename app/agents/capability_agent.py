@@ -112,6 +112,8 @@ async def run_capability_agent(
     max_steps: int,
     max_tool_calls: int,
     memory_service: MemoryRetrievalService | None = None,
+    finance_base_currency: str = "CNY",
+    finance_timezone: str = "Asia/Shanghai",
 ) -> CapabilityAgentOutcome:
     """让模型按需多轮调用只读能力，并汇总为现有图可校验的结果。"""
 
@@ -134,6 +136,8 @@ async def run_capability_agent(
             question=question,
             history=history,
             today=today,
+            finance_base_currency=finance_base_currency,
+            finance_timezone=finance_timezone,
         )
         try:
             decision = await chat_provider.complete_with_tools(
@@ -258,6 +262,7 @@ async def run_capability_agent(
                         name=call.name,
                         arguments=call.arguments,
                         today=today,
+                        default_target_currency=finance_base_currency,
                     )
                 except (ValueError, ValidationError):
                     round_observations.append(
@@ -368,9 +373,15 @@ def _decision_messages(
     question: str,
     history: list[dict[str, str]],
     today: date,
+    finance_base_currency: str,
+    finance_timezone: str,
 ) -> list[ChatMessage]:
     payload = {
         "current_date": today.isoformat(),
+        "financial_preferences": {
+            "base_currency": finance_base_currency,
+            "timezone": finance_timezone,
+        },
         "conversation_history": history,
         "current_question": question.strip(),
     }

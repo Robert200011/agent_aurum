@@ -33,6 +33,7 @@ from app.services.finance import FinanceService
 from app.services.memory_commands import MemoryCommandService
 from app.services.memory_retrieval import MemoryRetrievalService
 from app.services.retrieval import RagRetrievalService
+from app.services.user_settings import UserSettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,10 @@ class ChatRunCoordinator:
             with collect_model_tokens() as token_counter:
                 try:
                     async with self._session_factory() as session:
+                        preferences = await UserSettingsService(
+                            session=session,
+                            user_id=user_id,
+                        ).get_preferences()
                         memory_enabled = memory_rollout_enabled(
                             user_id,
                             feature_enabled=self._settings.memory_enabled,
@@ -240,7 +245,8 @@ class ChatRunCoordinator:
                             capability_agent_max_tool_calls=(
                                 self._settings.capability_agent_max_tool_calls
                             ),
-                            finance_timezone=self._settings.finance_timezone,
+                            finance_base_currency=preferences.base_currency,
+                            finance_timezone=preferences.timezone,
                             finance_tools=FinanceToolExecutor(
                                 FinanceService(session=session, user_id=user_id),
                                 market_stale_after_hours=(
