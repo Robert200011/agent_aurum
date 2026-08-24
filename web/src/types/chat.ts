@@ -21,6 +21,17 @@ export type ChatGenerationStage =
   | 'analyzing'
   | 'generating'
   | 'finalizing'
+export type ResponseDepth = 'brief' | 'standard' | 'deep'
+export type ResponseDepthRequest = 'auto' | ResponseDepth
+export type FinancialAnalysisType =
+  | 'transaction_lookup'
+  | 'cashflow_review'
+  | 'budget_review'
+  | 'financial_health'
+  | 'portfolio_review'
+  | 'goal_progress'
+  | 'investment_education'
+  | 'mixed'
 
 export interface Conversation {
   id: string
@@ -32,26 +43,6 @@ export interface Conversation {
 
 export interface ConversationList extends PageResponse {
   items: Conversation[]
-}
-
-export interface MessageCitation {
-  citation_id: number
-  document_id: string
-  document_version_id: string
-  knowledge_base_id: string
-  chunk_id: string
-  title: string
-  document_version: number
-  page: number | null
-  section: string | null
-  sheet_name: string | null
-  row_start: number | null
-  row_end: number | null
-  char_start: number | null
-  char_end: number | null
-  content_hash: string
-  quote: string
-  score: number | null
 }
 
 export interface FinanceEvidenceFact {
@@ -87,7 +78,6 @@ export interface ChatMessage {
   completion_tokens: number | null
   latency_ms: number | null
   created_at: string
-  citations: MessageCitation[]
   evidence: MessageEvidence[]
   memory_count: number
   data_as_of: string | null
@@ -114,12 +104,14 @@ export interface AgentRun {
   finance_tool_count: number
   data_as_of: string | null
   risk_notice: string | null
+  analysis_type: FinancialAnalysisType | null
+  response_depth: ResponseDepth | null
+  fast_path: boolean
 }
 
 export interface StructuredAnswer {
   message_id: string
   answer: string
-  citations: MessageCitation[]
   evidence: MessageEvidence[]
   memory_count: number
   data_as_of: string | null

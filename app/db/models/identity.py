@@ -38,7 +38,7 @@ from app.db.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
-from app.rag.constants import DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS
+from app.providers.embedding import DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS
 
 
 class UserStatus(StrEnum):

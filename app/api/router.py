@@ -7,9 +7,7 @@ from app.api import (
     auth,
     budgets,
     chat,
-    documents,
     holdings,
-    knowledge_bases,
     reports,
     system,
     transactions,
@@ -30,5 +28,3 @@ router.include_router(holdings.market_router)
 router.include_router(holdings.exchange_router)
 router.include_router(holdings.portfolio_router)
 router.include_router(reports.router)
-router.include_router(knowledge_bases.router)
-router.include_router(documents.router)

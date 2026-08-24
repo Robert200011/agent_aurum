@@ -540,7 +540,7 @@ onBeforeUnmount(() => {
               type="warning"
               show-icon
               message="注销后将无法再次登录"
-              description="现有登录凭证会立即失效。财务与知识库数据不会在此步骤中被物理删除。"
+              description="现有登录凭证会立即失效。财务数据不会在此步骤中被物理删除。"
             />
             <a-button
               danger

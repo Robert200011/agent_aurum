@@ -1,4 +1,4 @@
-"""普通登录用户的会话、非流式与 SSE 基础 RAG 问答 API。"""
+"""普通登录用户的会话、非流式与 SSE 财务问答 API。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ from app.api.schemas.chat import (
     MemoryConfirmationResolveResponse,
     MemoryConfirmationResponse,
     MemorySavedResponse,
-    MessageCitationResponse,
     MessageEvidenceResponse,
     MessageResponse,
     QuestionCreate,
@@ -40,7 +39,7 @@ from app.api.schemas.chat import (
     StreamStatusResponse,
     StructuredAnswerResponse,
 )
-from app.db.models.chat import AgentRun, Message, MessageCitation, MessageEvidence
+from app.db.models.chat import AgentRun, Message, MessageEvidence
 from app.errors import ApplicationError, ConflictError
 from app.governance.usage import collect_model_tokens
 from app.observability.context import set_context
@@ -124,7 +123,6 @@ async def get_conversation(
         messages=[
             _message_response(
                 message,
-                detail.citations_by_message.get(message.id, []),
                 detail.evidence_by_message.get(message.id, []),
                 detail.runs_by_message.get(message.id),
             )
@@ -197,6 +195,7 @@ async def answer_conversation(
                 conversation_id=conversation_id,
                 question=payload.question,
                 trace_id=_request_id(request),
+                response_depth=payload.response_depth,
             )
         finally:
             await quota_lease.settle(counter.total_tokens)
@@ -221,6 +220,7 @@ async def stream_answer_conversation(
             conversation_id=conversation_id,
             question=payload.question,
             trace_id=_request_id(request),
+            response_depth=payload.response_depth,
         )
     except BaseException:
         await quota_lease.settle(0)
@@ -465,7 +465,6 @@ def _structured_answer_response(persisted: PersistedAnswer) -> StructuredAnswerR
     return StructuredAnswerResponse(
         message_id=persisted.message.id,
         answer=persisted.message.content,
-        citations=[_citation_response(citation) for citation in persisted.citations],
         evidence=[_evidence_response(item) for item in persisted.evidence],
         memory_count=_run_detail_count(persisted.run, "memory_retrieval_count"),
         data_as_of=persisted.data_as_of,
@@ -491,8 +490,35 @@ def _agent_run_response(run: AgentRun) -> AgentRunResponse:
             "finance_tool_count": count if isinstance(count, int) and count >= 0 else 0,
             "data_as_of": _run_detail_datetime(run, "data_as_of"),
             "risk_notice": _run_detail_text(run, "risk_notice"),
+            "analysis_type": _run_analysis_type(run),
+            "response_depth": _run_response_depth(run),
+            "fast_path": run.detail.get("fast_path") is True,
         }
     )
+
+
+def _run_analysis_type(run: AgentRun) -> str | None:
+    value = run.detail.get("analysis_type")
+    return (
+        value
+        if value
+        in {
+            "transaction_lookup",
+            "cashflow_review",
+            "budget_review",
+            "financial_health",
+            "portfolio_review",
+            "goal_progress",
+            "investment_education",
+            "mixed",
+        }
+        else None
+    )
+
+
+def _run_response_depth(run: AgentRun) -> str | None:
+    value = run.detail.get("response_depth")
+    return value if value in {"brief", "standard", "deep"} else None
 
 
 def _sse(*, event: str, event_id: int, payload: BaseModel) -> str:
@@ -507,14 +533,12 @@ def _sse(*, event: str, event_id: int, payload: BaseModel) -> str:
 
 def _message_response(
     message: Message,
-    citations: list[MessageCitation],
     evidence: list[MessageEvidence],
     run: AgentRun | None,
 ) -> MessageResponse:
     response = MessageResponse.model_validate(message)
     return response.model_copy(
         update={
-            "citations": [_citation_response(citation) for citation in citations],
             "evidence": [_evidence_response(item) for item in evidence],
             "memory_count": (
                 _run_detail_count(run, "memory_retrieval_count")
@@ -527,17 +551,6 @@ def _message_response(
             "risk_notice": (
                 _run_detail_text(run, "risk_notice") if run is not None else None
             ),
-        }
-    )
-
-
-def _citation_response(citation: MessageCitation) -> MessageCitationResponse:
-    return MessageCitationResponse.model_validate(
-        citation.source_snapshot
-        | {
-            "citation_id": citation.rank,
-            "quote": citation.quote_snapshot,
-            "score": citation.score,
         }
     )
 

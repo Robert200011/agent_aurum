@@ -38,7 +38,6 @@ describe('FinanceEvidencePanel', () => {
     expect(wrapper.text()).toContain('个人财务数据')
     expect(wrapper.text()).toContain('支出：120.0000 CNY')
     expect(wrapper.text()).toContain('口径：按请求区间和原币种确定性汇总。')
-    expect(wrapper.text()).not.toContain('知识库依据')
     expect(wrapper.text()).toContain('风险提示')
     expect(wrapper.text()).toContain('市场价格会波动')
   })

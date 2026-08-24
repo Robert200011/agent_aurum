@@ -16,39 +16,12 @@ $webImage = "aurum-agent-web:p65-rehearsal"
 $env:AURUM_DEPLOY_ENVIRONMENT = "staging"
 $env:AURUM_PUBLIC_DOMAIN = "http://127.0.0.1"
 $env:AURUM_PUBLIC_ORIGIN = "http://localhost:18080"
-$env:AURUM_OBJECT_STORAGE_PUBLIC_DOMAIN = "http://objects.localhost"
 $env:AURUM_GATEWAY_HEALTH_HOST = "127.0.0.1"
 $env:AURUM_GATEWAY_BIND = "127.0.0.1"
 $env:AURUM_GATEWAY_HTTP_PORT = "18080"
 $env:AURUM_GATEWAY_HTTPS_PORT = "18443"
 $env:AURUM_PROMETHEUS_MAINTENANCE_PORT = "19090"
 $env:AURUM_POSTGRES_MAINTENANCE_PORT = "15433"
-$env:AURUM_MINIO_MAINTENANCE_PORT = "19002"
-$certificateDirectory = [IO.Path]::GetFullPath(
-    (Join-Path $repositoryRoot "$StateDirectory/minio-certs")
-)
-$certificatePath = Join-Path $certificateDirectory "public.crt"
-$privateKeyPath = Join-Path $certificateDirectory "private.key"
-New-Item -ItemType Directory -Path $certificateDirectory -Force | Out-Null
-if (-not (Test-Path $certificatePath) -or -not (Test-Path $privateKeyPath)) {
-    $opensslCommand = (Get-Command openssl -ErrorAction Stop).Source
-    $opensslRoot = Split-Path (Split-Path $opensslCommand -Parent) -Parent
-    $opensslConfig = Join-Path $opensslRoot "ssl/openssl.cnf"
-    $opensslArguments = @(
-        "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
-        "-keyout", $privateKeyPath, "-out", $certificatePath, "-subj", "/CN=minio",
-        "-addext", "subjectAltName=DNS:minio,DNS:localhost,IP:127.0.0.1"
-    )
-    if (Test-Path $opensslConfig) { $opensslArguments += @("-config", $opensslConfig) }
-    & $opensslCommand @opensslArguments
-    if ($LASTEXITCODE -ne 0) { throw "Unable to generate rehearsal MinIO certificate" }
-}
-$env:AURUM_MINIO_CERTS_DIR = $certificateDirectory.Replace("\", "/")
-$env:AURUM_MINIO_CA_FILE = $certificatePath.Replace("\", "/")
-$env:AWS_CA_BUNDLE = $certificatePath
-$env:AURUM_OBJECT_STORAGE_INTERNAL_ENDPOINT = "https://minio:9000"
-$env:AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT = "http://objects.localhost:18080"
-$env:AURUM_OBJECT_STORAGE_SECURE = "true"
 $env:AURUM_REFRESH_TOKEN_COOKIE_SECURE = "false"
 $env:AURUM_LANGGRAPH_AES_KEY = "0123456789abcdef0123456789abcdef"
 $env:GRAFANA_ADMIN_PASSWORD = "p6.5-rehearsal-only"

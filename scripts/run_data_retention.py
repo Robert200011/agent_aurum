@@ -1,4 +1,4 @@
-"""Preview or apply the audited database portion of the P6.4 retention policy."""
+"""Preview or apply the audited database portion of the retention policy."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from app.operations.backup import BackupValidationError, read_json
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_TARGETS = {
     "expired_refresh_tokens": ("identity", "refresh_tokens", "expires_at"),
-    "retrieval_logs": ("rag", "retrieval_logs", "created_at"),
 }
 
 
@@ -85,7 +84,7 @@ def execute_retention(
                 INSERT INTO audit.audit_logs
                   (id, action, resource_type, resource_id, user_agent, detail, created_at)
                 VALUES (%s, 'operations.retention_applied', 'retention_policy', %s,
-                        'phase6-retention-runner', %s::jsonb, clock_timestamp())
+                        'retention-runner', %s::jsonb, clock_timestamp())
                 """,
                 (
                     uuid4(),

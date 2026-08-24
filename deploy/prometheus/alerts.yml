@@ -19,22 +19,6 @@ groups:
         annotations:
           summary: Aurum model provider calls are failing
 
-      - alert: AurumIngestionWorkerOffline
-        expr: aurum_worker_ready == 0
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: Aurum ingestion worker heartbeat is offline
-
-      - alert: AurumIngestionQueueBacklog
-        expr: aurum_ingestion_queue_depth > 20
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: Aurum ingestion queue has a sustained backlog
-
       - alert: AurumDatabasePoolSaturation
         expr: |
           aurum_database_pool_connections{state="checked_out"}

@@ -1,4 +1,4 @@
-"""普通用户会话管理与基础 RAG 问答持久化。"""
+"""普通用户会话管理与个人财务问答持久化。"""
 
 from __future__ import annotations
 
@@ -12,13 +12,14 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.graph import RAG_GRAPH_VERSION
-from app.agents.policies.rag_prompt import HIGH_RISK_INVESTMENT_DISCLAIMER
+from app.agents.contracts import ResponseDepthRequest
+from app.agents.graph import AGENT_GRAPH_VERSION
+from app.agents.policies.answer_prompt import HIGH_RISK_INVESTMENT_DISCLAIMER
 from app.agents.state import (
-    RagAnswerCompleted,
-    RagAnswerDelta,
-    RagAnswerResult,
-    RagAnswerStage,
+    AnswerCompleted,
+    AnswerDelta,
+    AnswerResult,
+    AnswerStage,
 )
 from app.chat.finance_evidence import build_finance_persistence_record
 from app.chat.types import (
@@ -33,7 +34,6 @@ from app.db.models.chat import (
     AgentToolCall,
     Conversation,
     Message,
-    MessageCitation,
     MessageEvidence,
 )
 from app.db.models.identity import MemoryConfirmationStatus
@@ -46,7 +46,7 @@ from app.errors import (
     ConflictError,
     NotFoundError,
 )
-from app.services.answering import RagAnswerService, build_memory_command_answer
+from app.services.answering import AnswerService, build_memory_command_answer
 from app.services.memory_commands import (
     MemoryCommandResult,
     MemoryCommandService,
@@ -64,7 +64,6 @@ MAX_AUTOMATIC_TITLE_LENGTH = 60
 class ConversationDetail:
     conversation: Conversation
     messages: list[Message]
-    citations_by_message: dict[UUID, list[MessageCitation]]
     evidence_by_message: dict[UUID, list[MessageEvidence]]
     runs_by_message: dict[UUID, AgentRun]
 
@@ -80,7 +79,6 @@ class ConversationPage:
 @dataclass(frozen=True, slots=True)
 class PersistedAnswer:
     message: Message
-    citations: list[MessageCitation]
     run: AgentRun
     evidence: list[MessageEvidence]
     data_as_of: datetime | None = None
@@ -97,7 +95,7 @@ class ChatStreamStarted:
 
 @dataclass(frozen=True, slots=True)
 class ChatStreamDelta:
-    """已从模型收到但尚未通过最终引用校验的文本增量。"""
+    """已从模型收到但尚未通过最终回答校验的文本增量。"""
 
     text: str
 
@@ -108,7 +106,6 @@ class ChatStreamStatus:
 
     stage: Literal[
         "understanding",
-        "retrieving",
         "querying_finance",
         "analyzing",
         "generating",
@@ -118,7 +115,7 @@ class ChatStreamStatus:
 
 @dataclass(frozen=True, slots=True)
 class ChatStreamCompleted:
-    """最终回答和可信引用均已成功持久化。"""
+    """最终回答和财务证据均已成功持久化。"""
 
     answer: PersistedAnswer
 
@@ -159,17 +156,18 @@ class StreamingRun:
     run_id: UUID
     started_at: datetime
     history_before: datetime
+    response_depth: ResponseDepthRequest = "auto"
 
 
 class ChatService:
-    """以短事务记录运行状态，并在模型调用后原子完成回答和引用。"""
+    """以短事务记录运行状态，并在模型调用后原子完成回答和证据。"""
 
     def __init__(
         self,
         *,
         session: AsyncSession,
         user_id: UUID,
-        answer_service: RagAnswerService,
+        answer_service: AnswerService,
         memory_command_service: MemoryCommandService | None = None,
         history_message_limit: int = 8,
     ) -> None:
@@ -239,13 +237,6 @@ class ChatService:
             user_id=self._user_id,
             conversation_id=conversation.id,
         )
-        citations = await self._repository.list_citations(
-            user_id=self._user_id,
-            message_ids=[message.id for message in messages],
-        )
-        citations_by_message: dict[UUID, list[MessageCitation]] = {}
-        for citation in citations:
-            citations_by_message.setdefault(citation.message_id, []).append(citation)
         evidence = await self._repository.list_message_evidence(
             user_id=self._user_id,
             message_ids=[message.id for message in messages],
@@ -264,7 +255,6 @@ class ChatService:
         return ConversationDetail(
             conversation=conversation,
             messages=messages,
-            citations_by_message=citations_by_message,
             evidence_by_message=evidence_by_message,
             runs_by_message=runs_by_message,
         )
@@ -332,17 +322,12 @@ class ChatService:
         if run.status != AgentRunStatus.COMPLETED.value or run.message_id is None:
             return None
         message = await self._required_message(run.message_id, for_update=False)
-        citations = await self._repository.list_citations(
-            user_id=self._user_id,
-            message_ids=[message.id],
-        )
         evidence = await self._repository.list_message_evidence(
             user_id=self._user_id,
             message_ids=[message.id],
         )
         return PersistedAnswer(
             message=message,
-            citations=citations,
             run=run,
             evidence=evidence,
             data_as_of=_detail_datetime(run.detail.get("data_as_of")),
@@ -391,8 +376,9 @@ class ChatService:
         conversation_id: UUID,
         question: str,
         trace_id: str | None,
+        response_depth: ResponseDepthRequest = "auto",
     ) -> PersistedAnswer:
-        """记录运行起点，调用 RAG 图，并完成或失败该运行。"""
+        """记录运行起点，调用财务问答图，并完成或失败该运行。"""
 
         await self._prepare()
         conversation = await self._owned_conversation(conversation_id, for_update=True)
@@ -431,8 +417,8 @@ class ChatService:
                 thread_id=conversation.id,
                 trace_id=trace_id[:64] if trace_id else None,
                 status=AgentRunStatus.RUNNING.value,
-                graph_version=RAG_GRAPH_VERSION,
-                detail={},
+                graph_version=AGENT_GRAPH_VERSION,
+                detail={"requested_response_depth": response_depth},
                 started_at=started_at,
             )
         )
@@ -461,6 +447,7 @@ class ChatService:
                     question=normalized_question,
                     thread_id=conversation.id,
                     history=history,
+                    response_depth=response_depth,
                 )
             )
             await self._prepare()
@@ -475,19 +462,6 @@ class ChatService:
                 if result.completion.usage is not None:
                     assistant.prompt_tokens = result.completion.usage.prompt_tokens
                     assistant.completion_tokens = result.completion.usage.completion_tokens
-            citations = [
-                MessageCitation(
-                    user_id=self._user_id,
-                    message_id=assistant.id,
-                    chunk_id=citation.chunk_id,
-                    rank=citation.citation_id,
-                    score=citation.score,
-                    quote_snapshot=citation.quote,
-                    source_snapshot=citation.source_snapshot(),
-                )
-                for citation in result.citations
-            ]
-            await self._repository.add_all(citations)
             evidence = await self._persist_finance_evidence(
                 run_id=persisted_run.id,
                 message_id=assistant.id,
@@ -502,23 +476,17 @@ class ChatService:
             persisted_run.latency_ms = result.latency_ms
             persisted_run.completed_at = completed_at
             persisted_run.detail = {
-                "intent": result.plan.intent if result.plan is not None else "knowledge",
+                "intent": result.plan.intent if result.plan is not None else "direct",
                 "planner_mode": _planner_mode(result),
                 "route_reason": result.plan.route_reason if result.plan is not None else None,
                 "planner_confidence": (result.plan.confidence if result.plan is not None else None),
-                "retrieval_source": (
-                    "hybrid" if result.retrieval.knowledge_base_ids else "not_requested"
-                ),
-                "retrieval_result_count": len(result.retrieval.items),
-                "citation_count": len(citations),
-                "embedding_model": result.retrieval.embedding_model,
                 "chat_model": result.completion.model if result.completion else None,
                 "chat_request_id": (result.completion.request_id if result.completion else None),
                 "finish_reason": (
                     result.completion.finish_reason if result.completion else "no_context"
                 ),
                 "checkpoint_id": result.checkpoint_id,
-                "checkpoint_namespace": "",
+                "checkpoint_namespace": AGENT_GRAPH_VERSION,
                 "data_as_of": (
                     result.data_as_of.isoformat() if result.data_as_of is not None else None
                 ),
@@ -529,6 +497,7 @@ class ChatService:
                 "capability_decision_steps": result.capability_decision_steps,
                 "capability_call_count": result.capability_call_count,
                 "risk_policy": (result.plan.risk_policy if result.plan is not None else "standard"),
+                **_analysis_plan_detail(result),
                 "risk_notice": _risk_notice(result),
                 "memory_result_count": len(memory_result.save_results),
                 "memory_confirmation_id": (
@@ -550,7 +519,6 @@ class ChatService:
             await self._session.commit()
             return PersistedAnswer(
                 message=assistant,
-                citations=citations,
                 run=persisted_run,
                 evidence=evidence,
                 data_as_of=result.data_as_of,
@@ -579,6 +547,7 @@ class ChatService:
         conversation_id: UUID,
         question: str,
         trace_id: str | None,
+        response_depth: ResponseDepthRequest = "auto",
     ) -> AsyncIterator[ChatAnswerStreamEvent]:
         """持久化流式运行，并仅在可信引用校验成功后提交最终回答。"""
 
@@ -586,6 +555,7 @@ class ChatService:
             conversation_id=conversation_id,
             question=question,
             trace_id=trace_id,
+            response_depth=response_depth,
         )
         yield ChatStreamStarted(
             message_id=streaming_run.message_id,
@@ -600,6 +570,7 @@ class ChatService:
         conversation_id: UUID,
         question: str,
         trace_id: str | None,
+        response_depth: ResponseDepthRequest = "auto",
     ) -> StreamingRun:
         """创建可由独立后台任务继续执行的持久化运行。"""
 
@@ -607,6 +578,7 @@ class ChatService:
             conversation_id=conversation_id,
             question=question,
             trace_id=trace_id,
+            response_depth=response_depth,
         )
 
     async def regenerate_streaming_run(
@@ -649,11 +621,15 @@ class ChatService:
         if user_message is None:
             raise BusinessRuleError("the source question for this answer is unavailable")
 
-        started_at = datetime.now(UTC)
-        await self._repository.delete_message_citations(
+        previous_runs = await self._repository.list_agent_runs_for_messages(
             user_id=self._user_id,
-            message_id=assistant.id,
+            message_ids=[assistant.id],
         )
+        response_depth = (
+            _requested_response_depth(previous_runs[0]) if previous_runs else "auto"
+        )
+
+        started_at = datetime.now(UTC)
         await self._repository.delete_message_evidence(
             user_id=self._user_id,
             message_id=assistant.id,
@@ -672,10 +648,11 @@ class ChatService:
                 thread_id=conversation.id,
                 trace_id=trace_id[:64] if trace_id else None,
                 status=AgentRunStatus.RUNNING.value,
-                graph_version=RAG_GRAPH_VERSION,
+                graph_version=AGENT_GRAPH_VERSION,
                 detail={
                     "response_mode": "sse",
                     "operation": "regenerate",
+                    "requested_response_depth": response_depth,
                 },
                 started_at=started_at,
             )
@@ -691,6 +668,7 @@ class ChatService:
             run_id=run.id,
             started_at=started_at,
             history_before=user_message.created_at,
+            response_depth=response_depth,
         )
 
     async def execute_streaming_run(
@@ -747,8 +725,9 @@ class ChatService:
                 question=streaming_run.question,
                 thread_id=streaming_run.thread_id,
                 history=history,
+                response_depth=streaming_run.response_depth,
             ):
-                if isinstance(event, RagAnswerStage):
+                if isinstance(event, AnswerStage):
                     if event.stage == last_stage:
                         continue
                     if event.stage == "generating":
@@ -758,14 +737,14 @@ class ChatService:
                     last_stage = event.stage
                     yield ChatStreamStatus(event.stage)
                     continue
-                if isinstance(event, RagAnswerDelta):
+                if isinstance(event, AnswerDelta):
                     if not generation_started:
                         generation_started = True
                         last_stage = "generating"
                         yield ChatStreamStatus("generating")
                     yield ChatStreamDelta(event.text)
                     continue
-                if not isinstance(event, RagAnswerCompleted):
+                if not isinstance(event, AnswerCompleted):
                     raise RuntimeError("unsupported RAG stream event")
                 if not finalizing_started:
                     yield ChatStreamStatus("finalizing")
@@ -812,6 +791,7 @@ class ChatService:
         conversation_id: UUID,
         question: str,
         trace_id: str | None,
+        response_depth: ResponseDepthRequest,
     ) -> StreamingRun:
         await self._prepare()
         conversation = await self._owned_conversation(conversation_id, for_update=True)
@@ -848,10 +828,11 @@ class ChatService:
                 thread_id=conversation.id,
                 trace_id=trace_id[:64] if trace_id else None,
                 status=AgentRunStatus.RUNNING.value,
-                graph_version=RAG_GRAPH_VERSION,
+                graph_version=AGENT_GRAPH_VERSION,
                 detail={
                     "response_mode": "sse",
                     "operation": "answer",
+                    "requested_response_depth": response_depth,
                 },
                 started_at=started_at,
             )
@@ -869,13 +850,14 @@ class ChatService:
             run_id=run.id,
             started_at=started_at,
             history_before=started_at,
+            response_depth=response_depth,
         )
 
     async def _persist_streamed_answer(
         self,
         *,
         streaming_run: StreamingRun,
-        result: RagAnswerResult,
+        result: AnswerResult,
         memory_result: MemoryCommandResult,
     ) -> PersistedAnswer:
         await self._prepare()
@@ -894,19 +876,6 @@ class ChatService:
             if result.completion.usage is not None:
                 assistant.prompt_tokens = result.completion.usage.prompt_tokens
                 assistant.completion_tokens = result.completion.usage.completion_tokens
-        citations = [
-            MessageCitation(
-                user_id=self._user_id,
-                message_id=assistant.id,
-                chunk_id=citation.chunk_id,
-                rank=citation.citation_id,
-                score=citation.score,
-                quote_snapshot=citation.quote,
-                source_snapshot=citation.source_snapshot(),
-            )
-            for citation in result.citations
-        ]
-        await self._repository.add_all(citations)
         evidence = await self._persist_finance_evidence(
             run_id=run.id,
             message_id=assistant.id,
@@ -922,23 +891,17 @@ class ChatService:
         run.completed_at = completed_at
         run.detail = {
             "response_mode": "sse",
-            "intent": result.plan.intent if result.plan is not None else "knowledge",
+            "intent": result.plan.intent if result.plan is not None else "direct",
             "planner_mode": _planner_mode(result),
             "route_reason": result.plan.route_reason if result.plan is not None else None,
             "planner_confidence": (result.plan.confidence if result.plan is not None else None),
-            "retrieval_source": (
-                "hybrid" if result.retrieval.knowledge_base_ids else "not_requested"
-            ),
-            "retrieval_result_count": len(result.retrieval.items),
-            "citation_count": len(citations),
-            "embedding_model": result.retrieval.embedding_model,
             "chat_model": result.completion.model if result.completion else None,
             "chat_request_id": (result.completion.request_id if result.completion else None),
             "finish_reason": (
                 result.completion.finish_reason if result.completion else "no_context"
             ),
             "checkpoint_id": result.checkpoint_id,
-            "checkpoint_namespace": "",
+            "checkpoint_namespace": AGENT_GRAPH_VERSION,
             "data_as_of": (
                 result.data_as_of.isoformat() if result.data_as_of is not None else None
             ),
@@ -949,6 +912,7 @@ class ChatService:
             "capability_decision_steps": result.capability_decision_steps,
             "capability_call_count": result.capability_call_count,
             "risk_policy": (result.plan.risk_policy if result.plan is not None else "standard"),
+            **_analysis_plan_detail(result),
             "risk_notice": _risk_notice(result),
             "memory_result_count": len(memory_result.save_results),
             "memory_confirmation_id": (
@@ -970,7 +934,6 @@ class ChatService:
         await self._session.commit()
         return PersistedAnswer(
             message=assistant,
-            citations=citations,
             run=run,
             evidence=evidence,
             data_as_of=result.data_as_of,
@@ -981,7 +944,7 @@ class ChatService:
         self,
         *,
         run_id: UUID,
-        result: RagAnswerResult,
+        result: AnswerResult,
         used_at: datetime,
     ) -> None:
         """只记录被最终上下文采用的记忆 ID 和脱敏排序信息。"""
@@ -1227,15 +1190,41 @@ def _detail_text(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _planner_mode(result: RagAnswerResult) -> str:
+def _requested_response_depth(run: AgentRun) -> ResponseDepthRequest:
+    value = run.detail.get("requested_response_depth")
+    return value if value in {"auto", "brief", "standard", "deep"} else "auto"
+
+
+def _planner_mode(result: AnswerResult) -> str:
     if result.plan is None:
         return "unavailable"
     if result.plan.route_reason == "memory_command_service":
         return "memory_command"
-    return "capability_agent_v2"
+    return "financial_domain_plan_v1"
 
 
-def _risk_notice(result: RagAnswerResult) -> str | None:
+def _analysis_plan_detail(result: AnswerResult) -> dict[str, object]:
+    """只持久化白名单计划和校验状态，不记录模型推理或回答正文。"""
+
+    if result.analysis_plan is None:
+        return {
+            "analysis_type": None,
+            "response_depth": None,
+            "fast_path": False,
+            "analysis_plan": None,
+            "answer_protocol_validated": False,
+        }
+    plan = result.analysis_plan
+    return {
+        "analysis_type": plan.analysis_type,
+        "response_depth": plan.response_depth,
+        "fast_path": plan.fast_path,
+        "analysis_plan": plan.model_dump(mode="json"),
+        "answer_protocol_validated": result.answer_draft is not None,
+    }
+
+
+def _risk_notice(result: AnswerResult) -> str | None:
     if result.plan is None or result.plan.risk_policy != "high_risk_investment":
         return None
     return HIGH_RISK_INVESTMENT_DISCLAIMER

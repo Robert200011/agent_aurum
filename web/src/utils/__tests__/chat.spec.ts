@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  citationLocation,
-  parseAnswerLines,
-  parseAnswerSegments,
-} from '@/utils/chat'
+import { parseAnswerLines, parseAnswerSegments } from '@/utils/chat'
 
 describe('chat answer rendering helpers', () => {
   it('parses safe block-level markdown without producing HTML', () => {
@@ -25,27 +21,13 @@ describe('chat answer rendering helpers', () => {
     ])
   })
 
-  it('recognizes citations, emphasis and inline code as typed segments', () => {
+  it('recognizes emphasis and inline code as typed segments', () => {
     expect(parseAnswerSegments('参见 [2] 的 **规则** 与 `limit`。')).toEqual([
-      { kind: 'text', text: '参见 ', citationId: null },
-      { kind: 'citation', text: '[2]', citationId: 2 },
-      { kind: 'text', text: ' 的 ', citationId: null },
-      { kind: 'strong', text: '规则', citationId: null },
-      { kind: 'text', text: ' 与 ', citationId: null },
-      { kind: 'code', text: 'limit', citationId: null },
-      { kind: 'text', text: '。', citationId: null },
+      { kind: 'text', text: '参见 [2] 的 ' },
+      { kind: 'strong', text: '规则' },
+      { kind: 'text', text: ' 与 ' },
+      { kind: 'code', text: 'limit' },
+      { kind: 'text', text: '。' },
     ])
-  })
-
-  it('builds a readable location from document coordinates', () => {
-    expect(
-      citationLocation({
-        page: 3,
-        section: '费用报销',
-        sheet_name: null,
-        row_start: 10,
-        row_end: 12,
-      }),
-    ).toBe('第 3 页 · 费用报销 · 第 10–12 行')
   })
 })

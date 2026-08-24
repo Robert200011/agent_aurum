@@ -32,9 +32,7 @@ from app.errors import ApplicationError, RateLimitError
 from app.observability.context import reset_context, set_context
 from app.observability.logging import configure_logging
 from app.observability.metrics import (
-    QUEUE_DEPTH,
     QUOTA_CONCURRENCY,
-    WORKER_READY,
     MetricsMiddleware,
     metrics_payload,
     update_database_pool_metrics,
@@ -46,10 +44,6 @@ from app.observability.tracing import (
 )
 from app.providers.identity import RedisSecurityStore
 from app.providers.quota_store import RedisQuotaStore
-from app.providers.retrieval_cache import RedisRetrievalCache
-from app.providers.s3_object_storage import S3ObjectStorageProvider
-from app.providers.worker_health import RedisWorkerHealthStore
-from app.rag.rerankers.dashscope import DashScopeRerankerProvider
 from app.services.chat_runs import ChatRunCoordinator
 
 logger = logging.getLogger(__name__)
@@ -117,21 +111,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         security_store = RedisSecurityStore.from_settings(app_settings)
-        worker_health_store = RedisWorkerHealthStore.from_settings(app_settings)
         app.state.security_store = security_store
-        app.state.worker_health_store = worker_health_store
         app.state.quota_store = RedisQuotaStore.from_settings(app_settings)
-        app.state.retrieval_cache = RedisRetrievalCache.from_settings(app_settings)
         app.state.metrics_redis = Redis.from_url(app_settings.redis_url)
-        app.state.object_storage = S3ObjectStorageProvider(app_settings)
         app.state.chat_model = DashScopeChatModelProvider(
             app_settings,
             quota_store=app.state.quota_store,
-        )
-        app.state.reranker = (
-            DashScopeRerankerProvider(app_settings)
-            if app_settings.rag_reranker_enabled
-            else None
         )
         instrument_runtime(app_settings, engine=get_engine())
         serializer = encrypted_checkpoint_serializer(
@@ -156,10 +141,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     settings=app_settings,
                     session_factory=get_session_factory(),
                     chat_provider=app.state.chat_model,
-                    reranker_provider=app.state.reranker,
                     checkpointer=app.state.checkpointer,
                     quota_store=app.state.quota_store,
-                    retrieval_cache=app.state.retrieval_cache,
                 )
                 try:
                     yield
@@ -167,12 +150,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     await app.state.chat_run_coordinator.close()
         finally:
             await app.state.chat_model.close()
-            if app.state.reranker is not None:
-                await app.state.reranker.close()
-            await worker_health_store.close()
             await security_store.close()
             await app.state.quota_store.close()
-            await app.state.retrieval_cache.close()
             await app.state.metrics_redis.aclose()
             await get_engine().dispose()
 
@@ -243,18 +222,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async def prometheus_metrics() -> Response:
             update_database_pool_metrics(get_engine())
             try:
-                WORKER_READY.set(await app.state.worker_health_store.is_ready())
-                QUEUE_DEPTH.set(
-                    await app.state.metrics_redis.llen(app_settings.ingestion_queue_name)
-                )
-                agent_concurrency, upload_concurrency = (
-                    await app.state.quota_store.current_global_concurrency()
-                )
+                agent_concurrency = await app.state.quota_store.current_global_concurrency()
                 QUOTA_CONCURRENCY.labels(resource="agent", scope="global").set(
                     agent_concurrency
-                )
-                QUOTA_CONCURRENCY.labels(resource="upload", scope="global").set(
-                    upload_concurrency
                 )
             except Exception:
                 logger.warning("runtime metric collection failed", exc_info=True)

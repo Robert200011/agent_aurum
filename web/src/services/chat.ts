@@ -9,6 +9,7 @@ import type {
   MemoryConfirmationEvent,
   MemoryConfirmationResolution,
   MemorySavedEvent,
+  ResponseDepthRequest,
   Conversation,
   ConversationDetail,
   ConversationList,
@@ -140,10 +141,14 @@ export const chatApi = {
     return response.data
   },
 
-  async ask(conversationId: string, question: string): Promise<StructuredAnswer> {
+  async ask(
+    conversationId: string,
+    question: string,
+    responseDepth: ResponseDepthRequest = 'auto',
+  ): Promise<StructuredAnswer> {
     const response = await http.post<StructuredAnswer>(
       `/conversations/${conversationId}/messages`,
-      { question },
+      { question, response_depth: responseDepth },
       { timeout: 90_000 },
     )
     return response.data
@@ -154,6 +159,7 @@ export const chatApi = {
     question: string,
     handlers: ChatStreamHandlers,
     signal?: AbortSignal,
+    responseDepth: ResponseDepthRequest = 'auto',
   ): Promise<StructuredAnswer> {
     const response = await authorizedFetch(
       `/conversations/${conversationId}/messages/stream`,
@@ -163,7 +169,7 @@ export const chatApi = {
           Accept: 'text/event-stream',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, response_depth: responseDepth }),
         signal,
       },
     )

@@ -21,10 +21,7 @@ from app.services.user_settings import UserSettingsService
 
 
 def test_finance_preferences_drive_agent_date_and_default_currency() -> None:
-    registry = CapabilityRegistry.read_only_default(
-        finance_enabled=True,
-        knowledge_enabled=False,
-    )
+    registry = CapabilityRegistry.read_only_default(finance_enabled=True)
     request = registry.finance_request(
         name="get_finance_summary",
         arguments={},

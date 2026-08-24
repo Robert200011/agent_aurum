@@ -32,8 +32,8 @@ from app.observability.metrics import (
     MEMORY_RETRIEVAL_REQUESTS,
     MEMORY_RETRIEVAL_RESULTS,
 )
+from app.providers.embedding import EmbeddingProviderFailure
 from app.providers.model_provider import EmbeddingProvider, QueryEmbeddingProvider
-from app.rag.embeddings.dashscope import EmbeddingProviderFailure
 
 
 class MemoryEmbeddingProvider(EmbeddingProvider, QueryEmbeddingProvider, Protocol):

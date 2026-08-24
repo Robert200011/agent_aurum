@@ -1,4 +1,4 @@
-"""Product conversations, citations, and agent execution metadata."""
+"""Product conversations and agent execution metadata."""
 
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import (
     CHAT_SCHEMA,
     IDENTITY_SCHEMA,
-    RAG_SCHEMA,
     Base,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
@@ -96,49 +95,6 @@ class Message(UUIDPrimaryKeyMixin, Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-
-
-class MessageCitation(UUIDPrimaryKeyMixin, Base):
-    __tablename__ = "message_citations"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["message_id", "user_id"],
-            [f"{CHAT_SCHEMA}.messages.id", f"{CHAT_SCHEMA}.messages.user_id"],
-            name="fk_message_citations_message_user",
-            ondelete="CASCADE",
-        ),
-        CheckConstraint("rank > 0", name="message_citation_rank_positive"),
-        CheckConstraint(
-            "score IS NULL OR score BETWEEN -1.0 AND 1.0",
-            name="message_citation_score_valid",
-        ),
-        CheckConstraint(
-            "jsonb_typeof(source_snapshot) = 'object' "
-            "AND source_snapshot ?& ARRAY["
-            "'document_id', 'document_version_id', 'knowledge_base_id', "
-            "'chunk_id', 'title', 'document_version', 'content_hash'"
-            "] "
-            "AND source_snapshot ->> 'chunk_id' = chunk_id::text "
-            "AND length(btrim(source_snapshot ->> 'title')) > 0",
-            name="message_citation_source_snapshot_valid",
-        ),
-        Index("ix_message_citations_message_rank", "message_id", "rank", unique=True),
-        {"schema": CHAT_SCHEMA},
-    )
-
-    user_id: Mapped[UUID] = mapped_column(
-        ForeignKey(f"{IDENTITY_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False
-    )
-    message_id: Mapped[UUID] = mapped_column(
-        ForeignKey(f"{CHAT_SCHEMA}.messages.id", ondelete="CASCADE"), nullable=False
-    )
-    chunk_id: Mapped[UUID] = mapped_column(
-        ForeignKey(f"{RAG_SCHEMA}.document_chunks.id", ondelete="RESTRICT"), nullable=False
-    )
-    rank: Mapped[int] = mapped_column(Integer, nullable=False)
-    score: Mapped[float | None] = mapped_column(Float)
-    quote_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
-    source_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
 
 class AgentRun(UUIDPrimaryKeyMixin, Base):

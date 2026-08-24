@@ -18,7 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.agents.policies.rag_prompt import SYSTEM_PROMPT
+from app.agents.graph import AGENT_GRAPH_VERSION
+from app.agents.policies.answer_prompt import SYSTEM_PROMPT
 from app.operations.backup import BackupValidationError, read_json, sha256_file, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,9 +73,6 @@ def create_manifest(
     datasets = {}
     for name in (
         "phase5-finance-agent.json",
-        "phase6-rag-regression.json",
-        "phase6-prompt-injection.json",
-        "phase6-fault-scenarios.json",
         "memory-release-gate.json",
     ):
         path = ROOT / "evals" / name
@@ -90,7 +88,7 @@ def create_manifest(
         "worktree_dirty": dirty,
         "images": {"api": api_image, "web": web_image},
         "migration_revision": migration_revision,
-        "graph_version": "finance-agent-p6.3-v1",
+        "graph_version": AGENT_GRAPH_VERSION,
         "prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
         "dataset_sha256": datasets,
         "configuration_sha256": sha256_file(ROOT / "deploy/compose.production.yaml"),
@@ -230,7 +228,6 @@ def collect_metrics(prometheus_url: str) -> dict[str, float]:
             prometheus_url,
             'sum(rate(aurum_model_requests_total{outcome="error"}[5m]))',
         ),
-        "queue_depth": _prometheus_value(prometheus_url, "max(aurum_ingestion_queue_depth)"),
         "database_pool_ratio": _prometheus_value(
             prometheus_url,
             'max(aurum_database_pool_connections{state="checked_out"}) '
@@ -255,7 +252,6 @@ def decide(observation: dict[str, Any], metrics: dict[str, Any]) -> dict[str, An
         "p95_ms": 1000.0,
         "api_5xx_rate": 0.01,
         "model_error_rate": 0.01,
-        "queue_depth": 20.0,
         "database_pool_ratio": 0.9,
         "memory_embedding_error_rate": 0.05,
         "memory_retrieval_p95_seconds": 1.0,
@@ -267,7 +263,6 @@ def decide(observation: dict[str, Any], metrics: dict[str, Any]) -> dict[str, An
         "api_5xx": float(metrics.get("api_5xx_rate", float("inf"))) < thresholds["api_5xx_rate"],
         "model_errors": float(metrics.get("model_error_rate", float("inf")))
         < thresholds["model_error_rate"],
-        "queue": float(metrics.get("queue_depth", float("inf"))) <= thresholds["queue_depth"],
         "database_pool": float(metrics.get("database_pool_ratio", float("inf")))
         < thresholds["database_pool_ratio"],
         "memory_embeddings": float(

@@ -7,31 +7,15 @@ import {
   type AnswerLine,
 } from '@/utils/chat'
 
-const props = withDefaults(
-  defineProps<{
-    answer: string
-    citationIds?: number[]
-  }>(),
-  { citationIds: () => [] },
-)
-
-const emit = defineEmits<{
-  citation: [citationId: number]
-}>()
+const props = defineProps<{ answer: string }>()
 
 const lines = computed(() => parseAnswerLines(props.answer))
-const availableCitations = computed(() => new Set(props.citationIds))
 
 function lineTag(line: AnswerLine): string {
   if (line.kind !== 'heading') return 'p'
   return line.level === 1 ? 'h2' : line.level === 2 ? 'h3' : 'h4'
 }
 
-function openCitation(citationId: number | null): void {
-  if (citationId !== null && availableCitations.value.has(citationId)) {
-    emit('citation', citationId)
-  }
-}
 </script>
 
 <template>
@@ -50,19 +34,6 @@ function openCitation(citationId: number | null): void {
         >
           <strong v-if="segment.kind === 'strong'">{{ segment.text }}</strong>
           <code v-else-if="segment.kind === 'code'">{{ segment.text }}</code>
-          <button
-            v-else-if="
-              segment.kind === 'citation' &&
-                segment.citationId !== null &&
-                availableCitations.has(segment.citationId)
-            "
-            type="button"
-            class="citation-link"
-            :aria-label="`查看引用 ${segment.citationId}`"
-            @click="openCitation(segment.citationId)"
-          >
-            {{ segment.text }}
-          </button>
           <span v-else>{{ segment.text }}</span>
         </template>
       </span>
@@ -132,21 +103,4 @@ code {
   font-size: 0.88em;
 }
 
-.citation-link {
-  margin: 0 2px;
-  padding: 1px 6px;
-  border: 1px solid rgb(15 118 110 / 24%);
-  border-radius: 999px;
-  color: var(--mint-700);
-  background: var(--mint-100);
-  font-size: 0.82em;
-  font-weight: 750;
-  cursor: pointer;
-}
-
-.citation-link:hover,
-.citation-link:focus-visible {
-  border-color: var(--mint-700);
-  outline: none;
-}
 </style>

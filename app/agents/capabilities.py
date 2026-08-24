@@ -41,7 +41,6 @@ from app.db.models.identity import MemoryCategory
 from app.finance.types import TransactionType
 from app.providers.model_provider import ChatToolDefinition
 
-KNOWLEDGE_SEARCH_CAPABILITY = "search_personal_knowledge"
 MEMORY_SEARCH_CAPABILITY = "search_personal_memories"
 DIRECT_RESPONSE_CAPABILITY = "respond_without_personal_data"
 
@@ -208,18 +207,6 @@ class MarketSnapshotCapabilityInput(_OptionalCurrencyInput):
         return value.strip().upper()
 
 
-class KnowledgeSearchCapabilityInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    query: str = Field(min_length=1, max_length=2_000)
-    limit: int = Field(default=6, ge=1, le=20)
-
-    @field_validator("query")
-    @classmethod
-    def normalize_query(cls, value: str) -> str:
-        return value.strip()
-
-
 class MemorySearchCapabilityInput(BaseModel):
     """只允许模型提供检索意图，不接受 user_id 或其他越权范围参数。"""
 
@@ -258,7 +245,7 @@ class CapabilitySpec:
     name: str
     description: str
     input_model: type[BaseModel]
-    domain: Literal["finance", "knowledge", "memory", "control"]
+    domain: Literal["finance", "memory", "control"]
     permission: Literal["user_read"] = "user_read"
     side_effect: Literal["none"] = "none"
 
@@ -285,12 +272,9 @@ class CapabilityRegistry:
         cls,
         *,
         finance_enabled: bool,
-        knowledge_enabled: bool,
         memory_enabled: bool = False,
     ) -> CapabilityRegistry:
         specs = list(_FINANCE_CAPABILITIES if finance_enabled else ())
-        if knowledge_enabled:
-            specs.append(_KNOWLEDGE_CAPABILITY)
         if memory_enabled:
             specs.append(_MEMORY_CAPABILITY)
         specs.append(_DIRECT_RESPONSE_CAPABILITY)
@@ -598,19 +582,12 @@ _FINANCE_CAPABILITIES = (
     ),
 )
 
-_KNOWLEDGE_CAPABILITY = CapabilitySpec(
-    KNOWLEDGE_SEARCH_CAPABILITY,
-    "在当前用户已经发布并启用的个人知识库和文档中检索与问题相关的内容。",
-    KnowledgeSearchCapabilityInput,
-    "knowledge",
-)
-
 _MEMORY_CAPABILITY = CapabilitySpec(
     MEMORY_SEARCH_CAPABILITY,
     (
         "读取当前用户主动保存的长期目标、未来计划、偏好、约束和个人背景；"
         "relevant 模式还会返回稳定财务档案。"
-        "询问相关个人背景时使用 relevant 和语义查询；询问已保存哪些记忆时使用 all，不要改查知识库。"
+        "询问相关个人背景时使用 relevant 和语义查询；询问已保存哪些记忆时使用 all。"
         "当前余额、流水、预算执行、持仓和行情仍必须调用财务能力。"
     ),
     MemorySearchCapabilityInput,
@@ -621,7 +598,7 @@ _DIRECT_RESPONSE_CAPABILITY = CapabilitySpec(
     DIRECT_RESPONSE_CAPABILITY,
     (
         "仅当问题是一般知识、需要澄清，或请求了当前只读 Agent 不支持的写操作，"
-        "并且完全不需要当前用户的账户、交易、预算、投资或个人文档事实时选择。"
+        "并且完全不需要当前用户的账户、交易、预算、投资或长期记忆时选择。"
         "只要问题涉及用户自己的当前或历史数据，就不得选择此能力，必须调用相应读取能力。"
     ),
     DirectResponseCapabilityInput,

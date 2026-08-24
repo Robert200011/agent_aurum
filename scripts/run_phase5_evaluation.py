@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.agents.capabilities import (
-    KNOWLEDGE_SEARCH_CAPABILITY,
+    MEMORY_SEARCH_CAPABILITY,
     CapabilityRegistry,
     SemanticRangeInput,
     resolve_time_range,
@@ -29,20 +29,20 @@ def evaluate(dataset: dict[str, Any]) -> dict[str, Any]:
     total = 0
     registry = CapabilityRegistry.read_only_default(
         finance_enabled=True,
-        knowledge_enabled=True,
+        memory_enabled=True,
     )
     definitions = {item.name for item in registry.definitions()}
 
     for case in dataset["route_cases"]:
         total += 1
         expected_tools = set(case["tools"])
-        knowledge_available = (
-            not case["needs_knowledge"] or KNOWLEDGE_SEARCH_CAPABILITY in definitions
+        memory_available = (
+            not case.get("needs_memory", False) or MEMORY_SEARCH_CAPABILITY in definitions
         )
         risk_policy_matches = (
             investment_risk_policy(case["question"]) == case["risk_policy"]
         )
-        if expected_tools.issubset(definitions) and knowledge_available and risk_policy_matches:
+        if expected_tools.issubset(definitions) and memory_available and risk_policy_matches:
             passed += 1
         else:
             failures.append(

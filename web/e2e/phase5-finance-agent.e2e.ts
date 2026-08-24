@@ -104,7 +104,7 @@ test('真实财务 Agent 与混合回答浏览器冒烟', async ({ page }) => {
   await expect(page.getByText('search_transactions').last()).toBeVisible()
 
   await composer.fill(
-    '结合知识库，复述我本月收入、支出和净现金流，并说明旅行支出应使用哪个账户。只复述工具数字并引用原文，不要做新计算。',
+    '结合我之前保存的旅行偏好，复述本月收入、支出和净现金流，并说明旅行支出应使用哪个账户。只复述工具数字，不要做新计算。',
   )
   await page.getByRole('button', { name: '发送问题' }).click()
   await expect(page.locator('.finance-evidence')).toHaveCount(4, { timeout: 180_000 })

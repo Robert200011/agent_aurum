@@ -13,9 +13,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.chat.constants import DASHSCOPE_CHAT_MODEL, DASHSCOPE_OPENAI_BASE_URL
-from app.rag.constants import (
-    DASHSCOPE_QWEN3_RERANK,
-    DASHSCOPE_RERANK_BASE_URL,
+from app.providers.embedding import (
     DASHSCOPE_TEXT_EMBEDDING_V4,
     DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS,
 )
@@ -70,26 +68,6 @@ class Settings(BaseSettings):
     quota_global_agent_concurrency: int = Field(default=20, ge=1, le=10_000)
     quota_model_tokens_reserved_per_request: int = Field(default=8_192, ge=1, le=1_000_000)
     quota_agent_lease_seconds: int = Field(default=900, ge=30, le=7_200)
-    quota_upload_user_requests_per_minute: int = Field(default=10, ge=1, le=10_000)
-    quota_upload_user_daily_bytes: int = Field(
-        default=500 * 1024 * 1024, ge=1, le=100 * 1024 * 1024 * 1024
-    )
-    quota_upload_user_concurrency: int = Field(default=3, ge=1, le=1_000)
-    quota_upload_global_concurrency: int = Field(default=20, ge=1, le=10_000)
-    quota_upload_lease_seconds: int = Field(default=1_200, ge=60, le=10_800)
-    retrieval_cache_ttl_seconds: int = Field(default=120, ge=10, le=3_600)
-    retrieval_cache_ttl_jitter_seconds: int = Field(default=30, ge=0, le=600)
-    retrieval_cache_singleflight_seconds: int = Field(default=10, ge=1, le=60)
-    rag_retrieval_limit: int = Field(default=6, ge=1, le=20)
-    rag_hybrid_candidate_multiplier: int = Field(default=4, ge=1, le=10)
-    rag_rrf_k: int = Field(default=60, ge=1, le=1_000)
-    rag_reranker_enabled: bool = True
-    reranker_model: str = Field(default=DASHSCOPE_QWEN3_RERANK, min_length=1, max_length=128)
-    reranker_base_url: str = DASHSCOPE_RERANK_BASE_URL
-    reranker_timeout_seconds: int = Field(default=30, ge=1, le=300)
-    reranker_max_retries: int = Field(default=1, ge=0, le=5)
-    rag_context_max_characters: int = Field(default=24_000, ge=2_000, le=200_000)
-    rag_context_source_max_characters: int = Field(default=6_000, ge=500, le=50_000)
     embedding_model: str = DASHSCOPE_TEXT_EMBEDDING_V4
     embedding_dimensions: int = Field(default=DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS, ge=1, le=2048)
     embedding_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
@@ -110,60 +88,6 @@ class Settings(BaseSettings):
     finance_market_stale_after_hours: int = Field(default=72, ge=1, le=720)
     finance_exchange_rate_stale_after_hours: int = Field(default=24, ge=1, le=720)
     finance_timezone: str = Field(default="Asia/Shanghai", min_length=1, max_length=64)
-
-    object_storage_endpoint: str = "http://127.0.0.1:9000"
-    object_storage_bucket: str = "aurum-knowledge"
-    object_storage_region: str = "us-east-1"
-    object_storage_access_key: SecretStr | None = None
-    object_storage_secret_key: SecretStr | None = None
-    object_storage_secure: bool = False
-    object_storage_external_endpoint: str | None = None
-    object_storage_readiness_timeout_seconds: int = Field(default=5, ge=1, le=30)
-    object_storage_download_url_ttl_seconds: int = Field(default=300, ge=60, le=3600)
-
-    ingestion_queue_name: str = Field(
-        default="aurum-ingestion",
-        min_length=1,
-        max_length=128,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
-    )
-    ingestion_task_timeout_seconds: int = Field(default=900, ge=30, le=7200)
-    ingestion_lease_seconds: int = Field(default=960, ge=60, le=10800)
-    ingestion_max_retries: int = Field(default=3, ge=0, le=10)
-    ingestion_manual_retry_limit: int = Field(default=5, ge=0, le=100)
-    worker_heartbeat_interval_seconds: int = Field(default=15, ge=5, le=300)
-    worker_heartbeat_ttl_seconds: int = Field(default=45, ge=10, le=900)
-
-    document_max_size_bytes: int = Field(default=50 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
-    document_max_pdf_pages: int = Field(default=500, ge=1, le=10000)
-    document_max_tabular_rows: int = Field(default=100000, ge=1, le=1000000)
-    document_max_tabular_columns: int = Field(default=256, ge=1, le=16_384)
-    document_max_workbook_sheets: int = Field(default=128, ge=1, le=10_000)
-    document_max_cell_characters: int = Field(default=32_767, ge=1, le=1_000_000)
-    document_max_extracted_characters: int = Field(
-        default=10_000_000,
-        ge=1,
-        le=100_000_000,
-    )
-    document_max_archive_uncompressed_bytes: int = Field(
-        default=200 * 1024 * 1024, ge=1, le=4 * 1024 * 1024 * 1024
-    )
-    document_max_archive_compression_ratio: int = Field(default=100, ge=1, le=1000)
-    document_max_archive_members: int = Field(default=512, ge=1, le=10_000)
-    document_max_archive_member_bytes: int = Field(
-        default=50 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024
-    )
-    document_metadata_max_entries: int = Field(default=16, ge=0, le=64)
-    document_metadata_key_max_length: int = Field(default=64, ge=1, le=256)
-    document_metadata_value_max_length: int = Field(default=512, ge=1, le=4096)
-    outbox_dispatch_batch_size: int = Field(default=50, ge=1, le=500)
-    outbox_dispatch_interval_seconds: int = Field(default=10, ge=1, le=300)
-    outbox_lease_seconds: int = Field(default=300, ge=30, le=3600)
-    outbox_backoff_base_seconds: int = Field(default=5, ge=1, le=3600)
-    outbox_backoff_max_seconds: int = Field(default=300, ge=1, le=86400)
-    chunk_max_tokens: int = Field(default=800, ge=64, le=4096)
-    chunk_overlap_tokens: int = Field(default=100, ge=0, le=1024)
-    document_max_chunks: int = Field(default=10_000, ge=1, le=100_000)
 
     jwt_secret_key: SecretStr = Field(min_length=32)
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
@@ -223,7 +147,7 @@ class Settings(BaseSettings):
             "sha256",
         )
 
-    @field_validator("chat_model", "reranker_model", mode="before")
+    @field_validator("chat_model", mode="before")
     @classmethod
     def normalize_chat_model(cls, value: object) -> object:
         """模型名称去除配置文件中意外带入的首尾空白。"""
@@ -249,9 +173,6 @@ class Settings(BaseSettings):
 
     @field_validator(
         "chat_model_base_url",
-        "reranker_base_url",
-        "object_storage_endpoint",
-        "object_storage_external_endpoint",
         "otel_exporter_otlp_traces_endpoint",
     )
     @classmethod
@@ -270,7 +191,7 @@ class Settings(BaseSettings):
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("object-storage endpoint must be an absolute HTTP(S) URL")
+            raise ValueError("telemetry endpoint must be an absolute HTTP(S) URL")
         return normalized
 
     @model_validator(mode="after")
@@ -290,28 +211,11 @@ class Settings(BaseSettings):
             raise ValueError("global model token quota must be at least the per-user quota")
         if self.quota_global_agent_concurrency < self.quota_user_agent_concurrency:
             raise ValueError("global agent concurrency must be at least the per-user limit")
-        if self.quota_upload_global_concurrency < self.quota_upload_user_concurrency:
-            raise ValueError("global upload concurrency must be at least the per-user limit")
         if self.embedding_dimensions != DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS:
             raise ValueError(
                 "AURUM_EMBEDDING_DIMENSIONS must match the fixed "
                 f"{DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS}-dimension index"
             )
-        if self.rag_context_source_max_characters > self.rag_context_max_characters:
-            raise ValueError("RAG source context limit must not exceed total context limit")
-        if self.chunk_overlap_tokens >= self.chunk_max_tokens:
-            raise ValueError("chunk overlap must be smaller than the chunk token limit")
-        if self.ingestion_lease_seconds < self.ingestion_task_timeout_seconds:
-            raise ValueError("ingestion lease must be at least the task timeout")
-        if self.worker_heartbeat_ttl_seconds < self.worker_heartbeat_interval_seconds * 2:
-            raise ValueError("worker heartbeat TTL must cover at least two heartbeat intervals")
-        if self.outbox_backoff_max_seconds < self.outbox_backoff_base_seconds:
-            raise ValueError("outbox maximum backoff must be at least the base backoff")
-        if self.object_storage_secure != self.object_storage_endpoint.startswith("https://"):
-            raise ValueError(
-                "AURUM_OBJECT_STORAGE_SECURE must match AURUM_OBJECT_STORAGE_ENDPOINT scheme"
-            )
-
         if self.otel_tracing_enabled:
             trace_endpoint = urlsplit(self.otel_exporter_otlp_traces_endpoint)
             if trace_endpoint.path.rstrip("/") != "/v1/traces":
@@ -330,24 +234,12 @@ class Settings(BaseSettings):
             errors.append("AURUM_DEBUG")
         if not self.refresh_token_cookie_secure:
             errors.append("AURUM_REFRESH_TOKEN_COOKIE_SECURE")
-        if not self.object_storage_secure:
-            errors.append("AURUM_OBJECT_STORAGE_SECURE")
         if not self.chat_model_base_url.startswith("https://"):
             errors.append("AURUM_CHAT_MODEL_BASE_URL")
-        if self.rag_reranker_enabled and not self.reranker_base_url.startswith("https://"):
-            errors.append("AURUM_RERANKER_BASE_URL")
         if self.dashscope_api_key is None:
             errors.append("AURUM_DASHSCOPE_API_KEY")
         if self.langgraph_aes_key is None:
             errors.append("AURUM_LANGGRAPH_AES_KEY")
-        if self.object_storage_access_key is None:
-            errors.append("AURUM_OBJECT_STORAGE_ACCESS_KEY")
-        if self.object_storage_secret_key is None:
-            errors.append("AURUM_OBJECT_STORAGE_SECRET_KEY")
-        if self.object_storage_external_endpoint is None:
-            errors.append("AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT")
-        elif not self.object_storage_external_endpoint.startswith("https://"):
-            errors.append("AURUM_OBJECT_STORAGE_EXTERNAL_ENDPOINT")
         if errors:
             joined = ", ".join(errors)
             raise ValueError(f"insecure production configuration: {joined}")

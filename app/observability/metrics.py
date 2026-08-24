@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from functools import wraps
 from time import perf_counter
-from typing import ParamSpec, TypeVar
 
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram, generate_latest
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-
-P = ParamSpec("P")
-R = TypeVar("R")
 
 API_REQUESTS = Counter(
     "aurum_api_requests_total",
@@ -53,22 +47,6 @@ MODEL_TOKENS = Counter(
     "Model token usage reported by the provider.",
     ("provider", "model", "kind"),
 )
-RETRIEVAL_REQUESTS = Counter(
-    "aurum_retrieval_requests_total",
-    "Knowledge retrieval calls.",
-    ("mode", "outcome"),
-)
-RETRIEVAL_DURATION = Histogram(
-    "aurum_retrieval_duration_seconds",
-    "Knowledge retrieval duration.",
-    ("mode",),
-)
-RETRIEVAL_RESULTS = Histogram(
-    "aurum_retrieval_results",
-    "Number of chunks returned by retrieval.",
-    ("mode",),
-    buckets=(0, 1, 2, 4, 6, 10, 20),
-)
 TOOL_REQUESTS = Counter(
     "aurum_tool_requests_total",
     "Finance tool executions.",
@@ -78,24 +56,6 @@ TOOL_DURATION = Histogram(
     "aurum_tool_duration_seconds",
     "Finance tool execution duration.",
     ("tool",),
-)
-WORKER_TASKS = Counter(
-    "aurum_worker_tasks_total",
-    "Celery task executions.",
-    ("task", "outcome"),
-)
-WORKER_DURATION = Histogram(
-    "aurum_worker_task_duration_seconds",
-    "Celery task execution duration.",
-    ("task",),
-)
-WORKER_READY = Gauge(
-    "aurum_worker_ready",
-    "Whether the ingestion worker heartbeat is currently healthy.",
-)
-QUEUE_DEPTH = Gauge(
-    "aurum_ingestion_queue_depth",
-    "Pending messages in the ingestion queue.",
 )
 DB_POOL_CONNECTIONS = Gauge(
     "aurum_database_pool_connections",
@@ -263,33 +223,3 @@ class MetricsMiddleware:
             API_DURATION.labels(method=method, route=route).observe(elapsed)
             if is_sse:
                 SSE_CONNECTIONS.labels(route=route).dec()
-
-
-def observe_retrieval(
-    mode: str,
-) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-    """记录检索成功/失败、耗时和返回条目数，不记录查询正文。"""
-
-    def decorate(function: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
-        @wraps(function)
-        async def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
-            started = perf_counter()
-            from app.observability.tracing import start_span
-
-            with start_span("rag.retrieve", mode=mode):
-                try:
-                    result = await function(*args, **kwargs)
-                except Exception:
-                    RETRIEVAL_REQUESTS.labels(mode=mode, outcome="error").inc()
-                    raise
-                else:
-                    RETRIEVAL_REQUESTS.labels(mode=mode, outcome="success").inc()
-                    items = getattr(result, "items", ())
-                    RETRIEVAL_RESULTS.labels(mode=mode).observe(len(items))
-                    return result
-                finally:
-                    RETRIEVAL_DURATION.labels(mode=mode).observe(perf_counter() - started)
-
-        return wrapped
-
-    return decorate

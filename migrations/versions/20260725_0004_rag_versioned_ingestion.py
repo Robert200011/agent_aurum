@@ -14,11 +14,11 @@ from alembic import op
 from pgvector.sqlalchemy import Vector
 
 from app.db.base import RAG_SCHEMA
-from app.db.models.rag import (
-    DASHSCOPE_EMBEDDING_PROVIDER,
-    DASHSCOPE_TEXT_EMBEDDING_V4,
-    DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS,
-)
+
+# Keep historical migrations self-contained after the runtime RAG models were retired.
+DASHSCOPE_EMBEDDING_PROVIDER = "dashscope"
+DASHSCOPE_TEXT_EMBEDDING_V4 = "text-embedding-v4"
+DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS = 1024
 
 revision: str = "20260725_0004"
 down_revision: str | None = "20260724_0003"
