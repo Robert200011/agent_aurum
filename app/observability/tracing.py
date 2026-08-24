@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.celery import CeleryInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
@@ -19,7 +18,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 if TYPE_CHECKING:
-    from celery import Celery  # type: ignore[import-untyped]
     from fastapi import FastAPI
     from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -83,9 +81,8 @@ def instrument_runtime(
     settings: Settings,
     *,
     engine: AsyncEngine | None = None,
-    celery_app: Celery | None = None,
 ) -> None:
-    """接入数据库、Redis 和 Celery；任何观测初始化失败均只降级观测能力。"""
+    """接入数据库和 Redis；任何观测初始化失败均只降级观测能力。"""
 
     provider = configure_tracing(settings)
     if provider is None:
@@ -103,16 +100,6 @@ def instrument_runtime(
                     tracer_provider=provider,
                 )
                 if engine is not None
-                else None
-            ),
-        ),
-        (
-            "celery",
-            lambda: (
-                CeleryInstrumentor().instrument(  # type: ignore[no-untyped-call]
-                    tracer_provider=provider,
-                )
-                if celery_app is not None
                 else None
             ),
         ),

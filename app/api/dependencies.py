@@ -18,20 +18,17 @@ from app.db.repositories.identity import (
     RefreshTokenRepository,
     UserRepository,
 )
-from app.db.session import get_db_session, set_tenant_context
+from app.db.session import get_db_session
 from app.errors import AuthenticationError
 from app.memory.decision import MemoryDecisionProvider
 from app.memory.rollout import memory_rollout_enabled
 from app.observability.context import set_context, user_identifier_hash
+from app.providers.embedding import DashScopeEmbeddingProvider
 from app.providers.identity import SecurityStore
-from app.providers.model_provider import ChatModelProvider, RerankerProvider
-from app.providers.object_storage import ObjectStorageProvider
+from app.providers.model_provider import ChatModelProvider
 from app.providers.quota_store import RedisQuotaStore
-from app.providers.retrieval_cache import RedisRetrievalCache
-from app.providers.worker_health import WorkerHealthStore
-from app.rag.embeddings.dashscope import DashScopeEmbeddingProvider
 from app.security.auth import AccessTokenClaims, decode_access_token
-from app.services.answering import RagAnswerService
+from app.services.answering import AnswerService
 from app.services.auth import AuthService
 from app.services.chat import ChatService
 from app.services.chat_runs import ChatRunCoordinator
@@ -39,8 +36,6 @@ from app.services.finance import FinanceService
 from app.services.memory import MemoryService
 from app.services.memory_commands import MemoryCommandService
 from app.services.memory_retrieval import MemoryRetrievalService
-from app.services.rag import PersonalKnowledgeService
-from app.services.retrieval import RagRetrievalService
 from app.services.user_settings import UserSettingsService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -59,20 +54,8 @@ def get_security_store(request: Request) -> SecurityStore:
     return cast(SecurityStore, request.app.state.security_store)
 
 
-def get_object_storage(request: Request) -> ObjectStorageProvider:
-    return cast(ObjectStorageProvider, request.app.state.object_storage)
-
-
-def get_worker_health_store(request: Request) -> WorkerHealthStore:
-    return cast(WorkerHealthStore, request.app.state.worker_health_store)
-
-
 def get_chat_model_provider(request: Request) -> ChatModelProvider:
     return cast(ChatModelProvider, request.app.state.chat_model)
-
-
-def get_reranker_provider(request: Request) -> RerankerProvider | None:
-    return cast(RerankerProvider | None, request.app.state.reranker)
 
 
 def get_checkpoint_saver(request: Request) -> BaseCheckpointSaver[str]:
@@ -87,20 +70,10 @@ def get_quota_store(request: Request) -> RedisQuotaStore:
     return cast(RedisQuotaStore, request.app.state.quota_store)
 
 
-def get_retrieval_cache(request: Request) -> RedisRetrievalCache:
-    return cast(RedisRetrievalCache, request.app.state.retrieval_cache)
-
-
 SecurityStoreDependency = Annotated[SecurityStore, Depends(get_security_store)]
-ObjectStorageDependency = Annotated[ObjectStorageProvider, Depends(get_object_storage)]
-WorkerHealthStoreDependency = Annotated[WorkerHealthStore, Depends(get_worker_health_store)]
 ChatModelProviderDependency = Annotated[
     ChatModelProvider,
     Depends(get_chat_model_provider),
-]
-RerankerProviderDependency = Annotated[
-    RerankerProvider | None,
-    Depends(get_reranker_provider),
 ]
 CheckpointSaverDependency = Annotated[
     BaseCheckpointSaver[str],
@@ -111,7 +84,6 @@ ChatRunCoordinatorDependency = Annotated[
     Depends(get_chat_run_coordinator),
 ]
 QuotaStoreDependency = Annotated[RedisQuotaStore, Depends(get_quota_store)]
-RetrievalCacheDependency = Annotated[RedisRetrievalCache, Depends(get_retrieval_cache)]
 
 
 def get_auth_service(
@@ -199,72 +171,6 @@ def get_memory_service(
 MemoryServiceDependency = Annotated[MemoryService, Depends(get_memory_service)]
 
 
-async def get_personal_knowledge_service(
-    session: SessionDependency,
-    context: AccessContextDependency,
-    settings: SettingsDependency,
-) -> PersonalKnowledgeService:
-    await set_tenant_context(session, context.user.id)
-    return PersonalKnowledgeService(
-        session=session,
-        actor_user_id=context.user.id,
-        ingestion_max_retries=settings.ingestion_max_retries,
-        ingestion_manual_retry_limit=settings.ingestion_manual_retry_limit,
-    )
-
-
-PersonalKnowledgeServiceDependency = Annotated[
-    PersonalKnowledgeService,
-    Depends(get_personal_knowledge_service),
-]
-
-
-def get_rag_retrieval_service(
-    session: SessionDependency,
-    context: AccessContextDependency,
-    settings: SettingsDependency,
-) -> RagRetrievalService:
-    return RagRetrievalService(
-        session=session,
-        actor_user_id=context.user.id,
-        embedding_provider=DashScopeEmbeddingProvider(settings),
-        hybrid_candidate_multiplier=settings.rag_hybrid_candidate_multiplier,
-        rrf_k=settings.rag_rrf_k,
-    )
-
-
-RagRetrievalServiceDependency = Annotated[
-    RagRetrievalService,
-    Depends(get_rag_retrieval_service),
-]
-
-
-def get_personal_retrieval_service(
-    session: SessionDependency,
-    context: AccessContextDependency,
-    settings: SettingsDependency,
-    reranker_provider: RerankerProviderDependency,
-    retrieval_cache: RetrievalCacheDependency,
-) -> RagRetrievalService:
-    """Build a retriever whose maximum scope is the authenticated user."""
-
-    return RagRetrievalService(
-        session=session,
-        actor_user_id=context.user.id,
-        embedding_provider=DashScopeEmbeddingProvider(settings),
-        reranker_provider=reranker_provider,
-        hybrid_candidate_multiplier=settings.rag_hybrid_candidate_multiplier,
-        rrf_k=settings.rag_rrf_k,
-        cache=retrieval_cache,
-    )
-
-
-PersonalRetrievalServiceDependency = Annotated[
-    RagRetrievalService,
-    Depends(get_personal_retrieval_service),
-]
-
-
 def get_memory_retrieval_service(
     session: SessionDependency,
     context: AccessContextDependency,
@@ -295,25 +201,22 @@ MemoryRetrievalServiceDependency = Annotated[
 ]
 
 
-async def get_rag_answer_service(
-    retrieval_service: PersonalRetrievalServiceDependency,
+async def get_answer_service(
+    context: AccessContextDependency,
     memory_service: MemoryRetrievalServiceDependency,
     chat_provider: ChatModelProviderDependency,
     finance_service: FinanceServiceDependency,
     user_settings_service: UserSettingsServiceDependency,
     checkpointer: CheckpointSaverDependency,
     settings: SettingsDependency,
-) -> RagAnswerService:
+) -> AnswerService:
     """Build the authenticated user's routed answer workflow."""
 
     preferences = await user_settings_service.get_preferences()
-    return RagAnswerService(
-        retrieval_service=retrieval_service,
+    return AnswerService(
+        owner_user_id=context.user.id,
         chat_provider=chat_provider,
         checkpointer=checkpointer,
-        retrieval_limit=settings.rag_retrieval_limit,
-        context_max_characters=settings.rag_context_max_characters,
-        context_source_max_characters=settings.rag_context_source_max_characters,
         memory_service=memory_service if memory_service.enabled else None,
         capability_agent_max_steps=settings.capability_agent_max_steps,
         capability_agent_max_tool_calls=settings.capability_agent_max_tool_calls,
@@ -327,16 +230,16 @@ async def get_rag_answer_service(
     )
 
 
-RagAnswerServiceDependency = Annotated[
-    RagAnswerService,
-    Depends(get_rag_answer_service),
+AnswerServiceDependency = Annotated[
+    AnswerService,
+    Depends(get_answer_service),
 ]
 
 
 def get_chat_service(
     session: SessionDependency,
     context: AccessContextDependency,
-    answer_service: RagAnswerServiceDependency,
+    answer_service: AnswerServiceDependency,
     chat_provider: ChatModelProviderDependency,
     settings: SettingsDependency,
 ) -> ChatService:

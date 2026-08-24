@@ -2,7 +2,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$Backup,
     [Parameter(Mandatory = $true)][string]$DestinationDatabase,
-    [Parameter(Mandatory = $true)][string]$DestinationBucket,
     [Parameter(Mandatory = $true)][string]$Report,
     [switch]$ConfirmNewTargets,
     [string]$EnvFile = ".env"
@@ -18,7 +17,7 @@ Push-Location $repositoryRoot
 try {
     & $python -m scripts.phase6_backup --env-file $EnvFile restore `
         --backup $Backup --destination-database $DestinationDatabase `
-        --destination-bucket $DestinationBucket --report $Report --confirm-new-targets
+        --report $Report --confirm-new-targets
     if ($LASTEXITCODE -ne 0) { throw "Restore failed with exit code $LASTEXITCODE" }
 }
 finally {

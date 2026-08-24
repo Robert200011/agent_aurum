@@ -4,19 +4,16 @@ import { describe, expect, it } from 'vitest'
 import AnswerContent from '@/components/chat/AnswerContent.vue'
 
 describe('AnswerContent', () => {
-  it('emits only available citation markers', async () => {
+  it('renders structured plain-text formatting', () => {
     const wrapper = mount(AnswerContent, {
       props: {
-        answer: '结论见 [1]，无效标记 [9]。',
-        citationIds: [1],
+        answer: '## 结论\n- 保留 **应急金** 与 `CNY`。',
       },
     })
 
-    const buttons = wrapper.findAll('button')
-    expect(buttons).toHaveLength(1)
-    await buttons[0]?.trigger('click')
-    expect(wrapper.emitted('citation')).toEqual([[1]])
-    expect(wrapper.text()).toContain('[9]')
+    expect(wrapper.get('h3').text()).toBe('结论')
+    expect(wrapper.get('strong').text()).toBe('应急金')
+    expect(wrapper.get('code').text()).toBe('CNY')
   })
 
   it('renders model output as escaped text', () => {

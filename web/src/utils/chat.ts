@@ -1,5 +1,5 @@
 export type AnswerLineKind = 'heading' | 'unordered' | 'ordered' | 'paragraph'
-export type AnswerSegmentKind = 'text' | 'strong' | 'code' | 'citation'
+export type AnswerSegmentKind = 'text' | 'strong' | 'code'
 
 export interface AnswerLine {
   kind: AnswerLineKind
@@ -11,10 +11,9 @@ export interface AnswerLine {
 export interface AnswerSegment {
   kind: AnswerSegmentKind
   text: string
-  citationId: number | null
 }
 
-const inlinePattern = /(\[(\d+)\]|`([^`\n]+)`|\*\*([^*\n]+)\*\*)/g
+const inlinePattern = /(`([^`\n]+)`|\*\*([^*\n]+)\*\*)/g
 
 export function parseAnswerLines(answer: string): AnswerLine[] {
   return answer
@@ -63,23 +62,15 @@ export function parseAnswerSegments(text: string): AnswerSegment[] {
       segments.push({
         kind: 'text',
         text: text.slice(cursor, index),
-        citationId: null,
       })
     }
 
     if (match[2]) {
-      segments.push({
-        kind: 'citation',
-        text: match[0],
-        citationId: Number(match[2]),
-      })
-    } else if (match[3]) {
-      segments.push({ kind: 'code', text: match[3], citationId: null })
+      segments.push({ kind: 'code', text: match[2] })
     } else {
       segments.push({
         kind: 'strong',
-        text: match[4] ?? match[0],
-        citationId: null,
+        text: match[3] ?? match[0],
       })
     }
     cursor = index + match[0].length
@@ -89,29 +80,7 @@ export function parseAnswerSegments(text: string): AnswerSegment[] {
     segments.push({
       kind: 'text',
       text: text.slice(cursor),
-      citationId: null,
     })
   }
   return segments
-}
-
-export function citationLocation(citation: {
-  page: number | null
-  section: string | null
-  sheet_name: string | null
-  row_start: number | null
-  row_end: number | null
-}): string {
-  const parts: string[] = []
-  if (citation.page !== null) parts.push(`第 ${citation.page} 页`)
-  if (citation.section) parts.push(citation.section)
-  if (citation.sheet_name) parts.push(`工作表 ${citation.sheet_name}`)
-  if (citation.row_start !== null) {
-    const rows =
-      citation.row_end !== null && citation.row_end !== citation.row_start
-        ? `${citation.row_start}–${citation.row_end}`
-        : String(citation.row_start)
-    parts.push(`第 ${rows} 行`)
-  }
-  return parts.join(' · ') || '原文片段'
 }

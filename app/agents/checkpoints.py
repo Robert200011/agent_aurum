@@ -10,18 +10,20 @@ from app.db.base import AGENT_SCHEMA
 
 CHECKPOINT_MSGPACK_ALLOWLIST = [
     ("app.agents.contracts", "AgentQuestionPlan"),
+    ("app.agents.contracts", "AnalysisPeriod"),
+    ("app.agents.contracts", "AnalysisPeriodScope"),
+    ("app.agents.contracts", "FinancialAnalysisPlan"),
+    ("app.agents.contracts", "FinancialAnswerDraft"),
+    ("app.agents.contracts", "FinancialDataRequirement"),
+    ("app.agents.contracts", "FinancialMetricName"),
+    ("app.agents.contracts", "FinancialOutputSection"),
     # 仅用于恢复 V2 上线前已持久化的会话状态；旧模块不再包含规划逻辑。
     ("app.agents.policies.finance_planner", "AgentQuestionPlan"),
-    ("app.agents.state", "ControlledContextSource"),
-    ("app.agents.state", "ControlledRagContext"),
     ("app.agents.tools.finance", "FinanceToolName"),
     ("app.agents.tools.finance", "FinanceToolResult"),
     ("app.agents.tools.finance", "FinanceToolStatus"),
     ("app.providers.model_provider", "ChatCompletionResult"),
     ("app.providers.model_provider", "ChatTokenUsage"),
-    ("app.rag.citations.structured", "TrustedCitation"),
-    ("app.services.retrieval", "KnowledgeRetrievalResult"),
-    ("app.services.retrieval", "RetrievedChunk"),
     ("asyncpg.pgproto.pgproto", "UUID"),
 ]
 

@@ -3,7 +3,6 @@ import {
   ArrowLeftOutlined,
   DeleteOutlined,
   EditOutlined,
-  FileSearchOutlined,
   IdcardOutlined,
   InboxOutlined,
   MessageOutlined,
@@ -30,12 +29,10 @@ import type {
   ChatMessage,
   Conversation,
   ConversationDetail,
-  MessageCitation,
   MessageEvidence,
   MemoryConfirmationEvent,
   MemorySavedEvent,
 } from '@/types/chat'
-import { citationLocation } from '@/utils/chat'
 
 dayjs.extend(relativeTime)
 
@@ -54,7 +51,6 @@ const embeddedPage = ref<'chat' | 'profile'>('chat')
 const question = ref('')
 const pendingQuestion = ref('')
 const streamingAnswer = ref('')
-const streamingCitations = ref<MessageCitation[]>([])
 const streamingEvidence = ref<MessageEvidence[]>([])
 const streamingMemoryCount = ref(0)
 const streamingDataAsOf = ref<string | null>(null)
@@ -76,9 +72,6 @@ const createTitle = ref('')
 const renameOpen = ref(false)
 const renameTitle = ref('')
 
-const citationOpen = ref(false)
-const selectedCitation = ref<MessageCitation | null>(null)
-
 const canAsk = computed(
   () =>
     activeConversation.value?.status === 'active' &&
@@ -88,10 +81,10 @@ const canAsk = computed(
 const generationStatusText = computed(() => {
   if (generationStage.value === 'understanding') return '正在理解问题'
   if (generationStage.value === 'querying_finance') return '正在查询个人财务数据'
-  if (generationStage.value === 'analyzing') return '正在分析财务证据和知识依据'
+  if (generationStage.value === 'analyzing') return '正在分析财务证据'
   if (generationStage.value === 'generating') return '正在生成回答'
-  if (generationStage.value === 'finalizing') return '正在校验引用并保存'
-  return '正在检索参考资料'
+  if (generationStage.value === 'finalizing') return '正在校验回答并保存'
+  return '正在处理请求'
 })
 const conversationGroups = computed(() => {
   const groups = [
@@ -333,7 +326,6 @@ type StreamRequest = (
     onMemoryConfirmation: (event: MemoryConfirmationEvent) => void
     onComplete: (answer: {
       answer: string
-      citations: MessageCitation[]
       evidence: MessageEvidence[]
       memory_count: number
       data_as_of: string | null
@@ -348,7 +340,6 @@ async function runGeneration(
   request: StreamRequest,
 ): Promise<void> {
   streamingAnswer.value = ''
-  streamingCitations.value = []
   streamingEvidence.value = []
   streamingMemoryCount.value = 0
   streamingDataAsOf.value = null
@@ -383,7 +374,6 @@ async function runGeneration(
         },
         onComplete(answer) {
           streamingAnswer.value = answer.answer
-          streamingCitations.value = answer.citations
           streamingEvidence.value = answer.evidence
           streamingMemoryCount.value = answer.memory_count
           streamingDataAsOf.value = answer.data_as_of
@@ -404,7 +394,6 @@ async function runGeneration(
     streamAbortController = null
     pendingQuestion.value = ''
     streamingAnswer.value = ''
-    streamingCitations.value = []
     streamingEvidence.value = []
     streamingMemoryCount.value = 0
     streamingDataAsOf.value = null
@@ -470,7 +459,6 @@ async function regenerateAnswer(chatMessage: ChatMessage): Promise<void> {
   streamMode.value = 'regenerate'
   streamingMessageId.value = chatMessage.id
   chatMessage.content = ''
-  chatMessage.citations = []
   chatMessage.evidence = []
   chatMessage.memory_count = 0
   chatMessage.data_as_of = null
@@ -506,16 +494,6 @@ function handleComposerKeydown(event: KeyboardEvent): void {
     event.preventDefault()
     void submitQuestion()
   }
-}
-
-function openCitation(
-  citations: MessageCitation[],
-  citationId: number,
-): void {
-  const citation = citations.find((item) => item.citation_id === citationId)
-  if (!citation) return
-  selectedCitation.value = citation
-  citationOpen.value = true
 }
 
 async function scrollToBottom(): Promise<void> {
@@ -803,20 +781,13 @@ onMounted(loadWorkspace)
                   <AnswerContent
                     v-if="streamingAnswer"
                     :answer="displayAnswer(streamingAnswer, streamingRiskNotice)"
-                    :citation-ids="
-                      streamingCitations.map((citation) => citation.citation_id)
-                    "
-                    @citation="
-                      (citationId) =>
-                        openCitation(streamingCitations, citationId)
-                    "
                   />
                   <div v-else class="thinking-indicator">
                     <i /><i /><i />
                     <span>{{ generationStatusText }}…</span>
                   </div>
                   <span
-                    v-if="streamingAnswer && !streamingCitations.length"
+                    v-if="streamingAnswer"
                     class="streaming-caret"
                     aria-hidden="true"
                   />
@@ -864,40 +835,10 @@ onMounted(loadWorkspace)
                       !(streamingMessageId === chatMessage.id && sending)
                   "
                   :answer="displayAnswer(chatMessage.content, chatMessage.risk_notice)"
-                  :citation-ids="
-                    chatMessage.citations.map((citation) => citation.citation_id)
-                  "
-                  @citation="
-                    (citationId) =>
-                      openCitation(chatMessage.citations, citationId)
-                  "
                 />
                 <p v-if="chatMessage.role === 'user'" class="user-question">
                   {{ chatMessage.content }}
                 </p>
-                <div
-                  v-if="
-                    chatMessage.role === 'assistant' &&
-                      chatMessage.citations.length &&
-                      streamingMessageId !== chatMessage.id
-                  "
-                  class="message-sources"
-                >
-                  <span>参考依据</span>
-                  <button
-                    v-for="citation in chatMessage.citations"
-                    :key="citation.chunk_id"
-                    type="button"
-                    @click="
-                      openCitation(
-                        chatMessage.citations,
-                        citation.citation_id,
-                      )
-                    "
-                  >
-                    [{{ citation.citation_id }}] {{ citation.title }}
-                  </button>
-                </div>
                 <div
                   v-if="
                     chatMessage.role === 'assistant' &&
@@ -951,38 +892,11 @@ onMounted(loadWorkspace)
                     </div>
                     <AnswerContent
                       :answer="displayAnswer(streamingAnswer, streamingRiskNotice)"
-                      :citation-ids="
-                        streamingCitations.map((citation) => citation.citation_id)
-                      "
-                      @citation="
-                        (citationId) =>
-                          openCitation(streamingCitations, citationId)
-                      "
                     />
                     <span
-                      v-if="streamingCitations.length === 0"
                       class="streaming-caret"
                       aria-hidden="true"
                     />
-                    <div
-                      v-if="streamingCitations.length"
-                      class="message-sources"
-                    >
-                      <span>参考依据</span>
-                      <button
-                        v-for="citation in streamingCitations"
-                        :key="citation.chunk_id"
-                        type="button"
-                        @click="
-                          openCitation(
-                            streamingCitations,
-                            citation.citation_id,
-                          )
-                        "
-                      >
-                        [{{ citation.citation_id }}] {{ citation.title }}
-                      </button>
-                    </div>
                   </div>
                   <div v-else class="thinking-indicator">
                     <i /><i /><i />
@@ -1135,43 +1049,6 @@ onMounted(loadWorkspace)
         @press-enter="renameConversation"
       />
     </a-modal>
-
-    <a-drawer
-      v-model:open="citationOpen"
-      title="可信引用"
-      placement="right"
-      :width="430"
-    >
-      <article v-if="selectedCitation" class="citation-detail">
-        <div class="citation-number">
-          <FileSearchOutlined />
-          引用 [{{ selectedCitation.citation_id }}]
-        </div>
-        <h2>{{ selectedCitation.title }}</h2>
-        <p class="citation-location">
-          {{ citationLocation(selectedCitation) }}
-        </p>
-        <dl>
-          <div>
-            <dt>文档版本</dt>
-            <dd>v{{ selectedCitation.document_version }}</dd>
-          </div>
-          <div v-if="selectedCitation.score !== null">
-            <dt>检索相关度</dt>
-            <dd>{{ (selectedCitation.score * 100).toFixed(1) }}%</dd>
-          </div>
-        </dl>
-        <section>
-          <span>引用原文</span>
-          <blockquote>{{ selectedCitation.quote }}</blockquote>
-        </section>
-        <a-alert
-          type="success"
-          show-icon
-          message="此引用由服务端根据实际检索结果校验并持久化"
-        />
-      </article>
-    </a-drawer>
   </div>
 </template>
 
@@ -1527,42 +1404,6 @@ onMounted(loadWorkspace)
   color: var(--mint-700);
 }
 
-.message-sources {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid #edf1ee;
-}
-
-.message-sources > span {
-  width: 100%;
-  color: var(--ink-500);
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 0.08em;
-}
-
-.message-sources button {
-  max-width: 260px;
-  padding: 5px 9px;
-  overflow: hidden;
-  border: 1px solid #dce6e1;
-  border-radius: 8px;
-  color: var(--ink-700);
-  background: #fafcfb;
-  cursor: pointer;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.message-sources button:hover {
-  border-color: var(--mint-500);
-  color: var(--mint-700);
-}
-
 .thinking-indicator {
   display: flex;
   align-items: center;
@@ -1671,68 +1512,6 @@ onMounted(loadWorkspace)
 
 .dialog-form {
   margin-top: 20px;
-}
-
-.citation-detail h2 {
-  margin: 14px 0 6px;
-  color: var(--ink-950);
-  font-size: 20px;
-}
-
-.citation-number {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  color: var(--mint-700);
-  background: var(--mint-100);
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.citation-location {
-  color: var(--ink-500);
-  line-height: 1.6;
-}
-
-.citation-detail dl {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 22px 0;
-}
-
-.citation-detail dl > div {
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fafcfb;
-}
-
-.citation-detail dt,
-.citation-detail section > span {
-  color: var(--ink-500);
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 0.08em;
-}
-
-.citation-detail dd {
-  margin: 5px 0 0;
-  color: var(--ink-900);
-  font-weight: 700;
-}
-
-.citation-detail blockquote {
-  margin: 8px 0 22px;
-  padding: 16px;
-  border-left: 3px solid var(--gold-500);
-  border-radius: 0 10px 10px 0;
-  color: var(--ink-800);
-  background: #f7f8f4;
-  line-height: 1.8;
-  white-space: pre-wrap;
 }
 
 .chat-page.is-embedded {
@@ -2014,8 +1793,7 @@ onMounted(loadWorkspace)
   line-height: 1.6;
 }
 
-.is-embedded .answer-section-label,
-.is-embedded .message-sources > span {
+.is-embedded .answer-section-label {
   font-size: 8px;
 }
 

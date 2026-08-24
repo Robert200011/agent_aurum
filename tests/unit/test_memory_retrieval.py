@@ -29,7 +29,6 @@ from app.providers.model_provider import (
     ChatToolExchange,
 )
 from app.services.memory_retrieval import MemoryRetrievalService
-from app.services.retrieval import KnowledgeRetrievalResult, RagRetrievalService
 
 
 def _memory(*, content: str, score: float = 0.9) -> RetrievedMemory:
@@ -63,7 +62,6 @@ def test_memory_context_is_bounded_and_marks_user_provided_trust() -> None:
 def test_memory_capability_has_no_user_scope_parameter() -> None:
     registry = CapabilityRegistry.read_only_default(
         finance_enabled=False,
-        knowledge_enabled=False,
         memory_enabled=True,
     )
     definition = next(
@@ -77,7 +75,6 @@ def test_memory_capability_has_no_user_scope_parameter() -> None:
 def test_memory_capability_supports_relevant_and_all_modes() -> None:
     registry = CapabilityRegistry.read_only_default(
         finance_enabled=False,
-        knowledge_enabled=False,
         memory_enabled=True,
     )
 
@@ -93,29 +90,8 @@ def test_memory_capability_supports_relevant_and_all_modes() -> None:
     assert all_memories.query is None
 
 
-class _EmptyKnowledge:
-    actor_user_id = uuid4()
-
-    async def retrieve_user_knowledge(
-        self,
-        *,
-        query: str,
-        limit: int,
-        min_score: float | None,
-    ) -> KnowledgeRetrievalResult:
-        del limit, min_score
-        return KnowledgeRetrievalResult(
-            owner_user_id=self.actor_user_id,
-            knowledge_base_ids=(),
-            query=query,
-            embedding_model="",
-            latency_ms=0,
-            items=[],
-        )
-
-
 class _MemoryService:
-    actor_user_id = _EmptyKnowledge.actor_user_id
+    actor_user_id = uuid4()
 
     def __init__(self) -> None:
         self.queries: list[str] = []
@@ -213,16 +189,12 @@ async def test_agent_uses_memory_only_after_model_requests_it() -> None:
     model = _MemoryCallingModel()
 
     outcome = await run_capability_agent(
+        owner_user_id=memory_service.actor_user_id,
         question="结合我的情况给一个储蓄方向",
         history=[],
         today=date(2026, 8, 14),
-        retrieval_service=cast(RagRetrievalService, _EmptyKnowledge()),
         finance_tools=None,
         chat_provider=cast(ChatModelProvider, model),
-        retrieval_limit=5,
-        min_score=None,
-        context_max_characters=2_000,
-        context_source_max_characters=800,
         max_steps=3,
         max_tool_calls=5,
         memory_service=cast(MemoryRetrievalService, memory_service),
@@ -230,7 +202,7 @@ async def test_agent_uses_memory_only_after_model_requests_it() -> None:
 
     assert memory_service.queries == ["我的购房目标"]
     assert len(outcome.memory_retrieval.items) == 1
-    assert outcome.plan.intent == "knowledge"
+    assert outcome.plan.intent == "memory"
     assert model.exchanges
     observation = model.exchanges[0].results[0].content
     assert "user_provided_memory" in observation

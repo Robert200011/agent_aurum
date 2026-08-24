@@ -14,7 +14,7 @@ from typing import Any
 
 from Crypto.Cipher import AES
 
-BACKUP_FORMAT_VERSION = "aurum-backup-v1"
+BACKUP_FORMAT_VERSION = "aurum-database-backup-v2"
 BACKUP_MAGIC = b"AURUM-BACKUP-V1\n"
 NONCE_BYTES = 12
 TAG_BYTES = 16
@@ -125,7 +125,7 @@ def read_json(path: Path) -> dict[str, Any]:
 def validate_manifest(manifest: dict[str, Any]) -> None:
     if manifest.get("format_version") != BACKUP_FORMAT_VERSION:
         raise BackupValidationError("unsupported manifest version")
-    required = {"backup_id", "created_at", "database", "object_storage", "configuration"}
+    required = {"backup_id", "created_at", "database", "configuration"}
     if not required.issubset(manifest):
         raise BackupValidationError("backup manifest is incomplete")
 

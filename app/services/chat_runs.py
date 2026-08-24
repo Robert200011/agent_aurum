@@ -18,11 +18,10 @@ from app.errors import ApplicationError
 from app.governance.usage import collect_model_tokens
 from app.memory.decision import MemoryDecisionProvider
 from app.memory.rollout import memory_rollout_enabled
-from app.providers.model_provider import ChatModelProvider, RerankerProvider
+from app.providers.embedding import DashScopeEmbeddingProvider
+from app.providers.model_provider import ChatModelProvider
 from app.providers.quota_store import ChatQuotaLease, RedisQuotaStore
-from app.providers.retrieval_cache import RedisRetrievalCache
-from app.rag.embeddings.dashscope import DashScopeEmbeddingProvider
-from app.services.answering import RagAnswerService
+from app.services.answering import AnswerService
 from app.services.chat import (
     ChatAnswerStreamEvent,
     ChatService,
@@ -32,7 +31,6 @@ from app.services.chat import (
 from app.services.finance import FinanceService
 from app.services.memory_commands import MemoryCommandService
 from app.services.memory_retrieval import MemoryRetrievalService
-from app.services.retrieval import RagRetrievalService
 from app.services.user_settings import UserSettingsService
 
 logger = logging.getLogger(__name__)
@@ -73,18 +71,14 @@ class ChatRunCoordinator:
         settings: Settings,
         session_factory: async_sessionmaker[AsyncSession],
         chat_provider: ChatModelProvider,
-        reranker_provider: RerankerProvider | None,
         checkpointer: BaseCheckpointSaver[str],
         quota_store: RedisQuotaStore,
-        retrieval_cache: RedisRetrievalCache,
     ) -> None:
         self._settings = settings
         self._session_factory = session_factory
         self._chat_provider = chat_provider
-        self._reranker_provider = reranker_provider
         self._checkpointer = checkpointer
         self._quota_store = quota_store
-        self._retrieval_cache = retrieval_cache
         self._feeds: dict[UUID, _RunFeed] = {}
 
     def start(
@@ -202,17 +196,6 @@ class ChatRunCoordinator:
                             feature_enabled=self._settings.memory_enabled,
                             percentage=self._settings.memory_rollout_percentage,
                         )
-                        retrieval = RagRetrievalService(
-                            session=session,
-                            actor_user_id=user_id,
-                            embedding_provider=DashScopeEmbeddingProvider(self._settings),
-                            reranker_provider=self._reranker_provider,
-                            hybrid_candidate_multiplier=(
-                                self._settings.rag_hybrid_candidate_multiplier
-                            ),
-                            rrf_k=self._settings.rag_rrf_k,
-                            cache=self._retrieval_cache,
-                        )
                         memory_retrieval = MemoryRetrievalService(
                             session=session,
                             actor_user_id=user_id,
@@ -229,15 +212,10 @@ class ChatRunCoordinator:
                             enabled=memory_enabled,
                             embedding_enabled=self._settings.memory_embedding_enabled,
                         )
-                        answering = RagAnswerService(
-                            retrieval_service=retrieval,
+                        answering = AnswerService(
+                            owner_user_id=user_id,
                             chat_provider=self._chat_provider,
                             checkpointer=self._checkpointer,
-                            retrieval_limit=self._settings.rag_retrieval_limit,
-                            context_max_characters=self._settings.rag_context_max_characters,
-                            context_source_max_characters=(
-                                self._settings.rag_context_source_max_characters
-                            ),
                             memory_service=memory_retrieval if memory_enabled else None,
                             capability_agent_max_steps=(
                                 self._settings.capability_agent_max_steps

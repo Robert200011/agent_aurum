@@ -1,5 +1,5 @@
 {
-  "version": "p6.4-retention-v1",
+  "version": "finance-retention-v2",
   "timezone": "UTC",
   "targets": [
     {
@@ -9,14 +9,6 @@
       "mode": "delete",
       "table": "identity.refresh_tokens",
       "timestamp_column": "expires_at"
-    },
-    {
-      "name": "retrieval_logs",
-      "system": "postgresql",
-      "retention_days": 90,
-      "mode": "delete",
-      "table": "rag.retrieval_logs",
-      "timestamp_column": "created_at"
     },
     {
       "name": "audit_logs",
@@ -54,7 +46,7 @@
     },
     {
       "name": "encrypted_backups",
-      "system": "filesystem_or_object_storage",
+      "system": "filesystem_or_remote_storage",
       "retention_days": 30,
       "mode": "backup_job_lifecycle"
     }

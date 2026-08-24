@@ -33,7 +33,7 @@ jobs:
       AURUM_ENVIRONMENT: test
       AURUM_DATABASE_URL: postgresql+asyncpg://aurum_app:ci-app-password@127.0.0.1:5432/aurum
       AURUM_MIGRATION_DATABASE_URL: postgresql+asyncpg://aurum:ci-postgres-password@127.0.0.1:5432/aurum
-      AURUM_RAG_INTEGRATION_DATABASE_URL: postgresql+asyncpg://aurum_app:ci-app-password@127.0.0.1:5432/aurum
+      AURUM_INTEGRATION_DATABASE_URL: postgresql+asyncpg://aurum_app:ci-app-password@127.0.0.1:5432/aurum
       AURUM_REDIS_URL: redis://127.0.0.1:6379/0
       AURUM_JWT_SECRET_KEY: ci-only-jwt-secret-at-least-32-bytes-long
       AURUM_LANGGRAPH_AES_KEY: 0123456789abcdef0123456789abcdef
@@ -71,14 +71,9 @@ jobs:
                       CREATE ROLE aurum_app LOGIN PASSWORD 'ci-app-password'
                           NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
                           NOREPLICATION NOBYPASSRLS;
-                      GRANT CONNECT ON DATABASE aurum TO aurum_app;
-                      GRANT USAGE ON SCHEMA identity, chat, finance, rag, audit TO aurum_app;
-                      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES
-                          IN SCHEMA identity, chat, finance, rag, audit TO aurum_app;
-                      GRANT USAGE, SELECT ON ALL SEQUENCES
-                          IN SCHEMA identity, chat, finance, rag, audit TO aurum_app;
                       """
                   )
+                  await connection.execute("GRANT CONNECT ON DATABASE aurum TO aurum_app")
                   bypasses_rls = await connection.fetchval(
                       "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'aurum_app'"
                   )
@@ -90,6 +85,7 @@ jobs:
 
           asyncio.run(provision())
           PY
+          aurum-agent grant-app-role
       - run: >-
           python -m pytest -q
           tests/unit/test_memory_decision.py
@@ -98,7 +94,8 @@ jobs:
           tests/unit/test_memory_service.py
           tests/integration/test_memory_isolation.py
           tests/integration/test_memory_command_persistence.py
-      - run: python scripts/run_phase6_evaluation.py --skip-fault-pytest --output phase6-gate.json
+          tests/integration/test_user_settings_isolation.py
+      - run: python scripts/run_phase5_evaluation.py --output finance-agent-gate.json
       - run: python scripts/run_memory_evaluation.py --output memory-gate.json
       - run: pip-audit .
       - run: pip freeze > python-dependencies.txt
@@ -106,7 +103,7 @@ jobs:
         with:
           name: backend-evidence
           path: |
-            phase6-gate.json
+            finance-agent-gate.json
             memory-gate.json
             python-dependencies.txt
 
@@ -147,11 +144,13 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.22.0 "aurum-agent-api:$GITHUB_SHA" -o cyclonedx-json > api-sbom.cdx.json
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.22.0 "aurum-agent-web:$GITHUB_SHA" -o cyclonedx-json > web-sbom.cdx.json
-      - name: Scan candidate images
-        run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --pkg-types os --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-api:$GITHUB_SHA"
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --pkg-types os --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-web:$GITHUB_SHA"
+      - name: Scan API candidate image
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --pkg-types os --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-api:$GITHUB_SHA"
+      - name: Scan web candidate image
+        if: always()
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --pkg-types os --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-web:$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: image-sboms
           path: "*-sbom.cdx.json"

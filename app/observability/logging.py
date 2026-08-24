@@ -33,7 +33,6 @@ _ALLOWED_EXTRA_FIELDS: Final = frozenset(
         "job_id",
         "document_id",
         "owner_user_id",
-        "knowledge_base_id",
         "conversation_id",
         "agent_run_id",
         "run_id",

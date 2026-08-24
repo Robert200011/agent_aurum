@@ -15,12 +15,10 @@
     "aurum_api_requests_total",
     "aurum_model_requests_total",
     "aurum_sse_connections",
-    "aurum_ingestion_queue_depth",
     "aurum_database_pool_connections"
   ],
   "maximum_resource_growth": {
     "aurum_sse_connections": 0,
-    "aurum_ingestion_queue_depth": 0,
     "aurum_database_pool_connections{state=\"checked_out\"}": 1
   },
   "scenarios": [
@@ -52,7 +50,7 @@
         "Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"
       },
       "json": {
-        "question": "请使用已发布知识回答测试问题，并提供引用。"
+        "question": "请总结我本月的收入、支出和净现金流。"
       },
       "requests": 4,
       "concurrency": 1,

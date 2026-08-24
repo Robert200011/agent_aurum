@@ -7,7 +7,6 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.agents.state import ControlledRagContext
 from app.agents.tools.finance import FinanceToolResult
 from app.memory.retrieval import ControlledMemoryContext
 
@@ -15,7 +14,6 @@ _NUMBER_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![A-Za-z0-9_])"
 )
 _ORDERED_LIST_PATTERN = re.compile(r"(?m)^\s*\d+[.)、]\s+")
-_SOURCE_MARKER_PATTERN = re.compile(r"\[[sS]\d+\]")
 _TOOL_NAME_PATTERN = re.compile(
     r"\b(?:get|search|analyze|create|update|delete|set|import)_[a-z][a-z0-9_]*\b"
 )
@@ -45,7 +43,6 @@ def validate_finance_answer(
     *,
     answer: str,
     finance_results: tuple[FinanceToolResult, ...],
-    context: ControlledRagContext,
     memory_context: ControlledMemoryContext | None = None,
 ) -> None:
     """拒绝伪造标识、未执行工具和受控证据之外的数字。"""
@@ -69,17 +66,12 @@ def validate_finance_answer(
             include={"arguments", "data", "data_as_of", "warnings", "error"},
         )
         _collect_numbers(payload, finance_numbers)
-    knowledge_numbers: set[Decimal] = set()
-    for source in context.sources:
-        _collect_numbers(source.included_content, knowledge_numbers)
     memory_numbers = _memory_numbers(memory_context)
 
     candidate = _ORDERED_LIST_PATTERN.sub("", answer)
     for match in _NUMBER_PATTERN.finditer(candidate):
         number = _decimal(match.group())
         if number is None or number in finance_numbers:
-            continue
-        if number in knowledge_numbers and _segment_has_source_marker(candidate, match.start()):
             continue
         if number in memory_numbers:
             continue
@@ -171,17 +163,3 @@ def _decimal(raw: str) -> Decimal | None:
         return Decimal(raw.replace(",", ""))
     except InvalidOperation:
         return None
-
-
-def _segment_has_source_marker(answer: str, position: int) -> bool:
-    """知识数字必须在同一行或句段内携带本轮临时来源标记。"""
-
-    boundaries = "\n。！？；"
-    start = max((answer.rfind(marker, 0, position) for marker in boundaries), default=-1) + 1
-    following = [
-        index
-        for marker in boundaries
-        if (index := answer.find(marker, position)) >= 0
-    ]
-    end = min(following, default=len(answer))
-    return _SOURCE_MARKER_PATTERN.search(answer[start:end]) is not None

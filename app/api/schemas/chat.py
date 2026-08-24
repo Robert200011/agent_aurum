@@ -1,4 +1,4 @@
-"""面向普通登录用户的会话、消息与结构化引用契约。"""
+"""面向普通登录用户的会话、消息与财务证据契约。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.agents.contracts import AnalysisType, ResponseDepth, ResponseDepthRequest
 from app.chat.types import AgentRunStatus, ConversationStatus, MessageRole, MessageStatus
 from app.db.models.identity import MemoryCategory
 
@@ -82,6 +83,7 @@ class QuestionCreate(BaseModel):
     """向一个活跃会话提交的单轮问题。"""
 
     question: str = Field(min_length=1, max_length=2_000)
+    response_depth: ResponseDepthRequest = "auto"
 
     @field_validator("question")
     @classmethod
@@ -90,67 +92,6 @@ class QuestionCreate(BaseModel):
         if not normalized:
             raise ValueError("question must contain non-whitespace characters")
         return normalized
-
-
-class CitationSourceSnapshot(BaseModel):
-    """回答生成时冻结的来源身份与原文定位信息。"""
-
-    document_id: UUID
-    document_version_id: UUID
-    knowledge_base_id: UUID
-    chunk_id: UUID
-    title: str = Field(min_length=1, max_length=512)
-    document_version: int = Field(ge=1)
-    page: int | None = Field(default=None, ge=1)
-    section: str | None = Field(default=None, max_length=1024)
-    sheet_name: str | None = Field(default=None, max_length=256)
-    row_start: int | None = Field(default=None, ge=1)
-    row_end: int | None = Field(default=None, ge=1)
-    char_start: int | None = Field(default=None, ge=0)
-    char_end: int | None = Field(default=None, ge=0)
-    content_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
-
-    @field_validator("title", mode="before")
-    @classmethod
-    def normalize_required_title(cls, value: object) -> object:
-        """先清理必填标题，再由字段长度约束拒绝空白值。"""
-
-        return value.strip() if isinstance(value, str) else value
-
-    @field_validator("section", "sheet_name")
-    @classmethod
-    def normalize_optional_text(cls, value: str | None) -> str | None:
-        """统一可选定位文本，同时保留缺失字段。"""
-
-        normalized = value.strip() if value is not None else None
-        return normalized or None
-
-    @model_validator(mode="after")
-    def validate_ranges(self) -> CitationSourceSnapshot:
-        """拒绝无法定位回原文的倒置行号或字符范围。"""
-
-        if self.row_start is not None and self.row_end is not None:
-            if self.row_end < self.row_start:
-                raise ValueError("row_end must be greater than or equal to row_start")
-        if self.char_start is not None and self.char_end is not None:
-            if self.char_end < self.char_start:
-                raise ValueError("char_end must be greater than or equal to char_start")
-        return self
-
-
-class MessageCitationResponse(CitationSourceSnapshot):
-    """一个由后端校验并编号的回答引用。"""
-
-    citation_id: int = Field(ge=1)
-    quote: str = Field(min_length=1)
-    score: float | None = Field(default=None, ge=-1.0, le=1.0)
-
-    @field_validator("quote", mode="before")
-    @classmethod
-    def normalize_quote(cls, value: object) -> object:
-        """引用原文不得为空白。"""
-
-        return value.strip() if isinstance(value, str) else value
 
 
 class FinanceEvidenceFactResponse(BaseModel):
@@ -194,7 +135,6 @@ class MessageResponse(BaseModel):
     completion_tokens: int | None = Field(default=None, ge=0)
     latency_ms: int | None = Field(default=None, ge=0)
     created_at: datetime
-    citations: list[MessageCitationResponse] = Field(default_factory=list)
     evidence: list[MessageEvidenceResponse] = Field(default_factory=list)
     memory_count: int = Field(default=0, ge=0)
     data_as_of: datetime | None = None
@@ -227,6 +167,9 @@ class AgentRunResponse(BaseModel):
     finance_tool_count: int = Field(default=0, ge=0)
     data_as_of: datetime | None = None
     risk_notice: str | None = None
+    analysis_type: AnalysisType | None = None
+    response_depth: ResponseDepth | None = None
+    fast_path: bool = False
 
 
 class StructuredAnswerResponse(BaseModel):
@@ -234,7 +177,6 @@ class StructuredAnswerResponse(BaseModel):
 
     message_id: UUID
     answer: str = Field(min_length=1)
-    citations: list[MessageCitationResponse] = Field(default_factory=list)
     evidence: list[MessageEvidenceResponse] = Field(default_factory=list)
     memory_count: int = Field(default=0, ge=0)
     data_as_of: datetime | None = None
@@ -259,7 +201,6 @@ class StreamStatusResponse(BaseModel):
 
     stage: Literal[
         "understanding",
-        "retrieving",
         "querying_finance",
         "analyzing",
         "generating",

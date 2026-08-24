@@ -1,4 +1,4 @@
-"""Validated asynchronous adapter for DashScope text-embedding-v4."""
+"""DashScope text embedding adapter shared by long-term memory."""
 
 from __future__ import annotations
 
@@ -6,19 +6,24 @@ import asyncio
 import math
 from collections.abc import Callable, Mapping, Sequence
 from time import perf_counter
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from dashscope import TextEmbedding  # type: ignore[import-untyped, unused-ignore]
 
-from app.config import Settings
 from app.observability.metrics import record_model_call
 from app.observability.tracing import start_span
 from app.providers.model_provider import EmbeddingProvider
-from app.rag.constants import DASHSCOPE_EMBEDDING_PROVIDER
+
+if TYPE_CHECKING:
+    from app.config import Settings
+
+DASHSCOPE_EMBEDDING_PROVIDER = "dashscope"
+DASHSCOPE_TEXT_EMBEDDING_V4 = "text-embedding-v4"
+DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS = 1024
 
 
 class EmbeddingProviderFailure(RuntimeError):
-    """Safe provider failure metadata consumed by the ingestion state machine."""
+    """Safe provider failure metadata consumed by memory retrieval."""
 
     def __init__(self, code: str, *, retryable: bool) -> None:
         super().__init__(code)

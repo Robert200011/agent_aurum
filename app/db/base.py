@@ -10,6 +10,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 IDENTITY_SCHEMA = "identity"
 FINANCE_SCHEMA = "finance"
+# Historical Alembic revisions import this constant while replaying the retired schema.
 RAG_SCHEMA = "rag"
 CHAT_SCHEMA = "chat"
 AUDIT_SCHEMA = "audit"

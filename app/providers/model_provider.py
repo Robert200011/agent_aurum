@@ -1,4 +1,4 @@
-"""Language-model, embedding, and reranking provider contracts."""
+"""Language-model and embedding provider contracts."""
 
 from __future__ import annotations
 
@@ -11,15 +11,6 @@ from app.chat.types import ChatPromptRole
 
 class ChatModelProviderError(RuntimeError):
     """聊天模型适配器对编排层暴露的安全、可分类失败。"""
-
-    def __init__(self, code: str, *, retryable: bool) -> None:
-        super().__init__(code)
-        self.code = code
-        self.retryable = retryable
-
-
-class RerankerProviderError(RuntimeError):
-    """检索服务可安全降级处理的重排 Provider 失败。"""
 
     def __init__(self, code: str, *, retryable: bool) -> None:
         super().__init__(code)
@@ -164,13 +155,3 @@ class QueryEmbeddingProvider(Protocol):
     def dimensions(self) -> int: ...
 
     async def embed_query(self, query: str) -> list[float]: ...
-
-
-class RerankerProvider(Protocol):
-    @property
-    def provider_name(self) -> str: ...
-
-    @property
-    def model_name(self) -> str: ...
-
-    async def rerank(self, query: str, documents: Sequence[str]) -> list[float]: ...

@@ -160,7 +160,7 @@ describe("SettingsDrawer", () => {
 
     expect(wrapper.get("#settings-panel-deactivation").isVisible()).toBe(true);
     expect(wrapper.get("#settings-panel-deactivation").text()).toContain(
-      "财务与知识库数据不会在此步骤中被物理删除",
+      "财务数据不会在此步骤中被物理删除",
     );
     await wrapper.get(".deactivation-request").trigger("click");
     expect(wrapper.emitted("requestAccountDeactivation")).toHaveLength(1);

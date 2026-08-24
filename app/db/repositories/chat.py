@@ -16,7 +16,6 @@ from app.db.models.chat import (
     AgentToolCall,
     Conversation,
     Message,
-    MessageCitation,
     MessageEvidence,
 )
 
@@ -105,24 +104,6 @@ class ChatRepository:
                 Message.conversation_id == conversation_id,
             )
             .order_by(Message.created_at, Message.id)
-        )
-        return list((await self._session.scalars(statement)).all())
-
-    async def list_citations(
-        self,
-        *,
-        user_id: UUID,
-        message_ids: Sequence[UUID],
-    ) -> list[MessageCitation]:
-        if not message_ids:
-            return []
-        statement = (
-            select(MessageCitation)
-            .where(
-                MessageCitation.user_id == user_id,
-                MessageCitation.message_id.in_(message_ids),
-            )
-            .order_by(MessageCitation.message_id, MessageCitation.rank)
         )
         return list((await self._session.scalars(statement)).all())
 
@@ -266,19 +247,6 @@ class ChatRepository:
             .limit(1)
         )
         return cast(Message | None, await self._session.scalar(statement))
-
-    async def delete_message_citations(
-        self,
-        *,
-        user_id: UUID,
-        message_id: UUID,
-    ) -> None:
-        await self._session.execute(
-            delete(MessageCitation).where(
-                MessageCitation.user_id == user_id,
-                MessageCitation.message_id == message_id,
-            )
-        )
 
     async def delete_message_evidence(
         self,

@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 from pgvector.sqlalchemy import Vector
 
-from app.rag.constants import DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS
+from app.providers.embedding import DASHSCOPE_TEXT_EMBEDDING_V4_DIMENSIONS
 
 revision: str = "20260813_0020"
 down_revision: str | None = "20260813_0019"

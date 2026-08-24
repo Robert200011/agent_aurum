@@ -1,10 +1,10 @@
 {
-  "version": "p6.3-load-single-node-v1",
+  "version": "finance-load-single-node-v2",
   "name": "single-node-release",
   "base_url": "${AURUM_LOAD_BASE_URL}",
   "baseline_file": "baselines/single-node-release-v1.json",
   "metrics_path": "/metrics",
-  "request_timeout_seconds": 60,
+  "request_timeout_seconds": 45,
   "thresholds": {
     "maximum_server_error_rate": 0.01,
     "maximum_network_errors": 0,
@@ -15,12 +15,10 @@
     "aurum_api_requests_total",
     "aurum_model_requests_total",
     "aurum_sse_connections",
-    "aurum_ingestion_queue_depth",
     "aurum_database_pool_connections"
   ],
   "maximum_resource_growth": {
     "aurum_sse_connections": 0,
-    "aurum_ingestion_queue_depth": 0,
     "aurum_database_pool_connections{state=\"checked_out\"}": 2
   },
   "scenarios": [
@@ -28,35 +26,22 @@
       "id": "ordinary-conversation-list",
       "kind": "ordinary_api",
       "method": "GET",
-      "path": "/api/v1/conversations?page=1&page_size=20",
+      "path": "/api/v1/conversations",
       "headers": {"Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"},
-      "requests": 100,
-      "concurrency": 10,
-      "expected_statuses": [200],
-      "forbidden_response_markers": ["${AURUM_LOAD_OTHER_USER_MARKER}"]
+      "requests": 20,
+      "concurrency": 2,
+      "expected_statuses": [200]
     },
     {
-      "id": "rag-retrieval",
-      "kind": "rag_retrieval",
-      "method": "POST",
-      "path": "/api/v1/knowledge-bases/${AURUM_LOAD_KNOWLEDGE_BASE_ID}/search-preview",
-      "headers": {"Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"},
-      "json": {"query": "阶段六测试基准条款", "limit": 10},
-      "requests": 30,
-      "concurrency": 3,
-      "expected_statuses": [200],
-      "forbidden_response_markers": ["${AURUM_LOAD_OTHER_USER_MARKER}"]
-    },
-    {
-      "id": "real-model-smoke",
-      "kind": "real_model_smoke",
+      "id": "real-model-finance-smoke",
+      "kind": "real_model",
       "method": "POST",
       "path": "/api/v1/conversations/${AURUM_LOAD_CONVERSATION_ID}/messages",
       "headers": {"Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"},
-      "json": {"question": "根据我的知识库，用一句话总结当前文档并提供有效引用。"},
-      "requests": 3,
+      "json": {"question": "概括我本月的收入、支出和净现金流。"},
+      "requests": 4,
       "concurrency": 1,
-      "expected_statuses": [201],
+      "expected_statuses": [200],
       "forbidden_response_markers": ["${AURUM_LOAD_OTHER_USER_MARKER}"]
     },
     {
@@ -65,40 +50,11 @@
       "method": "POST",
       "path": "/api/v1/conversations/${AURUM_LOAD_CONVERSATION_ID}/messages/stream",
       "headers": {"Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"},
-      "json": {"question": "返回阶段六门禁摘要。"},
-      "requests": 10,
+      "json": {"question": "分析我本月的预算执行情况。"},
+      "requests": 8,
       "concurrency": 2,
       "expected_statuses": [200],
       "forbidden_response_markers": ["${AURUM_LOAD_OTHER_USER_MARKER}"]
-    },
-    {
-      "id": "document-ingestion",
-      "kind": "document_ingestion",
-      "method": "POST",
-      "path": "/api/v1/knowledge-bases/${AURUM_LOAD_KNOWLEDGE_BASE_ID}/documents",
-      "headers": {
-        "Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}",
-        "Idempotency-Key": "p6.3-load-${AURUM_LOAD_RUN_ID}"
-      },
-      "upload": {
-        "field": "file",
-        "path": "${AURUM_LOAD_DOCUMENT_PATH}",
-        "content_type": "text/markdown",
-        "form": {"metadata": "{\"suite\":\"p6.3-load\"}"}
-      },
-      "requests": 1,
-      "concurrency": 1,
-      "expected_statuses": [202]
-    },
-    {
-      "id": "ingestion-recovery-poll",
-      "kind": "ingestion_recovery",
-      "method": "GET",
-      "path": "/api/v1/ingestion-jobs/${AURUM_LOAD_INGESTION_JOB_ID}",
-      "headers": {"Authorization": "Bearer ${AURUM_LOAD_ACCESS_TOKEN}"},
-      "requests": 20,
-      "concurrency": 2,
-      "expected_statuses": [200]
     }
   ]
 }

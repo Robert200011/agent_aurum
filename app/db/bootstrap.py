@@ -14,14 +14,12 @@ from app.db.base import (
     CHAT_SCHEMA,
     FINANCE_SCHEMA,
     IDENTITY_SCHEMA,
-    RAG_SCHEMA,
 )
 
 DATABASE_ROLE_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 APPLICATION_SCHEMAS = (
     IDENTITY_SCHEMA,
     FINANCE_SCHEMA,
-    RAG_SCHEMA,
     CHAT_SCHEMA,
     AUDIT_SCHEMA,
     AGENT_SCHEMA,

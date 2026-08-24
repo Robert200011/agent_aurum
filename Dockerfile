@@ -12,6 +12,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --system aurum && adduser --system --ingroup aurum aurum
 
 COPY pyproject.toml ./

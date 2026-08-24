@@ -18,7 +18,7 @@ _SECRET_ASSIGNMENT_PATTERN = re.compile(
 _PROVIDER_KEY_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b")
 
 _SYSTEM_DISCLOSURE_MARKERS = (
-    "你是 Aurum 的个人财务与知识库问答助手",
+    "你是 Aurum 的个人财务助手",
     "系统提示词如下",
     "内部提示词如下",
     "developer message",
