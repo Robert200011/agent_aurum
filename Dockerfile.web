@@ -17,9 +17,6 @@ USER 101
 
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
-
-ARG VCS_REF=unknown
-ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.source="aurum-agent-web" \
       org.opencontainers.image.revision=$VCS_REF \
       org.opencontainers.image.created=$BUILD_DATE

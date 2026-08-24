@@ -144,11 +144,13 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.22.0 "aurum-agent-api:$GITHUB_SHA" -o cyclonedx-json > api-sbom.cdx.json
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.22.0 "aurum-agent-web:$GITHUB_SHA" -o cyclonedx-json > web-sbom.cdx.json
-      - name: Scan candidate images
-        run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --pkg-types os --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-api:$GITHUB_SHA"
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --pkg-types os --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-web:$GITHUB_SHA"
+      - name: Scan API candidate image
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --pkg-types os --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-api:$GITHUB_SHA"
+      - name: Scan web candidate image
+        if: always()
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0 image --scanners vuln --pkg-types os --ignore-unfixed --exit-code 1 --severity HIGH,CRITICAL "aurum-agent-web:$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: image-sboms
           path: "*-sbom.cdx.json"
