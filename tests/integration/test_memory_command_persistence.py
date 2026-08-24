@@ -15,10 +15,10 @@ from app.db.session import set_tenant_context
 from app.memory.contracts import MemoryDecision
 from app.services.memory_commands import MemoryCommandService, MemorySaveResultKind
 
-INTEGRATION_DATABASE_URL = os.getenv("AURUM_RAG_INTEGRATION_DATABASE_URL")
+INTEGRATION_DATABASE_URL = os.getenv("AURUM_INTEGRATION_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
     not INTEGRATION_DATABASE_URL,
-    reason="AURUM_RAG_INTEGRATION_DATABASE_URL is not configured",
+    reason="AURUM_INTEGRATION_DATABASE_URL is not configured",
 )
 
 

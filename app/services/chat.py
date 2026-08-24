@@ -745,7 +745,7 @@ class ChatService:
                     yield ChatStreamDelta(event.text)
                     continue
                 if not isinstance(event, AnswerCompleted):
-                    raise RuntimeError("unsupported RAG stream event")
+                    raise RuntimeError("unsupported answer stream event")
                 if not finalizing_started:
                     yield ChatStreamStatus("finalizing")
                 persisted = await self._persist_streamed_answer(
@@ -756,7 +756,7 @@ class ChatService:
                 completed = True
                 yield ChatStreamCompleted(persisted)
             if not completed:
-                raise RuntimeError("RAG stream ended without a completion event")
+                raise RuntimeError("answer stream ended without a completion event")
         except asyncio.CancelledError:
             if not completed:
                 await self._mark_stream_terminal(
@@ -1053,7 +1053,7 @@ class ChatService:
             await self._session.commit()
         except Exception:
             await self._session.rollback()
-            logger.exception("unable to persist terminal streaming RAG state")
+            logger.exception("unable to persist terminal answer stream state")
 
     async def _mark_failed(
         self,
@@ -1081,7 +1081,7 @@ class ChatService:
             await self._session.commit()
         except Exception:
             await self._session.rollback()
-            logger.exception("unable to persist failed RAG run state")
+            logger.exception("unable to persist failed agent run state")
 
     async def _prepare(self) -> None:
         await set_tenant_context(self._session, self._user_id)

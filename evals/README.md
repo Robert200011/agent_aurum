@@ -7,7 +7,8 @@
 ## 财务能力门禁
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_phase5_evaluation.py
+.\.venv\Scripts\python.exe scripts\run_phase5_evaluation.py `
+  --output .test-results\finance-agent-gate.json
 ```
 
 评测必须达到 `deterministic_pass_rate=1.0`。跨用户隔离、模型回答 Grounding、真实 PostgreSQL、

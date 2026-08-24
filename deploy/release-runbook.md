@@ -83,7 +83,7 @@ Alembic `downgrade`，记忆表变更继续遵循可前滚的 Expand-Migrate-Con
 使用应用角色数据库连接验证 RLS 和持久化（测试库，不使用生产数据）：
 
 ```powershell
-$env:AURUM_RAG_INTEGRATION_DATABASE_URL="postgresql+asyncpg://<app-role>@<test-host>/<test-db>"
+$env:AURUM_INTEGRATION_DATABASE_URL="postgresql+asyncpg://<app-role>@<test-host>/<test-db>"
 .\.venv\Scripts\python.exe -m pytest -q `
   tests/integration/test_memory_isolation.py `
   tests/integration/test_memory_command_persistence.py

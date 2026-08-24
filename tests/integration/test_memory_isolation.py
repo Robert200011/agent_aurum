@@ -21,10 +21,10 @@ from app.db.models.identity import (
 from app.db.session import set_tenant_context
 from app.services.memory import normalized_content_hash
 
-INTEGRATION_DATABASE_URL = os.getenv("AURUM_RAG_INTEGRATION_DATABASE_URL")
+INTEGRATION_DATABASE_URL = os.getenv("AURUM_INTEGRATION_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
     not INTEGRATION_DATABASE_URL,
-    reason="AURUM_RAG_INTEGRATION_DATABASE_URL is not configured",
+    reason="AURUM_INTEGRATION_DATABASE_URL is not configured",
 )
 
 

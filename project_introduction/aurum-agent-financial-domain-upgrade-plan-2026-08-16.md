@@ -131,7 +131,7 @@ flowchart TD
 | Request Classifier | 识别分析类型、时间范围、复杂度和风险等级 | 可调用一次低温度模型 |
 | Financial Planner | 生成受 Schema 限制的数据、计算和输出计划 | 是 |
 | Requirement Checker | 检查工具可用性、参数、权限和数据依赖 | 否 |
-| Capability Executor | 查询账户、流水、预算、持仓、行情、知识和记忆 | 否，执行模型提出的受控调用 |
+| Capability Executor | 查询账户、流水、预算、持仓、行情和长期记忆 | 否，执行模型提出的受控调用 |
 | Data Quality Checker | 检查缺失、过期、币种、同步状态和统计口径 | 否 |
 | Metric Engine | 计算金额、比例、趋势、集中度和覆盖月数 | 否 |
 | Domain Analyzer | 将事实和指标组织成发现、风险与行动候选项 | 是 |
